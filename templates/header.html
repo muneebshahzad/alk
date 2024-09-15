@@ -1,0 +1,123 @@
+
+<style>
+        /* Hide the content initially */
+        body {
+            display: none; /* Hide body initially */
+        }
+    </style>
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const correctPassword = 'alk';
+            const accessDuration = 10 * 60 * 1000; // 10 minutes in milliseconds
+
+            function checkPassword() {
+                const lastAccess = localStorage.getItem('lastAccess');
+                const currentTime = new Date().getTime();
+
+                if (lastAccess && (currentTime - lastAccess < accessDuration)) {
+                    // If within 10 minutes, show the content
+                    document.body.style.display = 'block';
+                    return;
+                }
+
+                // Prompt for password if not within 10 minutes
+                while (true) {
+                    let userPassword = prompt('Enter the password to access this page:');
+
+                    if (userPassword === correctPassword) {
+                        // Store the current time in localStorage
+                        localStorage.setItem('lastAccess', currentTime);
+                        // Show the content if the password is correct
+                        document.body.style.display = 'block';
+                        break; // Exit the loop
+                    } else {
+                        alert('Wrong password. Please try again.');
+                    }
+                }
+            }
+
+            // Call the function to check password when the page loads
+            checkPassword();
+        });
+    </script>
+
+<ul class="navbar-nav bg-gradient-primary sidebar sidebar-dark accordion" id="accordionSidebar">
+
+            <!-- Sidebar - Brand -->
+            <a class="sidebar-brand d-flex align-items-center justify-content-center" href="/">
+                <div class="sidebar-brand-icon rotate-n-15">
+                    <i class="fas fa-laugh-wink"></i>
+                </div>
+                <div class="sidebar-brand-text mx-3">Daily Tasker<sup>2</sup></div>
+            </a>
+
+            <!-- Divider -->
+            <hr class="sidebar-divider my-0">
+
+            <!-- Nav Item - Dashboard -->
+            <li class="nav-item">
+                <a class="nav-link" href="/">
+                    <i class="fas fa-fw fa-tachometer-alt"></i>
+                    <span>Dashboard</span></a>
+            </li>
+
+            <!-- Divider -->
+            <hr class="sidebar-divider">
+
+            <!-- Heading -->
+
+            <!-- Nav Item - Pages Collapse Menu -->
+
+
+              <!-- Nav Item - Pages Collapse Menu -->
+        <ul class="navbar-nav">
+    <li class="nav-item">
+        <a class="nav-link" href="#">
+            <i class="fas fa-fw fa-chart-area"></i>
+            <span>Report</span>
+        </a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link" href="/track">
+            <i class="fas fa-fw fa-table"></i>
+            <span>Tracking</span>
+        </a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link" href="/daraz">
+            <i class="fas fa-fw fa-table"></i>
+            <span>Daraz Tracking</span>
+        </a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link" href="#" id="refreshButton">
+            <i class="fas fa-sync-alt"></i>
+            <span>Refresh Data</span>
+        </a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link collapsed" href="#" data-toggle="collapse" data-target="#collapsePages" aria-expanded="false" aria-controls="collapsePages">
+            <i class="fas fa-fw fa-folder"></i>
+            <span>Accounts</span>
+        </a>
+        <div id="collapsePages" class="collapse" aria-labelledby="headingPages" data-parent="#accordionSidebar" style="">
+            <div class="bg-white py-2 collapse-inner rounded">
+                <h6 class="collapse-header">Accounts:</h6>
+                <a class="collapse-item" href="https://dashboard.tickbags.com/">Summary</a>
+                <a class="collapse-item" href="/addTransaction">Add Transaction</a>
+                <a class="collapse-item" href="/finance_report">Transactions List</a>
+            </div>
+        </div>
+    </li>
+</ul>
+
+            <!-- Divider -->
+            <hr class="sidebar-divider d-none d-md-block">
+
+            <!-- Sidebar Toggler (Sidebar) -->
+            <div class="text-center d-none d-md-inline">
+                <button class="rounded-circle border-0" id="sidebarToggle"></button>
+            </div>
+
+        </ul>
+
