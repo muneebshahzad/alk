@@ -280,7 +280,7 @@ async def getShopifyOrders():
     start_date = datetime(2024, 9, 1).isoformat()
 
     global order_details
-    orders = shopify.Order.find(order="created_at DESC", created_at_min=start_date)
+    orders = shopify.Order.find(limit=200,order="created_at DESC", created_at_min=start_date)
     order_details = []
     total_start_time = time.time()
 
@@ -313,7 +313,7 @@ def get_daraz_orders(statuses):
             request.add_api_param('offset', '0')
             request.add_api_param('created_before', '2025-02-10T16:00:00+08:00')
             request.add_api_param('created_after', '2017-02-10T09:00:00+08:00')
-            request.add_api_param('limit', '50')
+            request.add_api_param('limit', '5000')
             request.add_api_param('update_after', '2017-02-10T09:00:00+08:00')
             request.add_api_param('sort_by', 'updated_at')
             request.add_api_param('status', status)
