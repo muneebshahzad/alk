@@ -206,7 +206,7 @@ async def process_order(session, order):
             order_info['line_items'].append({
                 'fulfillment_status': line_item.fulfillment_status,
                 'image_src': image_src,
-                'product_title': line_item.title + " - " + variant_name ,
+                'product_title': (line_item.title or "") + " - " + (variant_name or ""),
                 'quantity': info['quantity'],
                 'tracking_number': info['tracking_number'],
                 'status': info['status']
