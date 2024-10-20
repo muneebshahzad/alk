@@ -56,26 +56,54 @@
         }
     }
 
-    function applyTag(orderId, tag) {
-        fetch('/apply_tag', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ order_id: orderId, tag: tag })
-        })
-        .then(response => response.json())
-        .then(data => {
-            if (data.success) {
-                alert('Tag applied successfully');
-            } else {
-                alert('Failed to apply tag');
-            }
+   function applyTag(orderId, tag) {
+    return fetch('/apply_tag', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ order_id: orderId, tag: tag })
+    })
+    .then(response => response.json())
+    .then(data => {
+        return { orderId: orderId, success: data.success }; // return result of this order
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        return { orderId: orderId, success: false }; // return failed result
+    });
+}
+
+function applyDeliveredToAll() {
+    const orders = {{ order_details|tojson }};
+    
+    const deliveredOrders = orders.filter(order => order.status === 'delivered');
+    
+    const applyPromises = deliveredOrders.map(order => applyTag(order.id, 'Delivered'));
+    
+    // Wait for all tag applications to complete
+    Promise.all(applyPromises)
+        .then(results => {
+            let successCount = 0;
+            let failureCount = 0;
+
+            results.forEach(result => {
+                if (result.success) {
+                    successCount++;
+                } else {
+                    failureCount++;
+                }
+            });
+
+            // Display a single summary message after all requests
+            alert(`Tag applied successfully to ${successCount} orders.\nFailed to apply to ${failureCount} orders.`);
         })
         .catch(error => {
-            console.error('Error:', error);
+            console.error('Error processing orders:', error);
+            alert('An error occurred while processing the orders.');
         });
-    }
+}
+
         document.getElementById('refreshButton').addEventListener('click', async function () {
              alert('Refreshing in Background!')
             const response = await fetch('/refresh', {
@@ -88,3 +116,14 @@
                 alert('Failed to refresh data');
             }
         });
+
+
+function applyDeliveredToAll() {
+    const orders = {{ order_details|tojson }};
+
+    orders.forEach(order => {
+        if (order.status === 'DELIVERED') {
+            applyTag(order.id, 'Delivered');
+        }
+    });
+}
