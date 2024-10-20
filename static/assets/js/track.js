@@ -5,22 +5,22 @@
         switch(type) {
             case 'delay':
                 subject = 'Delay in Delivery';
-                body = `Dear Team,\n\nPlease note that there has been significant delay in delivery of CN# ${trackingNumber}, Please arrange urgent delivery.\n\nThanks and Regards,\nTick Bags\nwww.tickbags.com`;
+                body = `Dear Team,\n\nPlease note that there has been significant delay in delivery of CN# ${trackingNumber}, Please arrange urgent delivery.\n\nThanks and Regards,\nTick Bags\nwww.alkaramat.com`;
                 break;
             case 'incomplete':
                 subject = 'FAKE DELIVERY REASON';
-                body = `Dear Team,\n\nPlease note that consignee is waiting for delivery against CN# ${trackingNumber}, while the tracking status says incomplete address even though the address is 100% accurate and phone number is completely accessible. Please arrange urgent delivery and make sure this shipment is not returned.\n\nThanks and Regards,\nTick Bags\nwww.tickbags.com`;
+                body = `Dear Team,\n\nPlease note that consignee is waiting for delivery against CN# ${trackingNumber}, while the tracking status says incomplete address even though the address is 100% accurate and phone number is completely accessible. Please arrange urgent delivery and make sure this shipment is not returned.\n\nThanks and Regards,\nTick Bags\nwww.alkaramat.com`;
                 break;
             case 'refusal':
                 subject = 'URGENT - FAKE ORDER REFUSAL';
-                body = `Dear Team,\n\nPlease note that consignee is waiting for delivery against CN# ${trackingNumber}, while the tracking status says that customer has refused the delivery. Please arrange urgent delivery and make sure this shipment is not returned.\n\nThanks and Regards,\nTick Bags\nwww.tickbags.com`;
+                body = `Dear Team,\n\nPlease note that consignee is waiting for delivery against CN# ${trackingNumber}, while the tracking status says that customer has refused the delivery. Please arrange urgent delivery and make sure this shipment is not returned.\n\nThanks and Regards,\nTick Bags\nwww.alkaramat.com`;
                 break;
         }
 
         // Prepare data to send to backend
         let data = {
-            to: ['Cod.lhe@leopardscourier.com','Cod.lhe1@leopardscourier.com','Cod.lhe5@leopardscourier.com','Codproject.lhe@leopardscourier.com'],
-            cc: ['ahmad.aslam@leopardscourier.com','muneeb.shahzad@hotmail.com'],
+            to: ['cs@postex.pk','cs@callcourier.com.pk'],
+            cc: ['muneeb.shahzad@hotmail.com'],
             subject: subject,
             body: body
         };
