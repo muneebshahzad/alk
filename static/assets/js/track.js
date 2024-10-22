@@ -5,22 +5,22 @@
         switch(type) {
             case 'delay':
                 subject = 'Delay in Delivery';
-                body = `Dear Team,\n\nPlease note that there has been significant delay in delivery of CN# ${trackingNumber}, Please arrange urgent delivery.\n\nThanks and Regards,\nTick Bags\nwww.alkaramat.com`;
+                body = `Dear Team,\n\nPlease note that there has been significant delay in delivery of CN# ${trackingNumber}, Please arrange urgent delivery.\n\nThanks and Regards,\nTick Bags\nwww.tickbags.com`;
                 break;
             case 'incomplete':
                 subject = 'FAKE DELIVERY REASON';
-                body = `Dear Team,\n\nPlease note that consignee is waiting for delivery against CN# ${trackingNumber}, while the tracking status says incomplete address even though the address is 100% accurate and phone number is completely accessible. Please arrange urgent delivery and make sure this shipment is not returned.\n\nThanks and Regards,\nTick Bags\nwww.alkaramat.com`;
+                body = `Dear Team,\n\nPlease note that consignee is waiting for delivery against CN# ${trackingNumber}, while the tracking status says incomplete address even though the address is 100% accurate and phone number is completely accessible. Please arrange urgent delivery and make sure this shipment is not returned.\n\nThanks and Regards,\nTick Bags\nwww.tickbags.com`;
                 break;
             case 'refusal':
                 subject = 'URGENT - FAKE ORDER REFUSAL';
-                body = `Dear Team,\n\nPlease note that consignee is waiting for delivery against CN# ${trackingNumber}, while the tracking status says that customer has refused the delivery. Please arrange urgent delivery and make sure this shipment is not returned.\n\nThanks and Regards,\nTick Bags\nwww.alkaramat.com`;
+                body = `Dear Team,\n\nPlease note that consignee is waiting for delivery against CN# ${trackingNumber}, while the tracking status says that customer has refused the delivery. Please arrange urgent delivery and make sure this shipment is not returned.\n\nThanks and Regards,\nTick Bags\nwww.tickbags.com`;
                 break;
         }
 
         // Prepare data to send to backend
         let data = {
-            to: ['cs@postex.pk','cs@callcourier.com.pk'],
-            cc: ['muneeb.shahzad@hotmail.com'],
+            to: ['Cod.lhe@leopardscourier.com','Cod.lhe1@leopardscourier.com','Cod.lhe5@leopardscourier.com','Codproject.lhe@leopardscourier.com'],
+            cc: ['ahmad.aslam@leopardscourier.com','muneeb.shahzad@hotmail.com'],
             subject: subject,
             body: body
         };
@@ -56,54 +56,26 @@
         }
     }
 
-   function applyTag(orderId, tag) {
-    return fetch('/apply_tag', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ order_id: orderId, tag: tag })
-    })
-    .then(response => response.json())
-    .then(data => {
-        return { orderId: orderId, success: data.success }; // return result of this order
-    })
-    .catch(error => {
-        console.error('Error:', error);
-        return { orderId: orderId, success: false }; // return failed result
-    });
-}
-
-function applyDeliveredToAll() {
-    const orders = {{ order_details|tojson }};
-    
-    const deliveredOrders = orders.filter(order => order.status === 'delivered');
-    
-    const applyPromises = deliveredOrders.map(order => applyTag(order.id, 'Delivered'));
-    
-    // Wait for all tag applications to complete
-    Promise.all(applyPromises)
-        .then(results => {
-            let successCount = 0;
-            let failureCount = 0;
-
-            results.forEach(result => {
-                if (result.success) {
-                    successCount++;
-                } else {
-                    failureCount++;
-                }
-            });
-
-            // Display a single summary message after all requests
-            alert(`Tag applied successfully to ${successCount} orders.\nFailed to apply to ${failureCount} orders.`);
+    function applyTag(orderId, tag) {
+        fetch('/apply_tag', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ order_id: orderId, tag: tag })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                alert('Tag applied successfully');
+            } else {
+                alert('Failed to apply tag');
+            }
         })
         .catch(error => {
-            console.error('Error processing orders:', error);
-            alert('An error occurred while processing the orders.');
+            console.error('Error:', error);
         });
-}
-
+    }
         document.getElementById('refreshButton').addEventListener('click', async function () {
              alert('Refreshing in Background!')
             const response = await fetch('/refresh', {
@@ -116,14 +88,3 @@ function applyDeliveredToAll() {
                 alert('Failed to refresh data');
             }
         });
-
-
-function applyDeliveredToAll() {
-    const orders = {{ order_details|tojson }};
-
-    orders.forEach(order => {
-        if (order.status === 'DELIVERED') {
-            applyTag(order.id, 'Delivered');
-        }
-    });
-}
