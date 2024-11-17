@@ -206,7 +206,7 @@ async def process_order(session, order):
             order_info['line_items'].append({
                 'fulfillment_status': line_item.fulfillment_status,
                 'image_src': image_src,
-                'product_title': (line_item.title or "") + " - " + (variant_name or ""),
+                'product_title': line_item.title + " - " + variant_name ,
                 'quantity': info['quantity'],
                 'tracking_number': info['tracking_number'],
                 'status': info['status']
@@ -253,8 +253,8 @@ def apply_tag():
         else:
             tags = []
 
-        # Remove a specific tag if needed (e.g., "Leopards Courier")
         if "Leopards Courier" in tags:
+            print("LEOPARDS")
             tags.remove("Leopards Courier")
 
         # Add new tag if it doesn't already exist
@@ -280,7 +280,7 @@ async def getShopifyOrders():
     start_date = datetime(2024, 9, 1).isoformat()
 
     global order_details
-    orders = shopify.Order.find(limit=200,order="created_at DESC", created_at_min=start_date)
+    orders = shopify.Order.find(limit=250,order="created_at DESC", created_at_min=start_date)
     order_details = []
     total_start_time = time.time()
 
@@ -292,6 +292,7 @@ async def getShopifyOrders():
     print(f"Total time taken to process all orders: {total_end_time - total_start_time:.2f} seconds")
 
     return order_details
+
 
 @app.route("/track")
 def tracking():
@@ -313,7 +314,7 @@ def get_daraz_orders(statuses):
             request.add_api_param('offset', '0')
             request.add_api_param('created_before', '2025-02-10T16:00:00+08:00')
             request.add_api_param('created_after', '2017-02-10T09:00:00+08:00')
-            request.add_api_param('limit', '5000')
+            request.add_api_param('limit', '50')
             request.add_api_param('update_after', '2017-02-10T09:00:00+08:00')
             request.add_api_param('sort_by', 'updated_at')
             request.add_api_param('status', status)
@@ -1101,6 +1102,60 @@ def add_payable():
 
     except Exception as e:
         return jsonify({'status': 'error', 'message': f'Error: {str(e)}'})
+
+@app.route('/pending')
+def pending_orders():
+    all_orders = []
+    pending_items_dict = {}  # Dictionary to track quantities of each unique item
+
+    global order_details
+
+
+    # Process Shopify orders with the specified statuses
+    for shopify_order in order_details:
+        if shopify_order['status'] in ['CONSIGNMENT BOOKED', 'Un-Booked']:
+            shopify_items_list = [
+                {
+                    'item_image': item['image_src'],
+                    'item_title': item['product_title'],
+                    'quantity': item['quantity'],
+                    'tracking_number': item['tracking_number'],
+                    'status': item['status']
+                }
+                for item in shopify_order['line_items']
+            ]
+
+            shopify_order_data = {
+                'order_via': 'Shopify',
+                'order_id': shopify_order['order_id'],
+                'status': shopify_order['status'],
+                'tracking_number': shopify_order['tracking_id'],
+                'date': shopify_order['created_at'],
+                'items_list': shopify_items_list
+            }
+            all_orders.append(shopify_order_data)
+
+            # Count quantities for each item in the Shopify order
+            for item in shopify_items_list:
+                product_title = item['item_title']
+                quantity = item['quantity']
+                item_image = item['item_image']
+
+                if product_title in pending_items_dict:
+                    pending_items_dict[product_title]['quantity'] += quantity
+                else:
+                    pending_items_dict[product_title] = {
+                        'item_image': item_image,
+                        'item_title': product_title,
+                        'quantity': quantity
+                    }
+
+    pending_items = list(pending_items_dict.values())
+    pending_items_sorted = sorted(pending_items, key=lambda x: x['quantity'], reverse=True)
+
+    half = len(pending_items_sorted) // 2
+
+    return render_template('pending.html', all_orders=all_orders, pending_items=pending_items_sorted, half=half)
 
 
 shop_url = os.getenv('SHOP_URL')
