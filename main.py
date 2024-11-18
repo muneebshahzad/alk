@@ -206,7 +206,7 @@ async def process_order(session, order):
             order_info['line_items'].append({
                 'fulfillment_status': line_item.fulfillment_status,
                 'image_src': image_src,
-                'product_title': line_item.title + " - " + variant_name ,
+                'product_title': (line_item.title or "") + " - " + (variant_name or ""),
                 'quantity': info['quantity'],
                 'tracking_number': info['tracking_number'],
                 'status': info['status']
@@ -1151,7 +1151,11 @@ def pending_orders():
                     }
 
     pending_items = list(pending_items_dict.values())
-    pending_items_sorted = sorted(pending_items, key=lambda x: x['quantity'], reverse=True)
+    pending_items_sorted = sorted(
+        pending_items,
+        key=lambda x: x.get('item_title', '').lower() if x.get('item_title') else '',
+        reverse=True
+    )
 
     half = len(pending_items_sorted) // 2
 
