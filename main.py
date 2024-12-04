@@ -1151,9 +1151,11 @@ def pending_orders():
                     }
 
     pending_items = list(pending_items_dict.values())
+    pending_items = list(pending_items_dict.values())
+
     pending_items_sorted = sorted(
         pending_items,
-        key=lambda x: x.get('item_title', '').lower() if x.get('item_title') else '',
+        key=lambda x: x.get('item_title', '').rstrip('-').strip().lower() if x.get('item_title') else '',
         reverse=True
     )
 
