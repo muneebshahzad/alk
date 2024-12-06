@@ -206,7 +206,7 @@ async def process_order(session, order):
             order_info['line_items'].append({
                 'fulfillment_status': line_item.fulfillment_status,
                 'image_src': image_src,
-                'product_title': (line_item.title or "") + " - " + (variant_name or ""),
+                'product_title' : line_item.title + (f" - {variant_name}" if variant_name else ""),
                 'quantity': info['quantity'],
                 'tracking_number': info['tracking_number'],
                 'status': info['status']
@@ -276,20 +276,28 @@ def apply_tag():
 
 
 async def getShopifyOrders():
-
     start_date = datetime(2024, 9, 1).isoformat()
-
     global order_details
-    orders = shopify.Order.find(limit=250,order="created_at DESC", created_at_min=start_date)
     order_details = []
     total_start_time = time.time()
 
+    # Fetch the first batch of orders
+    orders = shopify.Order.find(limit=250, order="created_at DESC", created_at_min=start_date)
+
     async with aiohttp.ClientSession() as session:
-        tasks = [process_order(session, order) for order in orders]
-        order_details = await asyncio.gather(*tasks)
+        while True:
+            # Process the current batch of orders
+            tasks = [process_order(session, order) for order in orders]
+            order_details.extend(await asyncio.gather(*tasks))
+
+            # Check if there is a next page of orders
+            if not orders.has_next_page():
+                break
+            orders = orders.next_page()
 
     total_end_time = time.time()
     print(f"Total time taken to process all orders: {total_end_time - total_start_time:.2f} seconds")
+    print(f"Total orders processed: {len(order_details)}")
 
     return order_details
 
@@ -1151,11 +1159,9 @@ def pending_orders():
                     }
 
     pending_items = list(pending_items_dict.values())
-    pending_items = list(pending_items_dict.values())
-
     pending_items_sorted = sorted(
         pending_items,
-        key=lambda x: x.get('item_title', '').rstrip('-').strip().lower() if x.get('item_title') else '',
+        key=lambda x: x.get('item_title', '').lower() if x.get('item_title') else '',
         reverse=True
     )
 
