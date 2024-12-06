@@ -1169,6 +1169,11 @@ def pending_orders():
 
     return render_template('pending.html', all_orders=all_orders, pending_items=pending_items_sorted, half=half)
 
+@app.route('/undelivered')
+def undelivered():
+    global order_details, pre_loaded
+    return render_template("undelivered.html", order_details=order_details)
+
 
 shop_url = os.getenv('SHOP_URL')
 api_key = os.getenv('API_KEY')
