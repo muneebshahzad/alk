@@ -121,3 +121,36 @@
 
         </ul>
 
+<script>
+    document.getElementById('refreshButton').addEventListener('click', async (event) => {
+        event.preventDefault();
+
+        // Disable the button and show a loading indicator
+        const button = document.getElementById('refreshButton');
+        button.disabled = true;
+        button.innerHTML = '<i class="fas fa-sync-alt fa-spin"></i> Refreshing...';
+
+        try {
+            const response = await fetch('/refresh', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+            });
+
+            if (response.ok) {
+                const html = await response.text();
+                document.body.innerHTML = html; // Replace the current page with the updated HTML
+            } else {
+                alert('Failed to refresh data. Please try again.');
+            }
+        } catch (error) {
+            console.error('Error refreshing data:', error);
+            alert('An error occurred while refreshing data.');
+        } finally {
+            // Re-enable the button and reset its text
+            button.disabled = false;
+            button.innerHTML = '<i class="fas fa-sync-alt"></i> Refresh Data';
+        }
+    });
+</script>
