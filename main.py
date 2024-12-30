@@ -300,12 +300,8 @@ async def getShopifyOrders():
                     break
                 orders = orders.next_page()
 
-    except shopify.exceptions.ClientError as e:
-        if e.response.status_code == 429:
-            # Handle rate limit exceeded error
-            retry_after = int(e.response.headers.get('Retry-After', 2))  # Default to 2 seconds if not provided
-            print(f"Rate limit exceeded. Retrying after {retry_after} seconds...")
-            await asyncio.sleep(retry_after)  # Wait before retrying
+    except :
+            await asyncio.sleep(2)  # Wait before retrying
             return await getShopifyOrders()  # Retry the request
 
     total_end_time = time.time()
