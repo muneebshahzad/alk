@@ -263,24 +263,25 @@ async def getShopifyOrders():
     # Get the current time in GMT+5 timezone
     current_time = datetime.utcnow() + timedelta(hours=5)
 
-    # Check if it's 12 AM or 12 PM in GMT+5
+    # Check if it's 9 AM or 10 PM in GMT+5
     is_full_fetch_time = current_time.hour == 9 or current_time.hour == 22
 
     if is_full_fetch_time:
-        # Fetch all orders
+        # Fetch all orders if it's the designated time
         start_date = datetime(2024, 11, 1).isoformat()
         print("Fetching all orders...")
     else:
         if last_fetch_time is not None:
-            # Fetch only new orders (created after the last fetch time)
+            # Fetch only new orders if last_fetch_time is not None
             start_date = last_fetch_time.isoformat()
             print(f"Fetching new orders since {start_date}...")
         else:
             # Handle the case where last_fetch_time is None
-            print("Error: last_fetch_time is None.")
+            print("Error: last_fetch_time is None. Fetching all orders.")
             start_date = datetime(2024, 11, 1).isoformat()
 
-    last_fetch_time = datetime.utcnow()  # Update the last fetch time to current UTC time
+    # Update the last_fetch_time to the current UTC time
+    last_fetch_time = datetime.utcnow()
 
     total_start_time = time.time()
 
@@ -301,10 +302,10 @@ async def getShopifyOrders():
 
     except shopify.exceptions.ClientError as e:
         if e.response.status_code == 429:
-            # Rate limit exceeded, retry after the specified time
+            # Handle rate limit exceeded error
             retry_after = int(e.response.headers.get('Retry-After', 2))  # Default to 2 seconds if not provided
             print(f"Rate limit exceeded. Retrying after {retry_after} seconds...")
-            await asyncio.sleep(retry_after)
+            await asyncio.sleep(retry_after)  # Wait before retrying
             return await getShopifyOrders()  # Retry the request
 
     total_end_time = time.time()
