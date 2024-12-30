@@ -257,7 +257,6 @@ def apply_tag():
         print(f"Error: {e}")
         return jsonify({"success": False, "error": str(e)})
 
-
 async def getShopifyOrders():
     global order_details, last_fetch_time
 
@@ -277,25 +276,36 @@ async def getShopifyOrders():
             start_date = last_fetch_time.isoformat()
             print(f"Fetching new orders since {start_date}...")
         else:
-            # Handle the case where last_fetch_time is None (e.g., fetch from the beginning or return an error)
+            # Handle the case where last_fetch_time is None
             print("Error: last_fetch_time is None.")
             start_date = datetime(2024, 11, 1).isoformat()
 
     last_fetch_time = datetime.utcnow()  # Update the last fetch time to current UTC time
 
     total_start_time = time.time()
-    orders = shopify.Order.find(limit=250, order="created_at DESC", created_at_min=start_date, status="any")
 
-    async with aiohttp.ClientSession() as session:
-        while True:
-            # Process the current batch of orders
-            tasks = [process_order(session, order) for order in orders]
-            order_details.extend(await asyncio.gather(*tasks))
+    try:
+        # Fetch orders from Shopify API
+        orders = shopify.Order.find(limit=250, order="created_at DESC", created_at_min=start_date, status="open")
 
-            # Check if there is a next page of orders
-            if not orders.has_next_page():
-                break
-            orders = orders.next_page()
+        async with aiohttp.ClientSession() as session:
+            while True:
+                # Process the current batch of orders
+                tasks = [process_order(session, order) for order in orders]
+                order_details.extend(await asyncio.gather(*tasks))
+
+                # Check if there is a next page of orders
+                if not orders.has_next_page():
+                    break
+                orders = orders.next_page()
+
+    except shopify.exceptions.ClientError as e:
+        if e.response.status_code == 429:
+            # Rate limit exceeded, retry after the specified time
+            retry_after = int(e.response.headers.get('Retry-After', 2))  # Default to 2 seconds if not provided
+            print(f"Rate limit exceeded. Retrying after {retry_after} seconds...")
+            await asyncio.sleep(retry_after)
+            return await getShopifyOrders()  # Retry the request
 
     total_end_time = time.time()
     print(f"Total time taken to process orders: {total_end_time - total_start_time:.2f} seconds")
@@ -306,6 +316,7 @@ async def getShopifyOrders():
 @app.route('/scan')
 def scan_page():
     return render_template('scan.html')
+
 
 @app.route("/")
 def tracking():
