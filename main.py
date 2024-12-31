@@ -257,70 +257,75 @@ def apply_tag():
         print(f"Error: {e}")
         return jsonify({"success": False, "error": str(e)})
 
-async def getShopifyOrders():
-    global order_details, last_fetch_time
-
-    # Get the current time in GMT+5 timezone
-    current_time = datetime.utcnow() + timedelta(hours=5)
-
-    # Check if it's 9 AM or 10 PM in GMT+5
-    is_full_fetch_time = current_time.hour == 9 or current_time.hour == 22
-
-    if is_full_fetch_time:
-        # Fetch all orders if it's the designated time
-        start_date = datetime(2024, 11, 1).isoformat()
-        print("Fetching all orders...")
-    else:
-        if last_fetch_time is not None:
-            # Fetch only new orders if last_fetch_time is not None
-            start_date = last_fetch_time.isoformat()
-            print(f"Fetching new orders since {start_date}...")
-        else:
-            # Handle the case where last_fetch_time is None
-            print("Error: last_fetch_time is None. Fetching all orders.")
-            start_date = datetime(2024, 11, 1).isoformat()
-
-    # Update the last_fetch_time to the current UTC time
-    last_fetch_time = datetime.utcnow()
-
+async def getShopifyOrders(all=True):
+    start_date = datetime(2024, 10, 1).isoformat()
+    current_date = datetime.now().isoformat()
+    global order_details
+    order_details = []
+    order_ids = set()  # To track unique order IDs
     total_start_time = time.time()
 
-    try:
-        # Fetch orders from Shopify API
-        orders = shopify.Order.find(limit=250, order="created_at DESC", created_at_min=start_date, status="open")
-
-        async with aiohttp.ClientSession() as session:
+    async with aiohttp.ClientSession() as session:
+        # Fetch orders from start_date (October 2024)
+        if all:
+            orders = shopify.Order.find(limit=250, order="created_at DESC", created_at_min=start_date)
             while True:
-                # Process the current batch of orders
                 tasks = [process_order(session, order) for order in orders]
-                order_details.extend(await asyncio.gather(*tasks))
+                results = await asyncio.gather(*tasks)
 
-                # Check if there is a next page of orders
+                for result in results:
+                    if result['id'] not in order_ids:  # Check for duplicates
+                        order_details.append(result)
+                        order_ids.add(result['id'])
+
                 if not orders.has_next_page():
                     break
                 orders = orders.next_page()
 
-    except :
-            await asyncio.sleep(2)  # Wait before retrying
-            return await getShopifyOrders()  # Retry the request
+        # Fetch orders from current_date onward
+        else:
+            orders = shopify.Order.find(limit=250, order="created_at DESC", created_at_min=current_date)
+            while True:
+                tasks = [process_order(session, order) for order in orders]
+                results = await asyncio.gather(*tasks)
+
+                for result in results:
+                    if result['id'] not in order_ids:  # Check for duplicates
+                        order_details.append(result)
+                        order_ids.add(result['id'])
+
+                if not orders.has_next_page():
+                    break
+                orders = orders.next_page()
 
     total_end_time = time.time()
-    print(f"Total time taken to process orders: {total_end_time - total_start_time:.2f} seconds")
+    print(f"Total time taken to process all orders: {total_end_time - total_start_time:.2f} seconds")
     print(f"Total orders processed: {len(order_details)}")
 
     return order_details
+
 
 @app.route('/scan')
 def scan_page():
     return render_template('scan.html')
 
+is_first_call = True
+
 
 @app.route("/")
 def tracking():
-    global order_details
-    asyncio.run(getShopifyOrders())
-    return render_template("track_alk.html", order_details=order_details)
+    global order_details, is_first_call
+    try:
+        if is_first_call:
+            order_details = asyncio.run(getShopifyOrders(True))
+            is_first_call = False
+        else:
+            order_details = asyncio.run(getShopifyOrders(False))
 
+        return render_template("track_alk.html", order_details=order_details)
+    except Exception as e:
+        print(f"Error refreshing data: {e}")
+        return jsonify({'message': 'Failed to refresh data'}), 500
 
 
 def format_date(date_str):
@@ -334,7 +339,7 @@ def format_date(date_str):
 def refresh_data():
     global order_details
     try:
-        order_details = asyncio.run(getShopifyOrders())
+        order_details = asyncio.run(getShopifyOrders(True))
         return render_template("track_alk.html", order_details=order_details)
     except Exception as e:
         print(f"Error refreshing data: {e}")
