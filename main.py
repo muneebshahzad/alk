@@ -266,37 +266,38 @@ async def getShopifyOrders(all=True):
     total_start_time = time.time()
 
     async with aiohttp.ClientSession() as session:
-        # Fetch orders from start_date (October 2024)
-        if all:
-            orders = shopify.Order.find(limit=250, order="created_at DESC", created_at_min=start_date)
+        try:
+            # Determine the date range
+            created_at_min = start_date if all else current_date
+
+            orders = shopify.Order.find(limit=250, order="created_at DESC", created_at_min=created_at_min)
             while True:
                 tasks = [process_order(session, order) for order in orders]
-                results = await asyncio.gather(*tasks)
+                try:
+                    results = await asyncio.gather(*tasks, return_exceptions=True)
 
-                for result in results:
-                    if result['id'] not in order_ids:  # Check for duplicates
-                        order_details.append(result)
-                        order_ids.add(result['id'])
+                    for result in results:
+                        if isinstance(result, Exception):
+                            print(f"Error processing order: {result}")
+                            continue
 
-                if not orders.has_next_page():
+                        if result['id'] not in order_ids:  # Check for duplicates
+                            order_details.append(result)
+                            order_ids.add(result['id'])
+
+                    if not orders.has_next_page():
+                        break
+
+                    # Respect API rate limits
+                    await asyncio.sleep(0.5)  # Pause between pages if needed
+                    orders = orders.next_page()
+
+                except Exception as e:
+                    print(f"Error during order processing: {e}")
                     break
-                orders = orders.next_page()
 
-        # Fetch orders from current_date onward
-        else:
-            orders = shopify.Order.find(limit=250, order="created_at DESC", created_at_min=current_date)
-            while True:
-                tasks = [process_order(session, order) for order in orders]
-                results = await asyncio.gather(*tasks)
-
-                for result in results:
-                    if result['id'] not in order_ids:  # Check for duplicates
-                        order_details.append(result)
-                        order_ids.add(result['id'])
-
-                if not orders.has_next_page():
-                    break
-                orders = orders.next_page()
+        except Exception as e:
+            print(f"Error fetching orders: {e}")
 
     total_end_time = time.time()
     print(f"Total time taken to process all orders: {total_end_time - total_start_time:.2f} seconds")
