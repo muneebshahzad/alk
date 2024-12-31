@@ -260,20 +260,16 @@ def apply_tag():
 
 async def getShopifyOrders():
     start_date = datetime(2024, 9, 1).isoformat()
-    current_date = datetime.now().isoformat()
     global order_details
     order_details = []
     total_start_time = time.time()
 
     # Fetch the first batch of orders
-
-    created_at_min = start_date if all else current_date
-    orders = shopify.Order.find(limit=250, order="created_at DESC", created_at_min=created_at_min)
+    orders = shopify.Order.find(limit=250, order="created_at DESC", created_at_min=start_date)
 
     async with aiohttp.ClientSession() as session:
         while True:
             # Process the current batch of orders
-
             tasks = [process_order(session, order) for order in orders]
             order_details.extend(await asyncio.gather(*tasks))
 
@@ -303,7 +299,6 @@ async def getShopifyOrders():
             tasks = [process_order(session, order) for order in orders]
             order_details.extend(await asyncio.gather(*tasks))
 
-            # Check if there is a next page of orders
             if not orders.has_next_page():
                 break
             orders = orders.next_page()
@@ -326,10 +321,7 @@ is_first_call = True
 def tracking():
     global order_details, is_first_call
     try:
-        if is_first_call:
-            order_details = asyncio.run(getShopifyOrders())
-            is_first_call = False
-
+        order_details = asyncio.run(getShopifyOrders())
         return render_template("track_alk.html", order_details=order_details)
     except Exception as e:
         print(f"Error refreshing data: {e}")
@@ -448,6 +440,7 @@ password = os.getenv('PASSWORD')
 shopify.ShopifyResource.set_site(shop_url)
 shopify.ShopifyResource.set_user(api_key)
 shopify.ShopifyResource.set_password(password)
+order_details = asyncio.run(getShopifyOrders())
 
 if __name__ == "__main__":
     shop_url = os.getenv('SHOP_URL')
