@@ -260,22 +260,30 @@ def apply_tag():
 
 
 async def getShopifyOrders():
-    start_date = datetime(2024, 9, 1).isoformat()
     global order_details
+    orders = shopify.Order.find(limit=50, order='created_at DESC')  # Fetch in batches of 50
     order_details = []
     total_start_time = time.time()
 
-    # Fetch the first batch of orders
-    orders = shopify.Order.find(limit=250, order="created_at DESC", created_at_min=start_date)
-
     async with aiohttp.ClientSession() as session:
         while True:
-            # Process the current batch of orders
+            start_time = time.time()
+
+            # Process the current batch of orders with throttling
             tasks = [process_order(session, order) for order in orders]
-            order_details.extend(await asyncio.gather(*tasks))
+            try:
+                order_details.extend(await asyncio.gather(*tasks))
+            except aiohttp.ClientError as e:
+                print(f"Error while processing orders: {e}")
 
             if not orders.has_next_page():
                 break
+
+            # Ensure requests do not exceed rate limits (2 per second)
+            elapsed_time = time.time() - start_time
+            if elapsed_time < 0.5:  # 0.5 seconds = 2 calls/sec
+                await asyncio.sleep(0.5 - elapsed_time)
+
             orders = orders.next_page()
 
     total_end_time = time.time()
