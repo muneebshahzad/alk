@@ -56,10 +56,18 @@ def send_email():
 
 
 async def fetch_tracking_data(session, tracking_number):
-
     url = f"https://cod.callcourier.com.pk/api/CallCourier/GetTackingHistory?cn={tracking_number}"
-    async with session.get(url) as response:
-        return await response.json()
+
+    try:
+        async with session.get(url) as response:
+            if response.status == 200:
+                return await response.json()
+            else:
+                print(f"Error: HTTP {response.status} for tracking number {tracking_number}")
+                return {"error": f"HTTP {response.status}"}
+    except aiohttp.ClientError as e:
+        print(f"Request failed: {e}")
+        return {"error": str(e)}
 
 async def process_line_item(session, line_item, fulfillments):
     if line_item.fulfillment_status is None and line_item.fulfillable_quantity == 0:
@@ -109,102 +117,90 @@ async def process_line_item(session, line_item, fulfillments):
 async def process_order(session, order):
     order_start_time = time.time()
 
-    input_datetime_str = order.created_at
-    parsed_datetime = datetime.fromisoformat(input_datetime_str[:-6])
-    formatted_datetime = parsed_datetime.strftime("%b %d, %Y")
-
+    # Parsing created_at timestamp
     try:
-        status = (order.fulfillment_status).title()
-    except:
+        input_datetime_str = order.created_at
+        parsed_datetime = datetime.fromisoformat(input_datetime_str[:-6])
+        formatted_datetime = parsed_datetime.strftime("%b %d, %Y")
+    except Exception as e:
+        formatted_datetime = "Unknown Date"
+        print(f"Error parsing created_at for order {order.order_number}: {e}")
+
+    # Handling missing fulfillment status
+    try:
+        status = (order.fulfillment_status or "Un-fulfilled").title()
+    except AttributeError:
         status = "Un-fulfilled"
-    print(order)
-    tags = []
-    try:
-        name = order.billing_address.name
-    except AttributeError:
-        name = " "
-        print("Error retrieving name")
 
-    try:
-        address = order.billing_address.address1
-    except AttributeError:
-        address = " "
-        print("Error retrieving address")
-
-    try:
-        city = order.billing_address.city
-    except AttributeError:
-        city = " "
-        print("Error retrieving city")
-
-    try:
-        phone = order.billing_address.phone
-    except AttributeError:
-        phone = " "
-        print("Error retrieving phone")
-
+    # Handling missing billing address fields
     customer_details = {
-        "name": name,
-        "address": address,
-        "city": city,
-        "phone": phone
+        "name": getattr(order.billing_address, "name", " "),
+        "address": getattr(order.billing_address, "address1", " "),
+        "city": getattr(order.billing_address, "city", " "),
+        "phone": getattr(order.billing_address, "phone", " ")
     }
+
+    # Initializing order information
     order_info = {
         'order_id': order.order_number,
         'tracking_id': 'N/A',
         'created_at': formatted_datetime,
         'total_price': order.total_price,
         'line_items': [],
-        'financial_status': (order.financial_status).title(),
+        'financial_status': getattr(order, "financial_status", "Unknown").title(),
         'fulfillment_status': status,
-        'customer_details' : customer_details,
-        'tags': order.tags.split(", "),
+        'customer_details': customer_details,
+        'tags': (order.tags or "").split(", "),
         'id': order.id
     }
-    print(order.tags)
 
-    tasks = []
-    for line_item in order.line_items:
-        tasks.append(process_line_item(session, line_item, order.fulfillments))
+    # Processing line items
+    tasks = [process_line_item(session, line_item, order.fulfillments) for line_item in order.line_items]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
 
-    results = await asyncio.gather(*tasks)
-    variant_name = ""
     for tracking_info_list, line_item in zip(results, order.line_items):
-        if tracking_info_list is None:
+        if isinstance(tracking_info_list, Exception):
+            print(f"Error processing line item for order {order.order_number}: {tracking_info_list}")
             continue
 
-        if line_item.product_id is not None:
-            product = shopify.Product.find(line_item.product_id)
-            if product and product.variants:
-                for variant in product.variants:
-                    if variant.id == line_item.variant_id:
-                        if variant.image_id is not None:
-                            images = shopify.Image.find(image_id=variant.image_id, product_id=line_item.product_id)
-                            variant_name = line_item.variant_title
-                            for image in images:
-                                if image.id == variant.image_id:
-                                    image_src = image.src
-                        else:
-                            variant_name = ""
-                            image_src = product.image.src
-        else:
-            image_src = "https://static.thenounproject.com/png/1578832-200.png"
+        # Handling product and image information
+        try:
+            if line_item.product_id:
+                product = shopify.Product.find(line_item.product_id)
+                variant_name = ""
+                image_src = "https://static.thenounproject.com/png/1578832-200.png"
+                if product and product.variants:
+                    for variant in product.variants:
+                        if variant.id == line_item.variant_id:
+                            if variant.image_id:
+                                images = shopify.Image.find(image_id=variant.image_id, product_id=line_item.product_id)
+                                variant_name = line_item.variant_title
+                                for image in images:
+                                    if image.id == variant.image_id:
+                                        image_src = image.src
+                            else:
+                                variant_name = ""
+                                image_src = product.image.src
+            else:
+                image_src = "https://static.thenounproject.com/png/1578832-200.png"
+        except Exception as e:
+            print(f"Error retrieving product information for line item: {e}")
+            continue
 
-        for info in tracking_info_list:
+        for info in tracking_info_list or []:
             order_info['line_items'].append({
                 'fulfillment_status': line_item.fulfillment_status,
                 'image_src': image_src,
-                'product_title' : line_item.title + (f" - {variant_name}" if variant_name else ""),
-                'quantity': info['quantity'],
-                'tracking_number': info['tracking_number'],
-                'status': info['status']
+                'product_title': line_item.title + (f" - {variant_name}" if variant_name else ""),
+                'quantity': info.get('quantity', 0),
+                'tracking_number': info.get('tracking_number', 'N/A'),
+                'status': info.get('status', 'Unknown')
             })
-            order_info['status'] = info['status']
 
     order_end_time = time.time()
-    print(f"Time taken to process order {name} {order.order_number}: {order_end_time - order_start_time:.2f} seconds")
-
+    print(f"Time taken to process order {order_info['customer_details']['name']} {order.order_number}: {order_end_time - order_start_time:.2f} seconds")
     return order_info
+
 
 
 
@@ -269,25 +265,39 @@ async def getShopifyOrders():
     order_details = []
     total_start_time = time.time()
 
-    # Fetch the first batch of orders
-    orders = shopify.Order.find(limit=250, order="created_at DESC", created_at_min=start_date)
+    try:
+        orders = shopify.Order.find(limit=250, order="created_at DESC", created_at_min=start_date)
+    except Exception as e:
+        print(f"Error fetching orders: {e}")
+        return []
 
     async with aiohttp.ClientSession() as session:
         while True:
             # Process the current batch of orders
             tasks = [process_order(session, order) for order in orders]
-            order_details.extend(await asyncio.gather(*tasks))
+            batch_results = await asyncio.gather(*tasks, return_exceptions=True)
+
+            # Filter out successful results and log errors
+            for result in batch_results:
+                if isinstance(result, Exception):
+                    print(f"Error processing an order: {result}")
+                else:
+                    order_details.append(result)
 
             # Check if there is a next page of orders
-            if not orders.has_next_page():
+            try:
+                if not orders.has_next_page():
+                    break
+                orders = orders.next_page()
+            except Exception as e:
+                print(f"Error fetching next page of orders: {e}")
                 break
-            orders = orders.next_page()
 
     total_end_time = time.time()
     print(f"Total time taken to process all orders: {total_end_time - total_start_time:.2f} seconds")
     print(f"Total orders processed: {len(order_details)}")
-
     return order_details
+
 
 
 @app.route("/")
@@ -296,96 +306,7 @@ def tracking():
     return render_template("track_alk.html", order_details=order_details)
 
 
-def get_daraz_orders(statuses):
-    try:
-        access_token = '50000601237osiZ0F1HkTZVojWcjq6szVDmDPjxiuvoEbCSvB15ff2bc8xtn4m'
-        client = lazop.LazopClient('https://api.daraz.pk/rest', '501554', 'nrP3XFN7ChZL53cXyVED1yj4iGZZtlcD')
 
-        all_orders = []
-
-        for status in statuses:
-            request = lazop.LazopRequest('/orders/get', 'GET')
-            request.add_api_param('sort_direction', 'DESC')
-            request.add_api_param('update_before', '2025-02-10T16:00:00+08:00')
-            request.add_api_param('offset', '0')
-            request.add_api_param('created_before', '2025-02-10T16:00:00+08:00')
-            request.add_api_param('created_after', '2017-02-10T09:00:00+08:00')
-            request.add_api_param('limit', '50')
-            request.add_api_param('update_after', '2017-02-10T09:00:00+08:00')
-            request.add_api_param('sort_by', 'updated_at')
-            request.add_api_param('status', status)
-            request.add_api_param('access_token', access_token)
-
-            response = client.execute(request)
-            darazOrders = response.body.get('data', {}).get('orders', [])
-
-            for order in darazOrders:
-                print(order)
-                order_id = order.get('order_id', 'Unknown')
-
-                item_request = lazop.LazopRequest('/order/items/get', 'GET')
-                item_request.add_api_param('order_id', order_id)
-                item_request.add_api_param('access_token', access_token)
-
-                item_response = client.execute(item_request)
-                try:
-                    items = item_response.body.get('data', [])
-                    if not items:
-                        raise ValueError("No items found in the response.")
-                except (AttributeError, ValueError) as e:
-                    print(f"Error retrieving items: {e}")
-                    items = []
-
-                item_details = []
-                for item in items:
-                    tracking_num = item.get('tracking_code', 'Unknown')
-
-                    tracking_req = lazop.LazopRequest('/logistic/order/trace', 'GET')
-                    tracking_req.add_api_param('order_id', order_id)
-                    tracking_req.add_api_param('access_token', access_token)
-                    tracking_response = client.execute(tracking_req)
-
-                    tracking_data = tracking_response.body.get('result', {})
-                    packages = tracking_data.get('data', [{}])[0].get('package_detail_info_list', [])
-
-                    track_status = "N/A"
-                    for package in packages:
-                        if package.get("tracking_number") == tracking_num:
-                            try:
-                                track_status = package.get('logistic_detail_info_list', [{}])[-1].get('title', "N/A")
-                            except (IndexError, KeyError) as e:
-                                print(f"Error processing tracking data: {e}")
-                                track_status = "N/A"
-                            print("MATCHED")
-                            break
-
-                    item_detail = {
-                        'item_image': item.get('product_main_image', 'N/A'),
-                        'item_title': item.get('name', 'Unknown'),
-                        'quantity': item.get('variation', 'N/A'),
-                        'tracking_number': item.get('tracking_code', 'N/A'),
-                        'status': track_status
-                    }
-                    item_details.append(item_detail)
-
-                filtered_order = {
-                    'order_id': order.get('order_id', 'Unknown'),
-                    'customer': {
-                        'name': f"{order.get('customer_first_name', 'Unknown')} {order.get('customer_last_name', 'Unknown')}",
-                        'address': order.get('address_shipping', {}).get('address', 'N/A'),
-                        'phone': order.get('address_shipping', {}).get('phone', 'N/A')
-                    },
-                    'status': status.replace('_', ' ').title(),
-                    'date': format_date(order.get('created_at', 'N/A')),
-                    'total_price': order.get('price', '0.00'),
-                    'items_list': item_details,
-                }
-                all_orders.append(filtered_order)
-
-        return all_orders
-    except Exception as e:
-        print(f"Error fetching darazOrders: {e}")
-        return []
 
 
 def format_date(date_str):
