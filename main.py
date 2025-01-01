@@ -142,7 +142,7 @@ async def process_order(session, order):
 
     # Initializing order information
     order_info = {
-        'order_id': order.order_number,
+        'order_id': order.name,
         'tracking_id': 'N/A',
         'created_at': formatted_datetime,
         'total_price': order.total_price,
