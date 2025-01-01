@@ -2,22 +2,23 @@ import asyncio
 import os
 import smtplib
 import time
-from datetime import datetime, timedelta
+from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from flask import Flask, render_template
-import datetime
-import shopify
+from flask import Flask, render_template, jsonify, request, flash, redirect, url_for, abort
+import datetime, requests
+from datetime import datetime
+import pymssql, shopify
+import aiohttp
 import lazop
 import aiohttp
-import pytz
 
 app = Flask(__name__)
 app.debug = True
 app.secret_key = os.getenv('APP_SECRET_KEY', 'default_secret_key')  # Use environment variable
 pre_loaded = 0
 order_details = []
-scanned_orders = []
-last_fetch_time = None
+
+
 
 @app.route('/send-email', methods=['POST'])
 def send_email():
@@ -52,6 +53,8 @@ def send_email():
 
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+
 async def fetch_tracking_data(session, tracking_number):
 
     url = f"https://cod.callcourier.com.pk/api/CallCourier/GetTackingHistory?cn={tracking_number}"
@@ -147,7 +150,7 @@ async def process_order(session, order):
         "phone": phone
     }
     order_info = {
-        'order_id': order.name.replace("#", ""),
+        'order_id': order.order_number,
         'tracking_id': 'N/A',
         'created_at': formatted_datetime,
         'total_price': order.total_price,
@@ -202,6 +205,8 @@ async def process_order(session, order):
     print(f"Time taken to process order {name} {order.order_number}: {order_end_time - order_start_time:.2f} seconds")
 
     return order_info
+
+
 
 @app.route('/apply_tag', methods=['POST'])
 def apply_tag():
@@ -258,32 +263,24 @@ def apply_tag():
         return jsonify({"success": False, "error": str(e)})
 
 
-
 async def getShopifyOrders():
+    start_date = datetime(2024, 9, 1).isoformat()
     global order_details
-    orders = shopify.Order.find(limit=50, order='created_at DESC')  # Fetch in batches of 50
     order_details = []
     total_start_time = time.time()
 
+    # Fetch the first batch of orders
+    orders = shopify.Order.find(limit=250, order="created_at DESC", created_at_min=start_date)
+
     async with aiohttp.ClientSession() as session:
         while True:
-            start_time = time.time()
-
-            # Process the current batch of orders with throttling
+            # Process the current batch of orders
             tasks = [process_order(session, order) for order in orders]
-            try:
-                order_details.extend(await asyncio.gather(*tasks))
-            except aiohttp.ClientError as e:
-                print(f"Error while processing orders: {e}")
+            order_details.extend(await asyncio.gather(*tasks))
 
+            # Check if there is a next page of orders
             if not orders.has_next_page():
                 break
-
-            # Ensure requests do not exceed rate limits (2 per second)
-            elapsed_time = time.time() - start_time
-            if elapsed_time < 0.5:  # 0.5 seconds = 2 calls/sec
-                await asyncio.sleep(0.5 - elapsed_time)
-
             orders = orders.next_page()
 
     total_end_time = time.time()
@@ -293,21 +290,102 @@ async def getShopifyOrders():
     return order_details
 
 
-@app.route('/scan')
-def scan_page():
-    return render_template('scan.html')
-
-is_first_call = True
-
-
 @app.route("/")
 def tracking():
-    global order_details, is_first_call
+    global order_details
+    return render_template("track_alk.html", order_details=order_details)
+
+
+def get_daraz_orders(statuses):
     try:
-        return render_template("track_alk.html", order_details=order_details)
+        access_token = '50000601237osiZ0F1HkTZVojWcjq6szVDmDPjxiuvoEbCSvB15ff2bc8xtn4m'
+        client = lazop.LazopClient('https://api.daraz.pk/rest', '501554', 'nrP3XFN7ChZL53cXyVED1yj4iGZZtlcD')
+
+        all_orders = []
+
+        for status in statuses:
+            request = lazop.LazopRequest('/orders/get', 'GET')
+            request.add_api_param('sort_direction', 'DESC')
+            request.add_api_param('update_before', '2025-02-10T16:00:00+08:00')
+            request.add_api_param('offset', '0')
+            request.add_api_param('created_before', '2025-02-10T16:00:00+08:00')
+            request.add_api_param('created_after', '2017-02-10T09:00:00+08:00')
+            request.add_api_param('limit', '50')
+            request.add_api_param('update_after', '2017-02-10T09:00:00+08:00')
+            request.add_api_param('sort_by', 'updated_at')
+            request.add_api_param('status', status)
+            request.add_api_param('access_token', access_token)
+
+            response = client.execute(request)
+            darazOrders = response.body.get('data', {}).get('orders', [])
+
+            for order in darazOrders:
+                print(order)
+                order_id = order.get('order_id', 'Unknown')
+
+                item_request = lazop.LazopRequest('/order/items/get', 'GET')
+                item_request.add_api_param('order_id', order_id)
+                item_request.add_api_param('access_token', access_token)
+
+                item_response = client.execute(item_request)
+                try:
+                    items = item_response.body.get('data', [])
+                    if not items:
+                        raise ValueError("No items found in the response.")
+                except (AttributeError, ValueError) as e:
+                    print(f"Error retrieving items: {e}")
+                    items = []
+
+                item_details = []
+                for item in items:
+                    tracking_num = item.get('tracking_code', 'Unknown')
+
+                    tracking_req = lazop.LazopRequest('/logistic/order/trace', 'GET')
+                    tracking_req.add_api_param('order_id', order_id)
+                    tracking_req.add_api_param('access_token', access_token)
+                    tracking_response = client.execute(tracking_req)
+
+                    tracking_data = tracking_response.body.get('result', {})
+                    packages = tracking_data.get('data', [{}])[0].get('package_detail_info_list', [])
+
+                    track_status = "N/A"
+                    for package in packages:
+                        if package.get("tracking_number") == tracking_num:
+                            try:
+                                track_status = package.get('logistic_detail_info_list', [{}])[-1].get('title', "N/A")
+                            except (IndexError, KeyError) as e:
+                                print(f"Error processing tracking data: {e}")
+                                track_status = "N/A"
+                            print("MATCHED")
+                            break
+
+                    item_detail = {
+                        'item_image': item.get('product_main_image', 'N/A'),
+                        'item_title': item.get('name', 'Unknown'),
+                        'quantity': item.get('variation', 'N/A'),
+                        'tracking_number': item.get('tracking_code', 'N/A'),
+                        'status': track_status
+                    }
+                    item_details.append(item_detail)
+
+                filtered_order = {
+                    'order_id': order.get('order_id', 'Unknown'),
+                    'customer': {
+                        'name': f"{order.get('customer_first_name', 'Unknown')} {order.get('customer_last_name', 'Unknown')}",
+                        'address': order.get('address_shipping', {}).get('address', 'N/A'),
+                        'phone': order.get('address_shipping', {}).get('phone', 'N/A')
+                    },
+                    'status': status.replace('_', ' ').title(),
+                    'date': format_date(order.get('created_at', 'N/A')),
+                    'total_price': order.get('price', '0.00'),
+                    'items_list': item_details,
+                }
+                all_orders.append(filtered_order)
+
+        return all_orders
     except Exception as e:
-        print(f"Error refreshing data: {e}")
-        return jsonify({'message': 'Failed to refresh data'}), 500
+        print(f"Error fetching darazOrders: {e}")
+        return []
 
 
 def format_date(date_str):
@@ -328,7 +406,6 @@ def refresh_data():
         return jsonify({'message': 'Failed to refresh data'}), 500
 
 
-
 def run_async(func, *args, **kwargs):
     return asyncio.run(func(*args, **kwargs))
 
@@ -344,11 +421,6 @@ def displayTracking(tracking_num):
     data = run_async(async_func)
 
     return render_template('trackingdata_alk.html', data=data)
-
-
-
-from flask import request, jsonify
-from datetime import datetime
 
 
 
@@ -429,5 +501,4 @@ if __name__ == "__main__":
     api_key = os.getenv('API_KEY')
     password = os.getenv('PASSWORD')
     app.run(port=5001)
-
 
