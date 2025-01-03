@@ -533,7 +533,7 @@ def fetch_orders():
     total_cost = 0.0
     for order in orders:
         total_sales += float(order['total_price'])  # Assuming total_price is a string, convert to float
-        total_cost += float(order['total_item_cost'])  # Assuming total_item_cost is a string, convert to float
+        total_cost += float(order.get('total_item_cost', 0))  # Assuming total_item_cost is a string, convert to float
     print(total_sales)
     # Return the orders with totals
     return jsonify({
