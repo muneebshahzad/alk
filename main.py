@@ -416,7 +416,7 @@ def pending_orders():
 
             shopify_order_data = {
                 'order_via': 'Shopify',
-                'order_id': shopify_order['order_id'],
+                'order_id': shopify_order['name'].replace('#', ''),
                 'status': shopify_order['status'],
                 'tracking_number': shopify_order['tracking_id'],
                 'date': shopify_order['created_at'],
@@ -521,7 +521,27 @@ async def getShopifyOrderswithDates(start_date: str, end_date: str):
 def report():
     global order_details, pre_loaded
     return render_template("report.html", order_details=order_details)
+    
+@app.route('/fetch-orders', methods=['POST'])
+def fetch_orders():
+    data = request.get_json()
+    from_date = data.get('fromDate') + "T00:00:00+05:00"
+    to_date = data.get('toDate') + "T23:59:59+05:00"
 
+    orders = asyncio.run(getShopifyOrderswithDates(from_date, to_date))
+    total_sales = 0.0
+    total_cost = 0.0
+    for order in orders:
+        total_sales += float(order['total_price'])  # Assuming total_price is a string, convert to float
+        total_cost += float(order['total_item_cost'])  # Assuming total_item_cost is a string, convert to float
+    print(total_sales)
+    # Return the orders with totals
+    return jsonify({
+        'orders': orders,
+        'total_sales': total_sales,
+        'total_cost': total_cost
+    })
+    
 shop_url = os.getenv('SHOP_URL')
 api_key = os.getenv('API_KEY')
 password = os.getenv('PASSWORD')
