@@ -233,6 +233,9 @@ async def process_order(session, order):
                         else:
                             variant_name = ""
                             image_src = product.image.src
+                    inventory_item_id = variant.inventory_item_id
+                    inventory_item = shopify.InventoryItem.find(inventory_item_id)
+                    cost = int(float(inventory_item.cost))
         else:
             image_src = "https://static.thenounproject.com/png/1578832-200.png"
 
@@ -243,9 +246,12 @@ async def process_order(session, order):
                 'product_title': (line_item.title or "") + " - " + (variant_name or ""),
                 'quantity': info['quantity'],
                 'tracking_number': info['tracking_number'],
-                'status': info['status']
+                'status': info['status'],
+                'cost': cost
             })
             order_info['status'] = info['status']
+            
+    order_info['total_item_cost'] = total_cost
 
     order_end_time = time.time()
     print(f"Time taken to process order {name} {order.order_number}: {order_end_time - order_start_time:.2f} seconds")
