@@ -215,6 +215,8 @@ async def process_order(session, order):
 
     results = await asyncio.gather(*tasks)
     variant_name = ""
+    inventory_item_id = ""
+    total_cost = 0
     for tracking_info_list, line_item in zip(results, order.line_items):
         if tracking_info_list is None:
             continue
@@ -240,6 +242,8 @@ async def process_order(session, order):
             image_src = "https://static.thenounproject.com/png/1578832-200.png"
 
         for info in tracking_info_list:
+            line_item_cost = cost  # Assume this is per item
+            total_cost += line_item_cost * info['quantity']
             order_info['line_items'].append({
                 'fulfillment_status': line_item.fulfillment_status,
                 'image_src': image_src,
