@@ -412,7 +412,7 @@ def pending_orders():
 
     # Process Shopify orders with the specified statuses
     for shopify_order in order_details:
-        if shopify_order['status'] in ['CONSIGNMENT BOOKED', 'Un-Booked']:
+        if shopify_order['status'] not in ['Returned to Shipper']:
             shopify_items_list = [
                 {
                     'item_image': item['image_src'],
@@ -426,7 +426,7 @@ def pending_orders():
 
             shopify_order_data = {
                 'order_via': 'Shopify',
-                'order_id': shopify_order['name'].replace('#', ''),
+                'order_id': shopify_order['order_id'],
                 'status': shopify_order['status'],
                 'tracking_number': shopify_order['tracking_id'],
                 'date': shopify_order['created_at'],
