@@ -70,41 +70,6 @@ async def fetch_tracking_data(session, tracking_number):
         return {"error": str(e)}
 product_cache = {}
 
-async def fetch_product_with_retry(product_id, retries=3, delay=2):
-    """Fetch product with retry logic in case of rate limits."""
-    for attempt in range(retries):
-        try:
-            if product_id in product_cache:
-                return product_cache[product_id]
-            product = shopify.Product.find(product_id)
-            product_cache[product_id] = product
-            return product
-        except Exception as e:
-            if '429' in str(e):
-                print(f"Rate limit exceeded for product {product_id}. Retrying...")
-                await asyncio.sleep(delay)
-                delay *= 2  # Exponential backoff
-            else:
-                print(f"Error fetching product {product_id}: {e}")
-                break
-    return None
-
-async def fetch_images_with_retry(product_id, image_id, retries=3, delay=2):
-    """Fetch product images with retry logic."""
-    for attempt in range(retries):
-        try:
-            images = shopify.Image.find(image_id=image_id, product_id=product_id)
-            return images
-        except Exception as e:
-            if '429' in str(e):
-                print(f"Rate limit exceeded for images {image_id}. Retrying...")
-                await asyncio.sleep(delay)
-                delay *= 2  # Exponential backoff
-            else:
-                print(f"Error fetching images for product {product_id}: {e}")
-                break
-    return []
-
 
 async def process_line_item(session, line_item, fulfillments):
     if line_item.fulfillment_status is None and line_item.fulfillable_quantity == 0:
@@ -116,9 +81,11 @@ async def process_line_item(session, line_item, fulfillments):
         for fulfillment in fulfillments:
             if fulfillment.status == "cancelled":
                 continue
+
             for item in fulfillment.line_items:
                 if item.id == line_item.id:
                     tracking_number = fulfillment.tracking_number
+
                     data = await fetch_tracking_data(session, tracking_number)
 
                     if data:
@@ -129,7 +96,7 @@ async def process_line_item(session, line_item, fulfillments):
                                 try:
                                     final_status = tracking_details[-1].get('ProcessDescForPortal')
                                 except:
-                                    final_status = 'N/A'
+                                    final_status = 'DELIVERED'
 
                             else:
                                 final_status = "Booked"
@@ -156,6 +123,7 @@ async def process_order(session, order):
     order_start_time = time.time()
 
     input_datetime_str = order.created_at
+
     parsed_datetime = datetime.fromisoformat(input_datetime_str[:-6])
     formatted_datetime = parsed_datetime.strftime("%b %d, %Y")
 
@@ -163,6 +131,9 @@ async def process_order(session, order):
         status = (order.fulfillment_status).title()
     except:
         status = "Un-fulfilled"
+        if order.cancel_reason is not None:
+            status = "CANCELLED"
+
     print(order)
     tags = []
     try:
@@ -228,16 +199,20 @@ async def process_order(session, order):
                     if variant.id == line_item.variant_id:
                         if variant.image_id is not None:
                             images = shopify.Image.find(image_id=variant.image_id, product_id=line_item.product_id)
-                            variant_name = line_item.variant_title
+
                             for image in images:
                                 if image.id == variant.image_id:
                                     image_src = image.src
                         else:
+
                             variant_name = ""
                             image_src = product.image.src
                     inventory_item_id = variant.inventory_item_id
                     inventory_item = shopify.InventoryItem.find(inventory_item_id)
                     cost = int(float(inventory_item.cost))
+
+            variant_name = line_item.variant_title
+
         else:
             image_src = "https://static.thenounproject.com/png/1578832-200.png"
 
@@ -254,7 +229,6 @@ async def process_order(session, order):
                 'cost': cost
             })
             order_info['status'] = info['status']
-            
     order_info['total_item_cost'] = total_cost
 
     order_end_time = time.time()
@@ -287,6 +261,71 @@ async def getShopifyOrders():
             try:
                 if not orders.has_next_page():
                     break
+                
+                orders = orders.next_page()
+
+            except Exception as e:
+                print(f"Error fetching next page: {e}")
+                break
+
+    total_end_time = time.time()
+    print(f"Processed {len(order_details)} orders in {total_end_time - total_start_time:.2f} seconds")
+    return order_details
+
+from datetime import datetime, timedelta
+import pytz
+
+def adjust_to_shopify_timezone(from_date, to_date):
+    # Parse input dates as naive datetime in GMT+5 timezone
+    gmt_plus_5 = pytz.timezone('Asia/Karachi')
+    from_date_gmt_plus_5 = datetime.strptime(from_date, "%Y-%m-%d").replace(tzinfo=gmt_plus_5)
+    to_date_gmt_plus_5 = datetime.strptime(to_date, "%Y-%m-%d").replace(tzinfo=gmt_plus_5)
+
+    # Convert to UTC (Shopify uses UTC internally)
+    from_date_utc = from_date_gmt_plus_5.astimezone(pytz.utc).isoformat()
+    to_date_utc = to_date_gmt_plus_5.astimezone(pytz.utc).isoformat()
+
+    return from_date_utc, to_date_utc
+async def getShopifyOrderswithDates(start_date: str, end_date: str):
+    """
+    Fetch Shopify orders within a specified date range.
+
+    Args:
+        start_date (str): Start date in ISO format (e.g., "2024-09-01T00:00:00").
+        end_date (str): End date in ISO format (e.g., "2024-09-30T23:59:59").
+
+    Returns:
+        list: Processed order details.
+    """
+    order_details = []
+    total_start_time = time.time()
+
+    try:
+        orders = shopify.Order.find(
+            limit=250,
+            order="created_at DESC",
+            created_at_min=start_date,
+            created_at_max=end_date,
+            status='any'
+        )
+    except Exception as e:
+        print(f"Error fetching orders: {e}")
+        return []
+
+    async with aiohttp.ClientSession() as session:
+        while True:
+            tasks = [process_order(session, order) for order in orders]
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+
+            for result in results:
+                if isinstance(result, Exception):
+                    print(f"Error processing an order: {result}")
+                else:
+                    order_details.append(result)
+
+            try:
+                if not orders.has_next_page():
+                    break
                 orders = orders.next_page()
             except Exception as e:
                 print(f"Error fetching next page: {e}")
@@ -296,7 +335,25 @@ async def getShopifyOrders():
     print(f"Processed {len(order_details)} orders in {total_end_time - total_start_time:.2f} seconds")
     return order_details
 
+@app.route('/fetch-orders', methods=['POST'])
+def fetch_orders():
+    data = request.get_json()
+    from_date = data.get('fromDate') + "T00:00:00+05:00"
+    to_date = data.get('toDate') + "T23:59:59+05:00"
 
+    orders = asyncio.run(getShopifyOrderswithDates(from_date, to_date))
+    total_sales = 0.0
+    total_cost = 0.0
+    for order in orders:
+        total_sales += float(order['total_price'])  # Assuming total_price is a string, convert to float
+        total_cost += float(order['total_item_cost'])  # Assuming total_item_cost is a string, convert to float
+    print(total_sales)
+    # Return the orders with totals
+    return jsonify({
+        'orders': orders,
+        'total_sales': total_sales,
+        'total_cost': total_cost
+    })
 
 
 @app.route('/apply_tag', methods=['POST'])
@@ -464,94 +521,13 @@ def pending_orders():
 def undelivered():
     global order_details, pre_loaded
     return render_template("undelivered.html", order_details=order_details)
-from datetime import datetime, timedelta
-import pytz
-
-def adjust_to_shopify_timezone(from_date, to_date):
-    # Parse input dates as naive datetime in GMT+5 timezone
-    gmt_plus_5 = pytz.timezone('Asia/Karachi')
-    from_date_gmt_plus_5 = datetime.strptime(from_date, "%Y-%m-%d").replace(tzinfo=gmt_plus_5)
-    to_date_gmt_plus_5 = datetime.strptime(to_date, "%Y-%m-%d").replace(tzinfo=gmt_plus_5)
-
-    # Convert to UTC (Shopify uses UTC internally)
-    from_date_utc = from_date_gmt_plus_5.astimezone(pytz.utc).isoformat()
-    to_date_utc = to_date_gmt_plus_5.astimezone(pytz.utc).isoformat()
-
-    return from_date_utc, to_date_utc
-async def getShopifyOrderswithDates(start_date: str, end_date: str):
-    """
-    Fetch Shopify orders within a specified date range.
-
-    Args:
-        start_date (str): Start date in ISO format (e.g., "2024-09-01T00:00:00").
-        end_date (str): End date in ISO format (e.g., "2024-09-30T23:59:59").
-
-    Returns:
-        list: Processed order details.
-    """
-    order_details = []
-    total_start_time = time.time()
-
-    try:
-        orders = shopify.Order.find(
-            limit=250,
-            order="created_at DESC",
-            created_at_min=start_date,
-            created_at_max=end_date,
-            status='any'
-        )
-    except Exception as e:
-        print(f"Error fetching orders: {e}")
-        return []
-
-    async with aiohttp.ClientSession() as session:
-        while True:
-            tasks = [process_order(session, order) for order in orders]
-            results = await asyncio.gather(*tasks, return_exceptions=True)
-
-            for result in results:
-                if isinstance(result, Exception):
-                    print(f"Error processing an order: {result}")
-                else:
-                    order_details.append(result)
-
-            try:
-                if not orders.has_next_page():
-                    break
-                orders = orders.next_page()
-            except Exception as e:
-                print(f"Error fetching next page: {e}")
-                break
-
-    total_end_time = time.time()
-    print(f"Processed {len(order_details)} orders in {total_end_time - total_start_time:.2f} seconds")
-    return order_details
 
 @app.route('/report')
 def report():
     global order_details, pre_loaded
     return render_template("report.html", order_details=order_details)
-    
-@app.route('/fetch-orders', methods=['POST'])
-def fetch_orders():
-    data = request.get_json()
-    from_date = data.get('fromDate') + "T00:00:00+05:00"
-    to_date = data.get('toDate') + "T23:59:59+05:00"
 
-    orders = asyncio.run(getShopifyOrderswithDates(from_date, to_date))
-    total_sales = 0.0
-    total_cost = 0.0
-    for order in orders:
-        total_sales += float(order['total_price'])  # Assuming total_price is a string, convert to float
-        total_cost += float(order.get('total_item_cost', 0))  # Assuming total_item_cost is a string, convert to float
-    print(total_sales)
-    # Return the orders with totals
-    return jsonify({
-        'orders': orders,
-        'total_sales': total_sales,
-        'total_cost': total_cost
-    })
-    
+
 shop_url = os.getenv('SHOP_URL')
 api_key = os.getenv('API_KEY')
 password = os.getenv('PASSWORD')
@@ -565,3 +541,4 @@ if __name__ == "__main__":
     api_key = os.getenv('API_KEY')
     password = os.getenv('PASSWORD')
     app.run(port=5001)
+
