@@ -172,10 +172,11 @@
             <tr>
                 <td>{{ order.order_id }}</td>
                 <td>
-                    {{ order.customer_details.name }}<br>
-                    {{ order.customer_details.address }}<br>
-                    {{ order.customer_details.city }}<br>
-                    {{ order.customer_details.phone }}<br>
+                    {{ order.customer_details.name | default('Unknown') }}<br>
+                    {{ order.customer_details.address | default('Unknown') }}<br>
+                    {{ order.customer_details.city | default('Unknown') }}<br>
+                    {{ order.customer_details.phone | default('Unknown') }}<br>
+
                     <a href="tel:{{ order.customer_details.phone }}" class="btn btn-primary btn-sm">Call</a>
                     <div class="btn-group">
                         <button type="button" class="btn btn-success btn-sm dropdown-toggle" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
