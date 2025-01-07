@@ -11,25 +11,25 @@ import pymssql, shopify
 import aiohttp
 import lazop
 import aiohttp
+from tenacity import retry, stop_after_attempt, wait_exponential
 
 app = Flask(__name__)
 app.debug = True
 app.secret_key = os.getenv('APP_SECRET_KEY', 'default_secret_key')  # Use environment variable
 pre_loaded = 0
 order_details = []
+semaphore = asyncio.Semaphore(2)
 
-
-def get_db_connection():
-    server = os.getenv('DB_SERVER')
-    database = os.getenv('DB_DATABASE')
-    username = os.getenv('DB_USERNAME')
-    password = os.getenv('DB_PASSWORD')
-    try:
-        connection = pymssql.connect(server=server, user=username, password=password, database=database)
-        return connection
-    except pymssql.Error as e:
-        print(f"Error connecting to the database: {str(e)}")
-        return None
+@retry(stop=stop_after_attempt(5), wait=wait_exponential(min=1, max=10))
+async def fetch_with_retry(session, url, method="GET", **kwargs):
+    """Fetch data with retry logic."""
+    async with session.request(method, url, **kwargs) as response:
+        if response.status == 429:  # Rate limit exceeded
+            retry_after = int(response.headers.get("Retry-After", 1))
+            print(f"Rate limit hit. Retrying after {retry_after} seconds...")
+            await asyncio.sleep(retry_after)
+        response.raise_for_status()
+        return await response.json()
 
 
 @app.route('/send-email', methods=['POST'])
@@ -68,12 +68,29 @@ def send_email():
 
 
 async def fetch_tracking_data(session, tracking_number):
-
     url = f"https://cod.callcourier.com.pk/api/CallCourier/GetTackingHistory?cn={tracking_number}"
-    async with session.get(url) as response:
-        return await response.json()
+
+    try:
+        async with session.get(url) as response:
+            if response.status == 200:
+                return await response.json()
+            else:
+                print(f"Error: HTTP {response.status} for tracking number {tracking_number}")
+                return {"error": f"HTTP {response.status}"}
+    except aiohttp.ClientError as e:
+        print(f"Request failed: {e}")
+        return {"error": str(e)}
+product_cache = {}
+
+async def limited_request(coroutine):
+    """Ensure requests adhere to rate limits."""
+    async with semaphore:
+        await asyncio.sleep(0.5)  # Enforce delay for Shopify rate limits
+        return await coroutine
+
 
 async def process_line_item(session, line_item, fulfillments):
+    """Process individual line items."""
     if line_item.fulfillment_status is None and line_item.fulfillable_quantity == 0:
         return []
 
@@ -83,140 +100,350 @@ async def process_line_item(session, line_item, fulfillments):
         for fulfillment in fulfillments:
             if fulfillment.status == "cancelled":
                 continue
+
             for item in fulfillment.line_items:
                 if item.id == line_item.id:
                     tracking_number = fulfillment.tracking_number
                     data = await fetch_tracking_data(session, tracking_number)
-
                     if data:
-                        consignment_list = data
-                        if consignment_list:
-                            tracking_details = consignment_list
-                            if tracking_details:
-                                try:
-                                    final_status = tracking_details[-1].get('ProcessDescForPortal')
-                                except:
-                                    final_status = 'N/A'
-
-                            else:
-                                final_status = "Booked"
-                                print("No tracking details available.")
-                        else:
-                            final_status = "Booked"
-                            print("No packets found.")
+                        tracking_details = data[-1].get('ProcessDescForPortal', 'DELIVERED')
                     else:
-                        final_status = "N/A"
-                        print("Error fetching data.")
+                        tracking_details = "N/A"
 
-                    # Track quantity for each tracking number
                     tracking_info.append({
                         'tracking_number': tracking_number,
-                        'status': final_status,
+                        'status': tracking_details,
                         'quantity': item.quantity
                     })
 
     return tracking_info if tracking_info else [
-        {"tracking_number": "N/A", "status": "Un-Booked", "quantity": line_item.quantity}]
+        {"tracking_number": "N/A", "status": "Un-Booked", "quantity": line_item.quantity}
+    ]
+
 
 async def process_order(session, order):
-    order_start_time = time.time()
-
-    input_datetime_str = order.created_at
-    parsed_datetime = datetime.fromisoformat(input_datetime_str[:-6])
-    formatted_datetime = parsed_datetime.strftime("%b %d, %Y")
-
+    """Process each order."""
     try:
-        status = (order.fulfillment_status).title()
-    except:
-        status = "Un-fulfilled"
-    print(order)
-    tags = []
-    try:
-        name = order.billing_address.name
-    except AttributeError:
-        name = " "
-        print("Error retrieving name")
+        order_start_time = time.time()
+        order_info = {
+            'order_id': order.order_number,
+            'created_at': order.created_at,
+            'total_price': order.total_price,
+            'line_items': [],
+            'financial_status': order.financial_status.title(),
+            'fulfillment_status': order.fulfillment_status or "Unfulfilled",
+            'customer_details': {
+                "name": getattr(order.billing_address, "name", " "),
+                "address": getattr(order.billing_address, "address1", " "),
+                "city": getattr(order.billing_address, "city", " "),
+                "phone": getattr(order.billing_address, "phone", " ")
+            },
+            'tags': order.tags.split(", ") if order.tags else []
+        }
 
-    try:
-        address = order.billing_address.address1
-    except AttributeError:
-        address = " "
-        print("Error retrieving address")
+        tasks = [process_line_item(session, line_item, order.fulfillments) for line_item in order.line_items]
+        results = await asyncio.gather(*tasks)
 
-    try:
-        city = order.billing_address.city
-    except AttributeError:
-        city = " "
-        print("Error retrieving city")
+        for tracking_info_list, line_item in zip(results, order.line_items):
+            if tracking_info_list is None:
+                continue
 
-    try:
-        phone = order.billing_address.phone
-    except AttributeError:
-        phone = " "
-        print("Error retrieving phone")
-
-    customer_details = {
-        "name": name,
-        "address": address,
-        "city": city,
-        "phone": phone
-    }
-    order_info = {
-        'order_id': order.order_number,
-        'tracking_id': 'N/A',
-        'created_at': formatted_datetime,
-        'total_price': order.total_price,
-        'line_items': [],
-        'financial_status': (order.financial_status).title(),
-        'fulfillment_status': status,
-        'customer_details' : customer_details,
-        'tags': order.tags.split(", "),
-        'id': order.id
-    }
-    print(order.tags)
-
-    tasks = []
-    for line_item in order.line_items:
-        tasks.append(process_line_item(session, line_item, order.fulfillments))
-
-    results = await asyncio.gather(*tasks)
-    variant_name = ""
-    for tracking_info_list, line_item in zip(results, order.line_items):
-        if tracking_info_list is None:
-            continue
-
-        if line_item.product_id is not None:
-            product = shopify.Product.find(line_item.product_id)
-            if product and product.variants:
-                for variant in product.variants:
-                    if variant.id == line_item.variant_id:
-                        if variant.image_id is not None:
-                            images = shopify.Image.find(image_id=variant.image_id, product_id=line_item.product_id)
-                            variant_name = line_item.variant_title
-                            for image in images:
-                                if image.id == variant.image_id:
-                                    image_src = image.src
-                        else:
-                            variant_name = ""
-                            image_src = product.image.src
-        else:
+            # Initialize placeholders for image and variant name
             image_src = "https://static.thenounproject.com/png/1578832-200.png"
+            variant_name = ""
 
-        for info in tracking_info_list:
-            order_info['line_items'].append({
-                'fulfillment_status': line_item.fulfillment_status,
-                'image_src': image_src,
-                'product_title' : line_item.title + (f" - {variant_name}" if variant_name else ""),
-                'quantity': info['quantity'],
-                'tracking_number': info['tracking_number'],
-                'status': info['status']
-            })
-            order_info['status'] = info['status']
+            # Fetch product details for the line item
+            if line_item.product_id is not None:
+                try:
+                    product = shopify.Product.find(line_item.product_id)
+                    if product and product.variants:
+                        for variant in product.variants:
+                            if variant.id == line_item.variant_id:
+                                # If variant has an image, fetch it
+                                if variant.image_id is not None:
+                                    images = shopify.Image.find(image_id=variant.image_id, product_id=line_item.product_id)
+                                    for image in images:
+                                        if image.id == variant.image_id:
+                                            image_src = image.src
+                                            break
+                                else:
+                                    image_src = product.image.src  # Use product-level image if no variant-specific image
+                                variant_name = line_item.variant_title
+                                print(image_src)
+                                break
+                except Exception as e:
+                    print(f"Error fetching product details for product ID {line_item.product_id}: {e}")
+            print(image_src)
 
-    order_end_time = time.time()
-    print(f"Time taken to process order {name} {order.order_number}: {order_end_time - order_start_time:.2f} seconds")
+            # Append tracking and line item details
+            for info in tracking_info_list:
+                order_info['line_items'].append({
+                    'fulfillment_status': line_item.fulfillment_status,
+                    'image_src': image_src,
+                    'product_title': line_item.title + (f" - {variant_name}" if variant_name else ""),
+                    'quantity': info['quantity'],
+                    'tracking_number': info['tracking_number'],
+                    'status': info['status']
+                })
+                order_info['status'] = info['status']
 
-    return order_info
+        order_end_time = time.time()
+        print(f"Processed order {order.order_number} in {order_end_time - order_start_time:.2f} seconds")
+        return order_info
+
+    except Exception as e:
+        print(f"Error processing order {order.order_number}: {e}")
+        return None
+
+
+
+async def getShopifyOrders():
+    start_date = datetime(2024, 9, 1).isoformat()
+    order_details = []
+    total_start_time = time.time()
+
+    try:
+        orders = shopify.Order.find(limit=5, order="created_at DESC", created_at_min=start_date)
+    except Exception as e:
+        print(f"Error fetching orders: {e}")
+        return []
+
+    async with aiohttp.ClientSession() as session:
+        while True:
+            tasks = [process_order(session, order) for order in orders]
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+
+            for result in results:
+                if isinstance(result, Exception):
+                    print(f"Error processing an order: {result}")
+                else:
+                    order_details.append(result)
+
+            try:
+                if not orders.has_next_page():
+                    break
+                break
+                orders = orders.next_page()
+
+            except Exception as e:
+                print(f"Error fetching next page: {e}")
+                break
+
+    total_end_time = time.time()
+    print(f"Processed {len(order_details)} orders in {total_end_time - total_start_time:.2f} seconds")
+    return order_details
+
+from datetime import datetime, timedelta
+import pytz
+
+def adjust_to_shopify_timezone(from_date, to_date):
+    # Parse input dates (assumed to be in GMT+5 already)
+    from_date = datetime.strptime(from_date, "%Y-%m-%d").replace(hour=0, minute=0, second=0)
+    to_date = datetime.strptime(to_date, "%Y-%m-%d").replace(hour=23, minute=59, second=59)
+
+    # Format the dates with explicit GMT+5 offset
+    from_date_gmt_plus_5 = from_date.strftime('%Y-%m-%dT%H:%M:%S+05:00')
+    to_date_gmt_plus_5 = to_date.strftime('%Y-%m-%dT%H:%M:%S+05:00')
+
+    return from_date_gmt_plus_5, to_date_gmt_plus_5
+
+
+async def getShopifyOrderswithDates(start_date: str, end_date: str):
+    order_details = []
+    total_start_time = time.time()
+
+    try:
+        orders = shopify.Order.find(
+            limit=250,
+            order="created_at DESC",
+            created_at_min=start_date,
+            created_at_max=end_date,
+            status='any'
+        )
+    except Exception as e:
+        print(f"Error fetching orders: {e}")
+        return []
+
+    async with aiohttp.ClientSession() as session:
+        while True:
+            tasks = [process_shopify_order_with_details(session, order) for order in orders]
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+
+            for result in results:
+                if isinstance(result, Exception):
+                    print(f"Error processing an order: {result}")
+                else:
+                    order_details.append(result)
+
+            try:
+                if not orders.has_next_page():
+                    break
+                orders = orders.next_page()
+            except Exception as e:
+                print(f"Error fetching next page: {e}")
+                break
+
+    total_end_time = time.time()
+    print(f"Processed {len(order_details)} orders in {total_end_time - total_start_time:.2f} seconds")
+    return order_details
+
+
+@app.route('/fetch-orders', methods=['POST'])
+def fetch_orders():
+    data = request.get_json()
+
+    # Ensure the fromDate and toDate are passed correctly (format: YYYY-MM-DD)
+    from_date = data.get('fromDate')
+    to_date = data.get('toDate')
+
+    # Adjust the dates to Shopify's timezone (convert to UTC)
+    from_date_utc, to_date_utc = adjust_to_shopify_timezone(from_date, to_date)
+    print(from_date_utc)
+    print(to_date_utc)
+    # Now pass the adjusted UTC dates to fetch orders
+    orders = asyncio.run(getShopifyOrderswithDates(from_date_utc, to_date_utc))
+
+    total_sales = 0.0
+    total_cost = 0.0
+    for order in orders:
+        total_sales += float(order['total_price'])  # Assuming total_price is a string, convert to float
+        total_cost += float(order['total_item_cost'])  # Assuming total_item_cost is a string, convert to float
+
+    # Return the orders with totals
+    return jsonify({
+        'orders': orders,
+        'total_sales': total_sales,
+        'total_cost': total_cost
+    })
+
+async def process_shopify_order_with_details(session, order):
+    try:
+        # Ensure required keys are present in the order
+        if not hasattr(order, 'order_number') or not hasattr(order, 'line_items'):
+            raise ValueError(f"Order {order.id} is missing critical attributes.")
+
+        # Prepare order information
+        order_info = {
+            'order_id': order.order_number,
+            'created_at': order.created_at,
+            'total_price': order.total_price or "0.0",  # Default to 0.0 if missing
+            'line_items': [],
+            'financial_status': order.financial_status.title() if order.financial_status else "Unknown",
+            'fulfillment_status': order.fulfillment_status or "Unfulfilled",
+            'total_item_cost': 0,  # To track the total cost of the items
+            'tracking_info': [],  # For all tracking details
+            'status': "Unfulfilled",  # Default status
+        }
+
+        # Process line items with tracking and cost details
+        tasks = [process_line_item(session, line_item, order.fulfillments) for line_item in order.line_items]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        for line_item, tracking_info_list in zip(order.line_items, results):
+            if isinstance(tracking_info_list, Exception):
+                print(f"Error processing line item {line_item.id}: {tracking_info_list}")
+                continue
+
+            # Initialize placeholders for image, variant details, and cost
+            image_src = "https://static.thenounproject.com/png/1578832-200.png"
+            variant_name = ""
+            line_item_cost = 0.0  # Initialize cost for this line item
+
+            # Fetch product and variant details for the line item
+            if line_item.product_id is not None:
+                try:
+                    product = shopify.Product.find(line_item.product_id)
+                    if product and product.variants:
+                        for variant in product.variants:
+                            if variant.id == line_item.variant_id:
+                                # Fetch variant-specific image
+                                if variant.image_id:
+                                    images = shopify.Image.find(image_id=variant.image_id, product_id=line_item.product_id)
+                                    for image in images:
+                                        if image.id == variant.image_id:
+                                            image_src = image.src
+                                            break
+                                else:
+                                    # Fallback to product-level image
+                                    image_src = product.image.src if product.image else image_src
+                                variant_name = line_item.variant_title
+
+                                # Fetch cost from inventory item
+                                if hasattr(variant, "inventory_item_id"):
+                                    inventory_item = shopify.InventoryItem.find(variant.inventory_item_id)
+                                    if inventory_item and hasattr(inventory_item, "cost"):
+                                        line_item_cost = float(inventory_item.cost) if inventory_item.cost else 0.0
+                                break
+
+                except Exception as e:
+                    print(f"Error fetching product details for product ID {line_item.product_id}: {e}")
+
+            # Append tracking and line item details
+            for info in tracking_info_list:
+                order_info['line_items'].append({
+                    'fulfillment_status': line_item.fulfillment_status,
+                    'image_src': image_src,
+                    'product_title': line_item.title + (f" - {variant_name}" if variant_name else ""),
+                    'quantity': info['quantity'],
+                    'tracking_number': info['tracking_number'],
+                    'status': info['status'],
+                    'cost': line_item_cost,  # Include the cost for the line item
+                })
+
+            # Update the total item cost for the order
+            order_info['total_item_cost'] += line_item_cost * sum(info['quantity'] for info in tracking_info_list)
+
+            # Update order-level status based on tracking details
+            if tracking_info_list:
+                order_info['status'] = tracking_info_list[-1]['status']  # Use the last tracking status
+
+        return order_info
+
+    except Exception as e:
+        print(f"Failed to process order {getattr(order, 'order_number', 'Unknown')}: {e}")
+        return None
+
+async def fetch_line_item_cost_and_tracking(session, line_item, fulfillments):
+    """
+    Fetch the tracking information of a line item.
+
+    Args:
+        session (aiohttp.ClientSession): The HTTP session for API requests.
+        line_item: A Shopify line item object.
+        fulfillments: List of fulfillments related to the order.
+
+    Returns:
+        tuple: (tracking_info_list)
+    """
+    try:
+        # Step 1: Initialize an empty tracking info list
+        tracking_info_list = []
+
+        # Step 2: Fetch tracking information
+        if line_item.fulfillment_status == "fulfilled":
+            for fulfillment in fulfillments:
+                if fulfillment.status == "cancelled":
+                    continue
+
+                for item in fulfillment.line_items:
+                    if item.id == line_item.id:
+                        tracking_number = fulfillment.tracking_number
+                        data = await fetch_tracking_data(session, tracking_number)
+                        tracking_details = (
+                            data[-1].get("ProcessDescForPortal", "DELIVERED") if data else "N/A"
+                        )
+                        tracking_info_list.append({
+                            'tracking_number': tracking_number,
+                            'status': tracking_details,
+                            'quantity': item.quantity
+                        })
+
+        return tracking_info_list
+
+    except Exception as e:
+        print(f"Error fetching tracking for line item {getattr(line_item, 'id', 'Unknown')}: {e}")
+        return []
+
 
 
 
@@ -275,136 +502,14 @@ def apply_tag():
         return jsonify({"success": False, "error": str(e)})
 
 
-async def getShopifyOrders():
-    start_date = datetime(2024, 9, 1).isoformat()
-    global order_details
-    order_details = []
-    total_start_time = time.time()
 
-    # Fetch the first batch of orders
-    orders = shopify.Order.find(limit=250, order="created_at DESC", created_at_min=start_date)
-
-    async with aiohttp.ClientSession() as session:
-        while True:
-            # Process the current batch of orders
-            tasks = [process_order(session, order) for order in orders]
-            order_details.extend(await asyncio.gather(*tasks))
-
-            # Check if there is a next page of orders
-            if not orders.has_next_page():
-                break
-            orders = orders.next_page()
-
-    total_end_time = time.time()
-    print(f"Total time taken to process all orders: {total_end_time - total_start_time:.2f} seconds")
-    print(f"Total orders processed: {len(order_details)}")
-
-    return order_details
-
-
-@app.route("/track")
+@app.route("/")
 def tracking():
     global order_details
     return render_template("track_alk.html", order_details=order_details)
 
 
-def get_daraz_orders(statuses):
-    try:
-        access_token = '50000601237osiZ0F1HkTZVojWcjq6szVDmDPjxiuvoEbCSvB15ff2bc8xtn4m'
-        client = lazop.LazopClient('https://api.daraz.pk/rest', '501554', 'nrP3XFN7ChZL53cXyVED1yj4iGZZtlcD')
 
-        all_orders = []
-
-        for status in statuses:
-            request = lazop.LazopRequest('/orders/get', 'GET')
-            request.add_api_param('sort_direction', 'DESC')
-            request.add_api_param('update_before', '2025-02-10T16:00:00+08:00')
-            request.add_api_param('offset', '0')
-            request.add_api_param('created_before', '2025-02-10T16:00:00+08:00')
-            request.add_api_param('created_after', '2017-02-10T09:00:00+08:00')
-            request.add_api_param('limit', '50')
-            request.add_api_param('update_after', '2017-02-10T09:00:00+08:00')
-            request.add_api_param('sort_by', 'updated_at')
-            request.add_api_param('status', status)
-            request.add_api_param('access_token', access_token)
-
-            response = client.execute(request)
-            darazOrders = response.body.get('data', {}).get('orders', [])
-
-            for order in darazOrders:
-                print(order)
-                order_id = order.get('order_id', 'Unknown')
-
-                item_request = lazop.LazopRequest('/order/items/get', 'GET')
-                item_request.add_api_param('order_id', order_id)
-                item_request.add_api_param('access_token', access_token)
-
-                item_response = client.execute(item_request)
-                try:
-                    items = item_response.body.get('data', [])
-                    if not items:
-                        raise ValueError("No items found in the response.")
-                except (AttributeError, ValueError) as e:
-                    print(f"Error retrieving items: {e}")
-                    items = []
-
-                item_details = []
-                for item in items:
-                    tracking_num = item.get('tracking_code', 'Unknown')
-
-                    tracking_req = lazop.LazopRequest('/logistic/order/trace', 'GET')
-                    tracking_req.add_api_param('order_id', order_id)
-                    tracking_req.add_api_param('access_token', access_token)
-                    tracking_response = client.execute(tracking_req)
-
-                    tracking_data = tracking_response.body.get('result', {})
-                    packages = tracking_data.get('data', [{}])[0].get('package_detail_info_list', [])
-
-                    track_status = "N/A"
-                    for package in packages:
-                        if package.get("tracking_number") == tracking_num:
-                            try:
-                                track_status = package.get('logistic_detail_info_list', [{}])[-1].get('title', "N/A")
-                            except (IndexError, KeyError) as e:
-                                print(f"Error processing tracking data: {e}")
-                                track_status = "N/A"
-                            print("MATCHED")
-                            break
-
-                    item_detail = {
-                        'item_image': item.get('product_main_image', 'N/A'),
-                        'item_title': item.get('name', 'Unknown'),
-                        'quantity': item.get('variation', 'N/A'),
-                        'tracking_number': item.get('tracking_code', 'N/A'),
-                        'status': track_status
-                    }
-                    item_details.append(item_detail)
-
-                filtered_order = {
-                    'order_id': order.get('order_id', 'Unknown'),
-                    'customer': {
-                        'name': f"{order.get('customer_first_name', 'Unknown')} {order.get('customer_last_name', 'Unknown')}",
-                        'address': order.get('address_shipping', {}).get('address', 'N/A'),
-                        'phone': order.get('address_shipping', {}).get('phone', 'N/A')
-                    },
-                    'status': status.replace('_', ' ').title(),
-                    'date': format_date(order.get('created_at', 'N/A')),
-                    'total_price': order.get('price', '0.00'),
-                    'items_list': item_details,
-                }
-                all_orders.append(filtered_order)
-
-        return all_orders
-    except Exception as e:
-        print(f"Error fetching darazOrders: {e}")
-        return []
-
-
-@app.route('/daraz')
-def daraz():
-    statuses = ['shipped', 'pending', 'ready_to_ship']
-    darazOrders = get_daraz_orders(statuses)
-    return render_template('daraz.html', darazOrders=darazOrders)
 
 
 def format_date(date_str):
@@ -425,279 +530,6 @@ def refresh_data():
         return jsonify({'message': 'Failed to refresh data'}), 500
 
 
-def check_database_connection():
-    server = 'tickbags.database.windows.net'
-    database = 'TickBags'
-    username = 'tickbags_ltd'
-    password = 'TB@2024!'
-
-    try:
-        print('Connecting to the database...')
-        connection = pymssql.connect(server=server, user=username, password=password, database=database)
-
-        print('Connected to the database')
-        return connection
-    except pymssql.Error as e:
-        print(f"Error connecting to the database: {str(e)}")
-        time.sleep(5)
-        check_database_connection()
-        return None
-
-
-def fetch_transaction_data():
-    connection = check_database_connection()
-    if connection is None:
-        return []
-    print("CONNECTED TO DATABASE")
-
-    try:
-        with connection.cursor(as_dict=True) as cursor:
-            query = '''SELECT * FROM alkincomeexpensetable ORDER BY "Payment_Date" desc'''
-            cursor.execute(query)
-            transactions = cursor.fetchall()
-            return transactions
-    except pymssql.Error as e:
-        print(f"Error fetching data from the database: {str(e)}")
-        return []
-    finally:
-        connection.close()
-
-
-@app.route('/finance_report')
-def finance_report():
-    transactions = fetch_transaction_data()
-
-    return render_template('finance_report.html', transactions=transactions)
-
-
-def fetch_monthly_financial_data(connection):
-    cursor = connection.cursor()
-
-    try:
-        cursor.execute("SELECT Month, NetProfit FROM alkMONTHLYSUMMARY ORDER BY Month ASC")
-        financial_data = cursor.fetchall()
-
-        formatted_data = {
-            'months': [row[0] for row in financial_data],
-            'net_amounts': [row[1] for row in financial_data]
-        }
-
-        return formatted_data
-
-    except Exception as e:
-        print(f"Error fetching monthly financial data: {str(e)}")
-        return {'months': [], 'net_amounts': []}
-
-    finally:
-        cursor.close()
-
-
-def fetch_account_summary(connection):
-    cursor = connection.cursor()
-
-    try:
-        # Fetch Cash on Hand (assuming it's stored in the 'accounts' table)
-        cursor.execute(
-            "SELECT FORMAT(accounts_balance, 'N0') as FormattedAmount   FROM alkaccounts WHERE accounts_name='Bank'")
-        cash_on_hand = cursor.fetchone()[0]
-
-        # Fetch Earnings (Monthly)
-        cursor.execute("""
-            SELECT FORMAT(Income, 'N0') as FormattedAmount
-            FROM alkMONTHLYSUMMARY
-            WHERE [Month] = FORMAT(GETDATE(), 'yyyy-MM')
-        """)
-        earnings_monthly = cursor.fetchone()[0] or 0
-
-        # Fetch Expenses (Monthly)
-        cursor.execute("""
-            SELECT FORMAT(Expense, 'N0') as FormattedAmount
-            FROM alkMONTHLYSUMMARY
-            WHERE [Month] = FORMAT(GETDATE(), 'yyyy-MM')
-        """)
-        expenses_monthly = cursor.fetchone()[0] or 0
-
-        # Calculate Net Profit (Including Withdrawal)
-        cursor.execute("""
-            SELECT FORMAT(NetProfit, 'N0') AS FormattedAmount
-            FROM alkMONTHLYSUMMARY
-            WHERE [Month] = FORMAT(GETDATE(), 'yyyy-MM')
-        """)
-        net_profit = cursor.fetchone()[0] or 0
-
-        return {
-            'cash_on_hand': cash_on_hand,
-            'earnings_monthly': earnings_monthly,
-            'expenses_monthly': expenses_monthly,
-            'net_profit': net_profit
-        }
-
-    except Exception as e:
-        print(f"Error fetching account summary: {str(e)}")
-        return {}
-
-    finally:
-        cursor.close()
-
-
-def fetch_accounts_data(connection):
-    cursor = connection.cursor()
-
-    try:
-        cursor.execute(
-            'SELECT accounts_name, accounts_balance FROM alkaccounts order by accounts_balance desc')  # Adjust the query accordingly
-        accounts_data = cursor.fetchall()
-
-        formatted_accounts = []
-
-        for row in accounts_data:
-            formatted_account = {
-                'person_name': row[0],
-                'balance': int(row[1]),
-
-            }
-
-            formatted_accounts.append(formatted_account)
-
-        return formatted_accounts
-
-    except Exception as e:
-        print(f"Error fetching accounts data: {str(e)}")
-        return []
-
-    finally:
-        cursor.close()
-
-
-def fetch_income_list(connection):
-    cursor = connection.cursor()
-
-    try:
-        # Execute the SQL query
-        query = '''
-
-SELECT TOP 5
-    Income_Expense_Name,
-    SUM(CAST(Amount AS FLOAT)) AS Amount
-FROM alkincomeexpensetable
-WHERE Type = 'Income'
-    AND FORMAT(CONVERT(datetime, Payment_Date, 120), 'yyyy-MM') = FORMAT(GETDATE(), 'yyyy-MM')
-GROUP BY Income_Expense_Name
-ORDER BY Amount DESC
-
-
-        '''
-        cursor.execute(query)
-        summary_data = cursor.fetchall()
-
-        formatted_data = {
-            'income': [row[0] for row in summary_data],
-            'net_amounts': [row[1] for row in summary_data]
-        }
-
-        return formatted_data
-
-
-    except Exception as e:
-        print(f"Error fetching income and expense summary: {str(e)}")
-        return [], []
-
-    finally:
-        cursor.close()
-
-
-def fetch_expenses(connection):
-    cursor = connection.cursor()
-    try:
-        cursor.execute("""
-                   SELECT TOP 5
-    Income_Expense_Name,
-    SUM(CAST(Amount AS FLOAT)) AS Amount
-FROM alkincomeexpensetable
-WHERE Type = 'Expense'
-    AND FORMAT(CONVERT(datetime, Payment_Date, 120), 'yyyy-MM') = FORMAT(GETDATE(), 'yyyy-MM')
-GROUP BY Income_Expense_Name
-ORDER BY Amount DESC;
-
-                """, )
-
-        summary_data = cursor.fetchall()
-        formatted_data = {
-            'expense': [row[0] for row in summary_data],
-            'net_amounts': [row[1] for row in summary_data]
-        }
-
-        return formatted_data
-
-    except Exception as e:
-        print(f"Error fetching incomes data: {str(e)}")
-        return []
-
-    finally:
-        cursor.close()
-
-
-@app.route('/')
-def accounts():
-    connection = check_database_connection()
-
-    try:
-        if not connection:
-            connection = check_database_connection()
-
-        if connection:
-            financial_data = fetch_monthly_financial_data(connection)
-            accounts = fetch_accounts_data(connection)
-            account_summary = fetch_account_summary(connection)
-            income_data = fetch_income_list(connection)
-            expense_data = fetch_expenses(connection)
-
-            # Debugging print statements
-            print("Financial Data:", financial_data)
-            print("Accounts:", accounts)
-            print("Account Summary:", account_summary)
-            print("Income Data:", income_data)
-            print("Expense Data:", expense_data)
-
-            colors = ['#4e73df', '#1cc88a', '#36b9cc', '#f6c23e', '#e74a3b', '#858796']
-
-            # Handle empty income or expense data gracefully
-            income_list = income_data.get('income', [])
-            expense_list = expense_data.get('expense', [])
-
-            # Ensure the colors don't exceed the income/expense list lengths
-            labeled_colors = list(zip(income_list, colors[:len(income_list)])) if income_list else []
-            labeled_expenses_colors = list(zip(expense_list, colors[:len(expense_list)])) if expense_list else []
-
-            print("Labeled Colors:", labeled_colors)
-            print("Labeled Expenses Colors:", labeled_expenses_colors)
-
-            return render_template('accounts.html',
-                                   labeled_colors=labeled_colors,
-                                   colors=colors,
-                                   accounts=accounts,
-                                   account_summary=account_summary,
-                                   financial_data=financial_data,
-                                   income_data=income_data,
-                                   expense_data=expense_data,
-                                   labeled_expenses_colors=labeled_expenses_colors)
-        else:
-            return render_template('error.html', message="Could not connect to the database. Please try again later.")
-
-    except Exception as e:
-        print(f"Error in account_balances route: {str(e)}")
-        return render_template('error.html', message="An unexpected error occurred. Please try again later.")
-
-    finally:
-        if connection:
-            connection.close()
-
-
-@app.route('/addTransaction')
-def addTransaction():
-    return render_template('addTransaction.html')
-
-
 def run_async(func, *args, **kwargs):
     return asyncio.run(func(*args, **kwargs))
 
@@ -715,464 +547,98 @@ def displayTracking(tracking_num):
     return render_template('trackingdata_alk.html', data=data)
 
 
-@app.route('/accounts/<account_name>')
-def accountData(account_name):
-    print(f"Account Name: {account_name}")  # Debug line
-
-    connection = check_database_connection()
-    if connection is None:
-        return "Database connection error", 500  # Return an error message or page if connection fails
-
-    print("CONNECTED TO DATABASE")
-
-    try:
-        with connection.cursor(as_dict=True) as cursor:
-            query = "SELECT * FROM alkincomeexpensetable WHERE Income_Expense_Name LIKE %s ORDER BY Payment_Date DESC"
-            cursor.execute(query, ('%' + account_name + '%',))
-            transactions = cursor.fetchall()
-    except pymssql.Error as e:
-        print(f"Error fetching data from the database: {str(e)}")
-        transactions = []  # Ensure transactions is defined
-    finally:
-        connection.close()
-
-    # Simple template rendering to verify if template works without data
-    return render_template('finance_report.html', transactions=transactions)
-
-
-@app.route('/expense_data')
-def expense_data():
-    connection = check_database_connection()
-
-    try:
-        if connection:
-            cursor = connection.cursor()
-            cursor.execute("""
-                SELECT e.expense_id, e.expense_title, s.subtype_title
-                FROM alkexpensetypes e
-                LEFT JOIN alkexpensesubtypes s ON e.expense_id = s.expense_id
-            """)
-            rows = cursor.fetchall()
-
-            expense_data = {}
-            for expense_id, expense_title, subtype_title in rows:
-                if expense_id not in expense_data:
-                    expense_data[expense_id] = {
-                        "expense_title": expense_title,
-                        "subtypes": []
-                    }
-                if subtype_title:
-                    expense_data[expense_id]["subtypes"].append(subtype_title)
-
-            # Convert the dictionary to the format needed
-            response_data = {
-                'types': [{'expense_id': k, 'expense_title': v['expense_title']} for k, v in expense_data.items()],
-                'subtypes': {str(k): v['subtypes'] for k, v in expense_data.items()}
-            }
-
-            return jsonify(response_data)
-        else:
-            return "Error: No database connection"
-
-    except Exception as e:
-        print(f"Error in expense_data route: {str(e)}")
-        return "Error in expense_data route"
-
-    finally:
-        if connection:
-            connection.close()
-
-
-@app.route('/income_data')
-def income_data():
-    connection = check_database_connection()
-
-    try:
-        if connection:
-            cursor = connection.cursor()
-            cursor.execute("""
-                SELECT e.income_id, e.income_title, s.subtype_title
-                FROM alkincometypes e
-                LEFT JOIN alkincomesubstypes s ON e.income_id = s.income_id
-            """)
-            rows = cursor.fetchall()
-
-            income_types = {}
-            income_subtypes = []
-
-            for income_id, income_title, subtype_title in rows:
-                if income_title not in income_types:
-                    income_types[income_title] = income_id
-                if subtype_title:
-                    income_subtypes.append({
-                        'subtype_title': subtype_title,
-                        'income_id': income_id
-                    })
-
-            # Convert the dictionary to the format needed
-            response_data = {
-                'types': [{'income_id': v, 'income_title': k} for k, v in income_types.items()],
-                'subtypes': income_subtypes
-            }
-
-            return jsonify(response_data)
-        else:
-            return "Error: No database connection"
-
-    except Exception as e:
-        print(f"Error in income_data route: {str(e)}")
-        return "Error in income_data route"
-
-    finally:
-        if connection:
-            connection.close()
-
-
-@app.route('/add_income', methods=['POST'])
-def add_income():
-    connection = check_database_connection()
-
-    if connection:
-        try:
-            cursor = connection.cursor()
-
-            amount = request.form['amount']
-            income_title = request.form['income_type']
-            payment_to = request.form['income_subtype']
-            description = request.form.get('description', '')
-            submission_datetime = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-
-            income_expense_name = f"{income_title} - {payment_to}"
-
-            cursor.execute("""
-                INSERT INTO alkincomeexpensetable (Income_Expense_Name, Description, Amount, Type, [Payment_Date])
-                VALUES (%s, %s, %s, %s, %s)
-            """, (income_expense_name, description, amount, 'Income', submission_datetime))
-
-            if income_title == 'Investments':
-                cursor.execute("""
-                    UPDATE alkaccounts
-                    SET accounts_balance = accounts_balance - %s
-                    WHERE accounts_name = %s
-                """, (amount, payment_to))
-
-            if payment_to == 'Mamu Stock Return':
-                cursor.execute("""
-                                    UPDATE alkaccounts
-                                    SET accounts_balance = accounts_balance + %s
-                                    WHERE accounts_name = 'Mamu'
-                                """, (amount))
-            else:
-
-                cursor.execute("""
-                                UPDATE alkaccounts
-                                SET accounts_balance = accounts_balance + %s
-                                WHERE accounts_name = 'Bank'
-                            """, (amount,))
-
-            # Commit the transaction
-            connection.commit()
-
-            return jsonify({'status': 'success', 'message': 'Income successfully added!'})
-
-        except Exception as e:
-            connection.rollback()
-            print(f"Error in add_income route: {str(e)}")
-            return jsonify({'status': 'error', 'message': 'Error in adding income'})
-
-        finally:
-            connection.close()
-    else:
-        return jsonify({'status': 'error', 'message': 'Error: No database connection'})
-
-
-from flask import request, jsonify
-from datetime import datetime
-
-
-@app.route('/add_expense', methods=['POST'])
-def add_expense():
-    connection = check_database_connection()
-
-    if connection:
-        try:
-            cursor = connection.cursor()
-
-            amount = float(request.form['amount'])  # Convert to float for numeric operations
-            expense_title = request.form['expense_type']
-            payment_to = request.form['expense_subtype']
-            description = request.form.get('description', '')
-            submission_datetime = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-
-            income_expense_name = f"{expense_title} - {payment_to}"
-
-            # Insert into alkincomeexpensetable
-            cursor.execute("""
-                INSERT INTO alkincomeexpensetable (Income_Expense_Name, Description, Amount, Type, [Payment_Date])
-                VALUES (%s, %s, %s, %s, %s)
-            """, (income_expense_name, description, amount, 'Expense', submission_datetime))
-
-            # UPDATE alkaccounts if expense_title is 'Profit Withdrawal'
-            if expense_title == 'Profit Withdrawal' or expense_title == 'Employee Salary' or expense_title == 'Employee Loan':
-                cursor.execute("""
-                    UPDATE alkaccounts
-                    SET accounts_balance = accounts_balance + %s
-                    WHERE accounts_name = %s
-                """, (amount, payment_to))
-
-            if payment_to == 'Mamu Payment':
-                cursor.execute("""
-                                UPDATE alkaccounts
-                                SET accounts_balance = accounts_balance + %s
-                                WHERE accounts_name = 'Mamu'
-                            """, (amount))
-
-            if payment_to == 'Mamu Stock Purchase':
-                cursor.execute("""
-                                UPDATE alkaccounts
-                                SET accounts_balance = accounts_balance - %s
-                                WHERE accounts_name = 'Mamu'
-                            """, (amount))
-            else:
-
-                cursor.execute("""
-                    UPDATE alkaccounts
-                    SET accounts_balance = accounts_balance - %s
-                    WHERE accounts_name = 'Bank'
-                """, (amount))
-
-            # Commit the transaction
-            connection.commit()
-
-            return jsonify({'status': 'success', 'message': 'Expense successfully added!'})
-
-        except Exception as e:
-            connection.rollback()
-            print(f"Error in add_expense route: {str(e)}")
-            return jsonify({'status': 'error', 'message': 'Error in adding expense'})
-
-        finally:
-            connection.close()
-    else:
-        return jsonify({'status': 'error', 'message': 'Error: No database connection'})
-
-
-
-
-
-@app.route('/get_payables')
-def get_payables():
-    connection = check_database_connection()
-
-    if connection:
-        try:
-            cursor = connection.cursor()
-
-            # Fetching data FROM alkpayables table
-            cursor.execute("""SELECT vendor, amount, pendingsince FROM alkpayables""")
-            rows = cursor.fetchall()  # Correctly fetch the rows from the cursor
-
-            payables_list = []
-            total_payables = 0  # Initialize total payables
-
-            for payable in rows:
-                vendor, amount, pending_since = payable
-                pending_days = (datetime.now().date() - pending_since).days
-
-                # Calculate total payables
-                total_payables += amount
-
-                # Prepare payables data to return
-                payables_list.append({
-                    'vendor': vendor,
-                    'amount': f"Rs {amount}",
-                    'pending_since': pending_since.strftime('%d %b %Y'),
-                    'pending_days': pending_days
-                })
-            print(total_payables)
-
-            # Return both the payables list and the total payables
-            return jsonify({
-                'payables': payables_list,
-                'total_payables': f"Rs {total_payables}"
-            })
-
-        except Exception as e:
-            connection.rollback()
-            print(f"Error in get_payables route: {str(e)}")
-            return jsonify({'status': 'error', 'message': 'Error in fetching payables'})
-
-        finally:
-            connection.close()
-    else:
-        return jsonify({'status': 'error', 'message': 'Error: No database connection'})
-
-
-@app.route('/mark_paid', methods=['POST'])
-def mark_paid():
-    vendor = request.args.get('vendor')
-
-    if not vendor:
-        return jsonify({'status': 'error', 'message': 'Vendor parameter is missing'})
-    print(vendor)
-    connection = check_database_connection()
-    if connection:
-        try:
-            cursor = connection.cursor()
-
-            # Use named parameters for SQL Server
-            cursor.execute("DELETE FROM alkpayables WHERE vendor = %s", (vendor))
-
-            connection.commit()
-            return jsonify({'status': 'success', 'message': 'Payable marked as paid'})
-
-        except Exception as e:
-            connection.rollback()
-            print(f"Error in mark_paid route: {str(e)}")
-            return jsonify({'status': 'error', 'message': 'Error in marking payable as paid'})
-
-        finally:
-            connection.close()
-    else:
-        return jsonify({'status': 'error', 'message': 'Error: No database connection'})
-
-
-@app.route('/update_amount', methods=['POST'])
-def update_amount():
-    try:
-        data = request.get_json()
-        vendor = data.get('vendor')
-        new_amount = data.get('amount')
-        print(f"{vendor} : {new_amount}")
-
-        if not vendor or not new_amount:
-            return jsonify({'status': 'error', 'message': 'Vendor or amount is missing'})
-
-        connection = check_database_connection()
-        if connection:
-            try:
-                cursor = connection.cursor()
-
-                # Use parameterized queries to prevent SQL injection
-                cursor.execute("UPDATE alkpayables SET amount = %s WHERE vendor = %s", (new_amount, vendor))
-
-                connection.commit()
-                return jsonify({'status': 'success', 'message': 'Amount updated successfully'})
-
-            except Exception as e:
-                connection.rollback()
-                print(f"Error in update_amount route: {str(e)}")
-                return jsonify({'status': 'error', 'message': 'Error updating amount'})
-
-            finally:
-                connection.close()
-        else:
-            return jsonify({'status': 'error', 'message': 'Error: No database connection'})
-
-    except Exception as e:
-        return jsonify({'status': 'error', 'message': f'Error: {str(e)}'})
-
-
-@app.route('/add_payable', methods=['POST'])
-def add_payable():
-    try:
-        data = request.get_json()
-        vendor = data.get('vendor')
-        amount = data.get('amount')
-        pending_since = data.get('pending_since')
-
-        if not vendor or not amount or not pending_since:
-            return jsonify({'status': 'error', 'message': 'All fields are required'})
-
-        connection = check_database_connection()
-        if connection:
-            try:
-                cursor = connection.cursor()
-
-                # Insert new payable into the database
-                cursor.execute("""
-                    INSERT into alkpayables (vendor, amount, pendingsince)
-                    VALUES (%s, %s, %s)
-                """, (vendor, amount, pending_since))
-
-                connection.commit()
-                return jsonify({'status': 'success', 'message': 'Payable added successfully'})
-
-            except Exception as e:
-                connection.rollback()
-                print(f"Error in add_payable route: {str(e)}")
-                return jsonify({'status': 'error', 'message': 'Error adding payable'})
-
-            finally:
-                connection.close()
-        else:
-            return jsonify({'status': 'error', 'message': 'Error: No database connection'})
-
-    except Exception as e:
-        return jsonify({'status': 'error', 'message': f'Error: {str(e)}'})
 
 @app.route('/pending')
-def pending_orders():
-    all_orders = []
-    pending_items_dict = {}  # Dictionary to track quantities of each unique item
+async def process_order(session, order):
+    """Process each order with optimized image fetching."""
+    try:
+        order_start_time = time.time()
+        order_info = {
+            'order_id': order.order_number,
+            'created_at': order.created_at,
+            'total_price': order.total_price,
+            'line_items': [],
+            'financial_status': order.financial_status.title(),
+            'fulfillment_status': order.fulfillment_status or "Unfulfilled",
+            'customer_details': {
+                "name": getattr(order.billing_address, "name", " "),
+                "address": getattr(order.billing_address, "address1", " "),
+                "city": getattr(order.billing_address, "city", " "),
+                "phone": getattr(order.billing_address, "phone", " ")
+            },
+            'tags': order.tags.split(", ") if order.tags else []
+        }
 
-    global order_details
+        tasks = [process_line_item(session, line_item, order.fulfillments) for line_item in order.line_items]
+        results = await asyncio.gather(*tasks)
+
+        for tracking_info_list, line_item in zip(results, order.line_items):
+            if tracking_info_list is None:
+                continue
+
+            # Use default image and variant name initially
+            image_src = "https://static.thenounproject.com/png/1578832-200.png"
+            variant_name = line_item.variant_title or ""
+
+            # Check if image fetching is necessary
+            if line_item.product_id is not None:
+                try:
+                    # Fetch product and check for cached data or default
+                    product = shopify.Product.find(line_item.product_id)
+                    if product and product.variants:
+                        for variant in product.variants:
+                            if variant.id == line_item.variant_id:
+                                if variant.image_id is not None:
+                                    images = shopify.Image.find(image_id=variant.image_id,
+                                                                product_id=line_item.product_id)
+                                    variant_name = line_item.variant_title
+                                    for image in images:
+                                        if image.id == variant.image_id:
+                                            image_src = image.src
+                                else:
+                                    variant_name = ""
+                                    image_src = product.image.src
+                                    break
+                    else:
+                        image_src = "https://static.thenounproject.com/png/1578832-200.png"
+                except Exception as e:
+                    print(f"Error fetching product details for product ID {line_item.product_id}: {e}")
+
+            # Append tracking and line item details
+            for info in tracking_info_list:
+                order_info['line_items'].append({
+                    'fulfillment_status': line_item.fulfillment_status,
+                    'image_src': image_src,
+                    'product_title': line_item.title + (f" - {variant_name}" if variant_name else ""),
+                    'quantity': info['quantity'],
+                    'tracking_number': info['tracking_number'],
+                    'status': info['status']
+                })
+                order_info['status'] = info['status']
+
+        order_end_time = time.time()
+        print(f"Processed order {order.order_number} in {order_end_time - order_start_time:.2f} seconds")
+        return order_info
+
+    except Exception as e:
+        print(f"Error processing order {order.order_number}: {e}")
+        return None
 
 
-    # Process Shopify orders with the specified statuses
-    for shopify_order in order_details:
-        if shopify_order['status'] in ['CONSIGNMENT BOOKED', 'Un-Booked']:
-            shopify_items_list = [
-                {
-                    'item_image': item['image_src'],
-                    'item_title': item['product_title'],
-                    'quantity': item['quantity'],
-                    'tracking_number': item['tracking_number'],
-                    'status': item['status']
-                }
-                for item in shopify_order['line_items']
-            ]
-
-            shopify_order_data = {
-                'order_via': 'Shopify',
-                'order_id': shopify_order['order_id'],
-                'status': shopify_order['status'],
-                'tracking_number': shopify_order['tracking_id'],
-                'date': shopify_order['created_at'],
-                'items_list': shopify_items_list
-            }
-            all_orders.append(shopify_order_data)
-
-            # Count quantities for each item in the Shopify order
-            for item in shopify_items_list:
-                product_title = item['item_title']
-                quantity = item['quantity']
-                item_image = item['item_image']
-
-                if product_title in pending_items_dict:
-                    pending_items_dict[product_title]['quantity'] += quantity
-                else:
-                    pending_items_dict[product_title] = {
-                        'item_image': item_image,
-                        'item_title': product_title,
-                        'quantity': quantity
-                    }
-
-    pending_items = list(pending_items_dict.values())
-    pending_items_sorted = sorted(
-        pending_items,
-        key=lambda x: x.get('item_title', '').lower() if x.get('item_title') else '',
-        reverse=True
-    )
-
-    half = len(pending_items_sorted) // 2
-
-    return render_template('pending.html', all_orders=all_orders, pending_items=pending_items_sorted, half=half)
 
 @app.route('/undelivered')
 def undelivered():
     global order_details, pre_loaded
     return render_template("undelivered.html", order_details=order_details)
+
+@app.route('/report')
+def report():
+    global order_details, pre_loaded
+    # Ensure order_details is a list of dictionaries (or the desired structure)
+    if not isinstance(order_details, list):
+        order_details = []
+    return render_template("report.html", order_details=order_details)
+
 
 
 shop_url = os.getenv('SHOP_URL')
