@@ -331,7 +331,7 @@ async def process_shopify_order_with_details(session, order):
 
         # Prepare order information
         order_info = {
-            'order_id': order.name,
+            'order_id': order.order_number,
             'created_at': order.created_at,
             'total_price': order.total_price or "0.0",  # Default to 0.0 if missing
             'line_items': [],
@@ -453,7 +453,6 @@ async def fetch_line_item_cost_and_tracking(session, line_item, fulfillments):
         print(f"Error fetching tracking for line item {getattr(line_item, 'id', 'Unknown')}: {e}")
         return []
 
-
 @app.route('/apply_tag', methods=['POST'])
 def apply_tag():
     data = request.json
@@ -466,7 +465,7 @@ def apply_tag():
 
     try:
         # Fetch the order
-        order = shopify.Order.find(order_id)
+        order = shopify.Order.find(name=order_id)
 
         # If the tag is "Returned", cancel the order
         if tag.strip().lower() == "returned":
@@ -556,7 +555,7 @@ async def process_order(session, order):
     try:
         order_start_time = time.time()
         order_info = {
-            'order_id': order.order_number,
+            'order_id': order.name,
             'created_at': order.created_at,
             'total_price': order.total_price,
             'line_items': [],
