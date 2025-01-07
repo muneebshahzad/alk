@@ -125,13 +125,23 @@ async def process_line_item(session, line_item, fulfillments):
     ]
 
 
+
 async def process_order(session, order):
-    """Process each order."""
+    """Process each order with optimized image fetching."""
     try:
         order_start_time = time.time()
+        created_at_str = order.created_at  # Assuming it's in the format '2025-01-07T23:42:49+05:00'
+
+        # Parse the string into a datetime object
+        created_at_obj = datetime.fromisoformat(created_at_str)
+
+        # Format the datetime object to 'YYYY-MM-DD'
+        formatted_date = created_at_obj.strftime('%Y-%m-%d')
+
         order_info = {
-            'order_id': order.order_number,
-            'created_at': order.created_at,
+            'order_num': order.name.replace("#",""),
+            'order_id': order.id,
+            'created_at': formatted_date,
             'total_price': order.total_price,
             'line_items': [],
             'financial_status': order.financial_status.title(),
@@ -152,33 +162,33 @@ async def process_order(session, order):
             if tracking_info_list is None:
                 continue
 
-            # Initialize placeholders for image and variant name
+            # Use default image and variant name initially
             image_src = "https://static.thenounproject.com/png/1578832-200.png"
-            variant_name = ""
+            variant_name = line_item.variant_title or ""
 
-            # Fetch product details for the line item
+            # Check if image fetching is necessary
             if line_item.product_id is not None:
                 try:
+                    # Fetch product and check for cached data or default
                     product = shopify.Product.find(line_item.product_id)
                     if product and product.variants:
                         for variant in product.variants:
                             if variant.id == line_item.variant_id:
-                                # If variant has an image, fetch it
                                 if variant.image_id is not None:
                                     images = shopify.Image.find(image_id=variant.image_id,
                                                                 product_id=line_item.product_id)
+                                    variant_name = line_item.variant_title
                                     for image in images:
                                         if image.id == variant.image_id:
                                             image_src = image.src
-                                            break
                                 else:
-                                    image_src = product.image.src  # Use product-level image if no variant-specific image
-                                variant_name = line_item.variant_title
-                                print(image_src)
-                                break
+                                    variant_name = ""
+                                    image_src = product.image.src
+                                    break
+                    else:
+                        image_src = "https://static.thenounproject.com/png/1578832-200.png"
                 except Exception as e:
                     print(f"Error fetching product details for product ID {line_item.product_id}: {e}")
-            print(image_src)
 
             # Append tracking and line item details
             for info in tracking_info_list:
@@ -199,7 +209,63 @@ async def process_order(session, order):
     except Exception as e:
         print(f"Error processing order {order.order_number}: {e}")
         return None
+@app.route('/pending')
+def pending_orders():
+    all_orders = []
+    pending_items_dict = {}  # Dictionary to track quantities of each unique item
 
+    global order_details
+
+
+    # Process Shopify orders with the specified statuses
+    for shopify_order in order_details:
+        if shopify_order['status'] in ['CONSIGNMENT BOOKED', 'Un-Booked']:
+            shopify_items_list = [
+                {
+                    'item_image': item['image_src'],
+                    'item_title': item['product_title'],
+                    'quantity': item['quantity'],
+                    'tracking_number': item['tracking_number'],
+                    'status': item['status']
+                }
+                for item in shopify_order['line_items']
+            ]
+
+            shopify_order_data = {
+                'order_via': 'Shopify',
+                'order_id': shopify_order['order_id'],
+                'status': shopify_order['status'],
+                'tracking_number': shopify_order.get('tracking_number', 'N/A'),
+                'date': shopify_order['created_at'],
+                'items_list': shopify_items_list
+            }
+            all_orders.append(shopify_order_data)
+
+            # Count quantities for each item in the Shopify order
+            for item in shopify_items_list:
+                product_title = item['item_title']
+                quantity = item['quantity']
+                item_image = item['item_image']
+
+                if product_title in pending_items_dict:
+                    pending_items_dict[product_title]['quantity'] += quantity
+                else:
+                    pending_items_dict[product_title] = {
+                        'item_image': item_image,
+                        'item_title': product_title,
+                        'quantity': quantity
+                    }
+
+    pending_items = list(pending_items_dict.values())
+    pending_items_sorted = sorted(
+        pending_items,
+        key=lambda x: x.get('item_title', '').lower() if x.get('item_title') else '',
+        reverse=True
+    )
+
+    half = len(pending_items_sorted) // 2
+
+    return render_template('pending.html', all_orders=all_orders, pending_items=pending_items_sorted, half=half)
 
 async def getShopifyOrders():
     start_date = datetime(2024, 9, 1).isoformat()
@@ -453,51 +519,48 @@ async def fetch_line_item_cost_and_tracking(session, line_item, fulfillments):
         print(f"Error fetching tracking for line item {getattr(line_item, 'id', 'Unknown')}: {e}")
         return []
 
+
 @app.route('/apply_tag', methods=['POST'])
 def apply_tag():
     data = request.json
     order_id = data.get('order_id')
+    print(order_id)
     tag = data.get('tag')
 
     # Get today's date in YYYY-MM-DD format
     today_date = datetime.now().strftime('%Y-%m-%d')
     tag_with_date = f"{tag.strip()} ({today_date})"
-
     try:
         # Fetch the order
-        order = shopify.Order.find(name=order_id)
+        order = shopify.Order.find(order_id)
+
+        # Ensure it's a single order
+        if not hasattr(order, 'tags'):
+            raise ValueError("Could not fetch a valid order. Ensure the order ID is correct.")
 
         # If the tag is "Returned", cancel the order
         if tag.strip().lower() == "returned":
-            # Attempt to cancel the order
             if order.cancel():
                 print("Order Cancelled")
             else:
                 print("Order Cancellation Failed")
         if tag.strip().lower() == "delivered":
             if order.close():
-                print("Order Cloed")
+                print("Order Closed")
             else:
                 print("Order Closing Failed")
 
         # Process existing tags
-        if order.tags:
-            tags = [t.strip() for t in order.tags.split(", ")]  # Remove excess spaces
-        else:
-            tags = []
+        tags = [t.strip() for t in order.tags.split(", ")] if order.tags else []
 
         if "Leopards Courier" in tags:
-            print("LEOPARDS")
             tags.remove("Leopards Courier")
 
-        # Add new tag if it doesn't already exist
         if tag_with_date not in tags:
             tags.append(tag_with_date)
 
-        # Update the order with the new tags
+        # Update and save the order
         order.tags = ", ".join(tags)
-
-        # Save the order
         if order.save():
             return jsonify({"success": True, "message": "Tag applied successfully."})
         else:
@@ -549,81 +612,6 @@ def displayTracking(tracking_num):
     return render_template('trackingdata_alk.html', data=data)
 
 
-@app.route('/pending')
-async def process_order(session, order):
-    """Process each order with optimized image fetching."""
-    try:
-        order_start_time = time.time()
-        order_info = {
-            'order_id': order.name,
-            'created_at': order.created_at,
-            'total_price': order.total_price,
-            'line_items': [],
-            'financial_status': order.financial_status.title(),
-            'fulfillment_status': order.fulfillment_status or "Unfulfilled",
-            'customer_details': {
-                "name": getattr(order.billing_address, "name", " "),
-                "address": getattr(order.billing_address, "address1", " "),
-                "city": getattr(order.billing_address, "city", " "),
-                "phone": getattr(order.billing_address, "phone", " ")
-            },
-            'tags': order.tags.split(", ") if order.tags else []
-        }
-
-        tasks = [process_line_item(session, line_item, order.fulfillments) for line_item in order.line_items]
-        results = await asyncio.gather(*tasks)
-
-        for tracking_info_list, line_item in zip(results, order.line_items):
-            if tracking_info_list is None:
-                continue
-
-            # Use default image and variant name initially
-            image_src = "https://static.thenounproject.com/png/1578832-200.png"
-            variant_name = line_item.variant_title or ""
-
-            # Check if image fetching is necessary
-            if line_item.product_id is not None:
-                try:
-                    # Fetch product and check for cached data or default
-                    product = shopify.Product.find(line_item.product_id)
-                    if product and product.variants:
-                        for variant in product.variants:
-                            if variant.id == line_item.variant_id:
-                                if variant.image_id is not None:
-                                    images = shopify.Image.find(image_id=variant.image_id,
-                                                                product_id=line_item.product_id)
-                                    variant_name = line_item.variant_title
-                                    for image in images:
-                                        if image.id == variant.image_id:
-                                            image_src = image.src
-                                else:
-                                    variant_name = ""
-                                    image_src = product.image.src
-                                    break
-                    else:
-                        image_src = "https://static.thenounproject.com/png/1578832-200.png"
-                except Exception as e:
-                    print(f"Error fetching product details for product ID {line_item.product_id}: {e}")
-
-            # Append tracking and line item details
-            for info in tracking_info_list:
-                order_info['line_items'].append({
-                    'fulfillment_status': line_item.fulfillment_status,
-                    'image_src': image_src,
-                    'product_title': line_item.title + (f" - {variant_name}" if variant_name else ""),
-                    'quantity': info['quantity'],
-                    'tracking_number': info['tracking_number'],
-                    'status': info['status']
-                })
-                order_info['status'] = info['status']
-
-        order_end_time = time.time()
-        print(f"Processed order {order.order_number} in {order_end_time - order_start_time:.2f} seconds")
-        return order_info
-
-    except Exception as e:
-        print(f"Error processing order {order.order_number}: {e}")
-        return None
 
 
 @app.route('/undelivered')
