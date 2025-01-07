@@ -331,7 +331,7 @@ async def process_shopify_order_with_details(session, order):
 
         # Prepare order information
         order_info = {
-            'order_id': order.order_number,
+            'order_id': order.name,
             'created_at': order.created_at,
             'total_price': order.total_price or "0.0",  # Default to 0.0 if missing
             'line_items': [],
