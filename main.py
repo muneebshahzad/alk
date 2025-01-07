@@ -12,6 +12,10 @@ import aiohttp
 import lazop
 import aiohttp
 from tenacity import retry, stop_after_attempt, wait_exponential
+from aiohttp import ClientTimeout
+from aiohttp import ClientSession, ClientError
+import asyncio
+from tenacity import retry, stop_after_attempt, wait_exponential
 
 app = Flask(__name__)
 app.debug = True
@@ -32,6 +36,11 @@ async def fetch_with_retry(session, url, method="GET", **kwargs):
         response.raise_for_status()
         return await response.json()
 
+async def limited_request(coroutine):
+    """Ensure requests adhere to rate limits."""
+    async with semaphore:
+        await asyncio.sleep(0.5)  # Enforce delay for Shopify rate limits (no more than 2 per second)
+        return await coroutine
 
 @app.route('/send-email', methods=['POST'])
 def send_email():
@@ -68,19 +77,26 @@ def send_email():
         return jsonify({'error': str(e)}), 500
 
 
+@retry(stop=stop_after_attempt(5), wait=wait_exponential(min=1, max=10))
 async def fetch_tracking_data(session, tracking_number):
     url = f"https://cod.callcourier.com.pk/api/CallCourier/GetTackingHistory?cn={tracking_number}"
 
+    # Set a timeout of 10 seconds for the request
+    timeout = ClientTimeout(total=10)
+
     try:
-        async with session.get(url) as response:
+        async with session.get(url, timeout=timeout) as response:
             if response.status == 200:
                 return await response.json()
             else:
                 print(f"Error: HTTP {response.status} for tracking number {tracking_number}")
                 return {"error": f"HTTP {response.status}"}
-    except aiohttp.ClientError as e:
+    except ClientError as e:
         print(f"Request failed: {e}")
         return {"error": str(e)}
+    except asyncio.TimeoutError:
+        print(f"Request timed out for tracking number {tracking_number}")
+        return {"error": "Request timed out"}
 
 
 product_cache = {}
@@ -123,8 +139,6 @@ async def process_line_item(session, line_item, fulfillments):
     return tracking_info if tracking_info else [
         {"tracking_number": "N/A", "status": "Un-Booked", "quantity": line_item.quantity}
     ]
-
-
 
 async def process_order(session, order):
     """Process each order with optimized image fetching."""
@@ -209,6 +223,9 @@ async def process_order(session, order):
     except Exception as e:
         print(f"Error processing order {order.order_number}: {e}")
         return None
+
+
+
 @app.route('/pending')
 def pending_orders():
     all_orders = []
@@ -273,14 +290,14 @@ async def getShopifyOrders():
     total_start_time = time.time()
 
     try:
-        orders = shopify.Order.find(limit=10, order="created_at DESC", created_at_min=start_date)
+        orders = shopify.Order.find(limit=250, order="created_at DESC", created_at_min=start_date)
     except Exception as e:
         print(f"Error fetching orders: {e}")
         return []
 
     async with aiohttp.ClientSession() as session:
         while True:
-            tasks = [process_order(session, order) for order in orders]
+            tasks = [limited_request(process_order(session, order)) for order in orders]
             results = await asyncio.gather(*tasks, return_exceptions=True)
 
             for result in results:
