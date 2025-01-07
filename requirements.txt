@@ -5,3 +5,4 @@ Flask~=3.0.3
 ShopifyAPI
 gunicorn 
 pytz
+tenacity
