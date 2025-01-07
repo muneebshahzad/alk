@@ -156,7 +156,7 @@
         <tr>
             <th>Order ID</th>
             <th style="width: 15%;">Customer</th>
-            <th style="width: 10%;">>City</th>
+            <th>City</th>
             <th>Tags</th>
             <th>Payment</th>
             <th>Date</th>
@@ -170,29 +170,36 @@
     <tbody>
         {% for order in order_details %}
             <tr>
-                <td>{{ order.order_id }}</td>
-                <td>
-                    {{ order.customer_details.name | default('Unknown') }}<br>
-                    {{ order.customer_details.address | default('Unknown') }}<br>
-                    {{ order.customer_details.city | default('Unknown') }}<br>
-                    {{ order.customer_details.phone | default('Unknown') }}<br>
-
+                        <td>{{ order.order_num }}</td>
+        <td>
+            {% if order.customer_details %}
+                {{ order.customer_details.name or "Unknown" }}<br>
+                {{ order.customer_details.address or "Not provided" }}<br>
+                {{ order.customer_details.city or "Unknown" }}<br>
+                {{ order.customer_details.phone or "Not provided" }}<br>
+                {% if order.customer_details.phone %}
                     <a href="tel:{{ order.customer_details.phone }}" class="btn btn-primary btn-sm">Call</a>
                     <div class="btn-group">
                         <button type="button" class="btn btn-success btn-sm dropdown-toggle" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
                             WhatsApp
                         </button>
                         <div class="dropdown-menu">
-    <a class="dropdown-item" href="https://wa.me/{{ order.customer_details.phone }}?text=Hello%20{{ order.customer_details.name }},%20Your%20order%23{{ order.order_id }}%20from%20AlchemyOfDecor.com%20has%20been%20dispatched%20and%20is%20expected%20to%20be%20delivered%20in%203-7%20working%20days.%20Your%20patience%20is%20highly%20appreciated." target="_blank">Send Dispatch Message</a>
-    <a class="dropdown-item" href="https://wa.me/{{ order.customer_details.phone }}?text=Hello%20{{ order.customer_details.name }},%20Your%20order%23{{ order.order_id }}%20from%20AlchemyOfDecor.com%20has%20been%20delayed,%20please%20be%20assured%20that%20we%20are%20trying%20our%20best%20to%20deliver%20it%20at%20earliest.%20Your%20patience%20is%20highly%20appreciated." target="_blank">Send Delay Message</a>
-    <a class="dropdown-item" href="https://wa.me/{{ order.customer_details.phone }}?text=Hello%20{{ order.customer_details.name }},%20Logistics%20company%20made%20an%20attempt%20to%20deliver%20your%20order%23{{ order.order_id }}%20from%20AlchemyOfDecor.com%20but%20as%20per%20them,%20you%20weren't%20available%20at%20address%20or%20the%20address%20was%20closed.%20Please%20let%20us%20know%20when%20should%20we%20re-arrange%20the%20delivery.%20Thank%20You" target="_blank">Send Address Closed Message</a>
-    <a class="dropdown-item" href="https://wa.me/{{ order.customer_details.phone }}?text=Hello%20{{ order.customer_details.name }},%20Logistics%20company%20made%20an%20attempt%20to%20deliver%20your%20order%23{{ order.order_id }}%20from%20AlchemyOfDecor.com%20and%20according%20to%20them,%20you%20refused%20to%20accept%20the%20delivery.%20Please%20let%20us%20know%20if%20you're%20still%20interested%20in%20receiving%20the%20product." target="_blank">Send Refused Message</a>
-    <a class="dropdown-item" href="https://wa.me/{{ order.customer_details.phone }}?text=Hello%20{{ order.customer_details.name }},%20Your%20order%23{{ order.order_id }}%20from%20AlchemyOfDecor.com%20was%20delivered%20recently.%20Please%20let%20us%20know%20about%20your%20experience%20with%20us.%20Your%20feedback%20will%20surely%20help%20us%20improve.%20Thank%20You!" target="_blank">Send Feedback Message</a>
-</div>
-
+                            <a class="dropdown-item" href="https://wa.me/{{ order.customer_details.phone }}?text=Hello%20{{ order.customer_details.name }},%20Your%20order%23{{ order.order_id }}%20from%20AlchemyOfDecor.com%20has%20been%20dispatched%20and%20is%20expected%20to%20be%20delivered%20in%203-7%20working%20days.%20Your%20patience%20is%20highly%20appreciated." target="_blank">Send Dispatch Message</a>
+                            <a class="dropdown-item" href="https://wa.me/{{ order.customer_details.phone }}?text=Hello%20{{ order.customer_details.name }},%20Your%20order%23{{ order.order_id }}%20from%20AlchemyOfDecor.com%20has%20been%20delayed,%20please%20be%20assured%20that%20we%20are%20trying%20our%20best%20to%20deliver%20it%20at%20earliest.%20Your%20patience%20is%20highly%20appreciated." target="_blank">Send Delay Message</a>
+                            <a class="dropdown-item" href="https://wa.me/{{ order.customer_details.phone }}?text=Hello%20{{ order.customer_details.name }},%20Logistics%20company%20made%20an%20attempt%20to%20deliver%20your%20order%23{{ order.order_id }}%20from%20AlchemyOfDecor.com%20but%20as%20per%20them,%20you%20weren't%20available%20at%20address%20or%20the%20address%20was%20closed.%20Please%20let%20us%20know%20when%20should%20we%20re-arrange%20the%20delivery.%20Thank%20You" target="_blank">Send Address Closed Message</a>
+                            <a class="dropdown-item" href="https://wa.me/{{ order.customer_details.phone }}?text=Hello%20{{ order.customer_details.name }},%20Logistics%20company%20made%20an%20attempt%20to%20deliver%20your%20order%23{{ order.order_id }}%20from%20AlchemyOfDecor.com%20and%20according%20to%20them,%20you%20refused%20to%20accept%20the%20delivery.%20Please%20let%20us%20know%20if%20you're%20still%20interested%20in%20receiving%20the%20product." target="_blank">Send Refused Message</a>
+                            <a class="dropdown-item" href="https://wa.me/{{ order.customer_details.phone }}?text=Hello%20{{ order.customer_details.name }},%20Your%20order%23{{ order.order_id }}%20from%20AlchemyOfDecor.com%20was%20delivered%20recently.%20Please%20let%20us%20know%20about%20your%20experience%20with%20us.%20Your%20feedback%20will%20surely%20help%20us%20improve.%20Thank%20You!" target="_blank">Send Feedback Message</a>
+                        </div>
                     </div>
-                </td>
-                <td>{{ order.customer_details.city }}</td>
+                {% else %}
+                    <p>Phone number not available</p>
+                {% endif %}
+            {% else %}
+                <p>Customer details not available</p>
+            {% endif %}
+        </td>
+        <td>{{ order.customer_details.city or "Unknown" if order.customer_details else "Unknown" }}</td>
+
 
                 <td>{% for tag in order.tags %}
                      <span class="badge badge-secondary">{{ tag }}</span><br>
@@ -245,14 +252,13 @@
                  <td>
                         <button class="btn btn-primary btn-sm" onclick="toggleStatusButtons(this)">Mark As</button>
                         <div class="status-buttons">
-                             <button class="btn btn-outline-success btn-sm" onclick="applyTag('{{ order.id }}', 'Delivered')">Delivered</button>
-                            <button class="btn btn-outline-secondary btn-sm" onclick="applyTag('{{ order.id }}', 'Re-Dispatch')">Re-Dispatch</button>
-                            <button class="btn btn-outline-secondary btn-sm" onclick="applyTag('{{ order.id }}', 'Wants to Open Parcel')">Wants to Open Parcel</button>
-                            <button class="btn btn-outline-danger btn-sm" onclick="applyTag('{{ order.id }}', 'Returned')">Returned</button>
-                            <button class="btn btn-outline-secondary btn-sm" onclick="applyTag('{{ order.id }}', 'Not-On-Whatsapp')">Not On Whatsapp</button>
-                            <button class="btn btn-outline-warning btn-sm" onclick="applyTag('{{ order.id }}', 'Cancelled')">Cancelled</button>
-                            <button class="btn btn-outline-info btn-sm" onclick="applyTag('{{ order.id }}', 'Confirmed')">Confirmed</button>
-                            <button class="btn btn-outline-secondary btn-sm" onclick="applyTag('{{ order.id }}', 'Call Not Attended')">Call Not Attended</button>
+                             <button class="btn btn-outline-success btn-sm" onclick="applyTag('{{ order.order_id }}', 'Delivered')">Delivered</button>
+                            <button class="btn btn-outline-secondary btn-sm" onclick="applyTag('{{ order.order_id }}', 'Re-Dispatch')">Re-Dispatch</button>
+                            <button class="btn btn-outline-secondary btn-sm" onclick="applyTag('{{ order.order_id }}', 'Wants to Open Parcel')">Wants to Open Parcel</button>
+                            <button class="btn btn-outline-danger btn-sm" onclick="applyTag('{{ order.order_id }}', 'Returned')">Returned</button>
+                            <button class="btn btn-outline-warning btn-sm" onclick="applyTag('{{ order.order_id }}', 'Cancelled')">Cancelled</button>
+                            <button class="btn btn-outline-info btn-sm" onclick="applyTag('{{ order.order_id }}', 'Confirmed')">Confirmed</button>
+                            <button class="btn btn-outline-secondary btn-sm" onclick="applyTag('{{ order.order_id }}', 'Call Not Attended')">Call Not Attended</button>
                         </div>
                     </td>
             </tr>
@@ -329,7 +335,31 @@
     <script src="static/assets/js/demo/datatables-demo.js"></script>
         <script src="static/assets/js/demo/datatables-demo.js"></script>
     <script src="static/assets/js/track.js"></script>
-
+<script>
+    function applyTag(orderId, tag) {
+    console.log("Order ID:", orderId);
+    if (!orderId) {
+        alert("Order ID is missing");
+        return;
+    }
+    fetch('/apply_tag', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ order_id: orderId, tag: tag })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert("Tag applied successfully.");
+        } else {
+            alert("Error: " + data.error);
+        }
+    })
+    .catch(error => console.error('Error:', error));
+}
+</script>
 <script>
    $(document).ready(function() {
     // Destroy existing DataTable instance if present
@@ -357,7 +387,7 @@
 
     orders.forEach(order => {
         if (order.status === 'DELIVERED') {
-            applyTag(order.id, 'Delivered');
+            applyTag(order.order_id, 'Delivered');
         }
     });
 }
