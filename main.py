@@ -20,6 +20,7 @@ pre_loaded = 0
 order_details = []
 semaphore = asyncio.Semaphore(2)
 
+
 @retry(stop=stop_after_attempt(5), wait=wait_exponential(min=1, max=10))
 async def fetch_with_retry(session, url, method="GET", **kwargs):
     """Fetch data with retry logic."""
@@ -80,7 +81,10 @@ async def fetch_tracking_data(session, tracking_number):
     except aiohttp.ClientError as e:
         print(f"Request failed: {e}")
         return {"error": str(e)}
+
+
 product_cache = {}
+
 
 async def limited_request(coroutine):
     """Ensure requests adhere to rate limits."""
@@ -161,7 +165,8 @@ async def process_order(session, order):
                             if variant.id == line_item.variant_id:
                                 # If variant has an image, fetch it
                                 if variant.image_id is not None:
-                                    images = shopify.Image.find(image_id=variant.image_id, product_id=line_item.product_id)
+                                    images = shopify.Image.find(image_id=variant.image_id,
+                                                                product_id=line_item.product_id)
                                     for image in images:
                                         if image.id == variant.image_id:
                                             image_src = image.src
@@ -196,7 +201,6 @@ async def process_order(session, order):
         return None
 
 
-
 async def getShopifyOrders():
     start_date = datetime(2024, 9, 1).isoformat()
     order_details = []
@@ -222,7 +226,7 @@ async def getShopifyOrders():
             try:
                 if not orders.has_next_page():
                     break
-                
+
                 orders = orders.next_page()
 
             except Exception as e:
@@ -233,8 +237,10 @@ async def getShopifyOrders():
     print(f"Processed {len(order_details)} orders in {total_end_time - total_start_time:.2f} seconds")
     return order_details
 
+
 from datetime import datetime, timedelta
 import pytz
+
 
 def adjust_to_shopify_timezone(from_date, to_date):
     # Parse input dates (assumed to be in GMT+5 already)
@@ -316,6 +322,7 @@ def fetch_orders():
         'total_cost': total_cost
     })
 
+
 async def process_shopify_order_with_details(session, order):
     try:
         # Ensure required keys are present in the order
@@ -358,7 +365,8 @@ async def process_shopify_order_with_details(session, order):
                             if variant.id == line_item.variant_id:
                                 # Fetch variant-specific image
                                 if variant.image_id:
-                                    images = shopify.Image.find(image_id=variant.image_id, product_id=line_item.product_id)
+                                    images = shopify.Image.find(image_id=variant.image_id,
+                                                                product_id=line_item.product_id)
                                     for image in images:
                                         if image.id == variant.image_id:
                                             image_src = image.src
@@ -403,6 +411,7 @@ async def process_shopify_order_with_details(session, order):
         print(f"Failed to process order {getattr(order, 'order_number', 'Unknown')}: {e}")
         return None
 
+
 async def fetch_line_item_cost_and_tracking(session, line_item, fulfillments):
     """
     Fetch the tracking information of a line item.
@@ -443,8 +452,6 @@ async def fetch_line_item_cost_and_tracking(session, line_item, fulfillments):
     except Exception as e:
         print(f"Error fetching tracking for line item {getattr(line_item, 'id', 'Unknown')}: {e}")
         return []
-
-
 
 
 @app.route('/apply_tag', methods=['POST'])
@@ -502,14 +509,10 @@ def apply_tag():
         return jsonify({"success": False, "error": str(e)})
 
 
-
 @app.route("/")
 def tracking():
     global order_details
     return render_template("track_alk.html", order_details=order_details)
-
-
-
 
 
 def format_date(date_str):
@@ -545,7 +548,6 @@ def displayTracking(tracking_num):
     data = run_async(async_func)
 
     return render_template('trackingdata_alk.html', data=data)
-
 
 
 @app.route('/pending')
@@ -625,11 +627,11 @@ async def process_order(session, order):
         return None
 
 
-
 @app.route('/undelivered')
 def undelivered():
     global order_details, pre_loaded
     return render_template("undelivered.html", order_details=order_details)
+
 
 @app.route('/report')
 def report():
@@ -638,7 +640,6 @@ def report():
     if not isinstance(order_details, list):
         order_details = []
     return render_template("report.html", order_details=order_details)
-
 
 
 shop_url = os.getenv('SHOP_URL')
@@ -654,4 +655,3 @@ if __name__ == "__main__":
     api_key = os.getenv('API_KEY')
     password = os.getenv('PASSWORD')
     app.run(port=5001)
-
