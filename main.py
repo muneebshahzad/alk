@@ -236,6 +236,8 @@ def pending_orders():
 
     # Process Shopify orders with the specified statuses
     for shopify_order in order_details:
+        if not shopify_order:  # Skip if shopify_order is None or empty
+            continue
         if shopify_order['status'] in ['CONSIGNMENT BOOKED', 'Un-Booked']:
             shopify_items_list = [
                 {
@@ -290,7 +292,7 @@ async def getShopifyOrders():
     total_start_time = time.time()
 
     try:
-        orders = shopify.Order.find(limit=250, order="created_at DESC", created_at_min=start_date)
+        orders = shopify.Order.find(limit=5, order="created_at DESC", created_at_min=start_date)
     except Exception as e:
         print(f"Error fetching orders: {e}")
         return []
@@ -309,6 +311,7 @@ async def getShopifyOrders():
             try:
                 if not orders.has_next_page():
                     break
+                break
 
                 orders = orders.next_page()
 
