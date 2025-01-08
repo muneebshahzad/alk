@@ -292,7 +292,7 @@ async def getShopifyOrders():
     total_start_time = time.time()
 
     try:
-        orders = shopify.Order.find(limit=5, order="created_at DESC", created_at_min=start_date)
+        orders = shopify.Order.find(limit=250, order="created_at DESC", created_at_min=start_date)
     except Exception as e:
         print(f"Error fetching orders: {e}")
         return []
@@ -311,7 +311,6 @@ async def getShopifyOrders():
             try:
                 if not orders.has_next_page():
                     break
-                break
 
                 orders = orders.next_page()
 
