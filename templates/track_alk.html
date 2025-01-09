@@ -161,10 +161,10 @@
     <div class="col-md-2">
         <div class="card text-white bg-danger">
             <div class="card-body">
-                <h5 class="card-title">Delivered</h5>
-                <p>Value: Rs <span id="delivered-value">0</span></p>
-                <p>Quantity: <span id="delivered-quantity">0</span></p>
-                <p>Orders: <span id="delivered-orders">0</span></p>
+                <h5 class="card-title">Un-Booked</h5>
+                <p>Value: Rs <span id="unbooked-value">0</span></p>
+                <p>Quantity: <span id="unbooked-quantity">0</span></p>
+                <p>Orders: <span id="unbooked-orders">0</span></p>
             </div>
         </div>
     </div>
@@ -469,6 +469,10 @@
         });
     </script>
 <script>
+
+</script>
+</body>
+<script>
     // Function to calculate and update values for the cards
 function updateOrderStats(orderDetails) {
     let allValue = 0, allQuantity = 0, allOrders = 0;
@@ -476,6 +480,7 @@ function updateOrderStats(orderDetails) {
     let bookedValue = 0, bookedQuantity = 0, bookedOrders = 0;
     let deliveredValue = 0, deliveredQuantity = 0, deliveredOrders = 0;
     let returnsValue = 0, returnsQuantity = 0, returnsOrders = 0;
+    let unbookedValue = 0, unbookedQuantity = 0 , unbookedOrders=0;
 
     orderDetails.forEach(order => {
         let orderValue = parseFloat(order.total_price) || 0;
@@ -501,6 +506,11 @@ function updateOrderStats(orderDetails) {
                 deliveredQuantity += orderQuantity;
                 deliveredOrders += 1; // Increment delivered orders
                 break;
+            case 'Un-Booked':
+                unbookedValue += orderValue;
+                unbookedQuantity += orderQuantity;
+                unbookedOrders += 1;
+                break;
             default:
                 if (order.status.includes('RETURN')) {
                     returnsValue += orderValue;
@@ -510,9 +520,9 @@ function updateOrderStats(orderDetails) {
         }
     });
 
-    let shippedValue = allValue - (dispatchValue + bookedValue + deliveredValue + returnsValue);
-    let shippedQuantity = allQuantity - (dispatchQuantity + bookedQuantity + deliveredQuantity + returnsQuantity);
-    let shippedOrders = allOrders - (dispatchOrders + bookedOrders + deliveredOrders + returnsOrders);
+    let shippedValue = allValue - (dispatchValue + bookedValue + deliveredValue + returnsValue + unbookedValue);
+    let shippedQuantity = allQuantity - (dispatchQuantity + bookedQuantity + deliveredQuantity + returnsQuantity + unbookedQuantity);
+    let shippedOrders = allOrders - (dispatchOrders + bookedOrders + deliveredOrders + returnsOrders + unbookedOrders);
 
     // Update card values in the DOM
     document.getElementById('all-value').innerText = allValue.toFixed(2);
@@ -527,9 +537,9 @@ function updateOrderStats(orderDetails) {
     document.getElementById('booked-quantity').innerText = bookedQuantity;
     document.getElementById('booked-orders').innerText = bookedOrders;
 
-    document.getElementById('delivered-value').innerText = deliveredValue.toFixed(2);
-    document.getElementById('delivered-quantity').innerText = deliveredQuantity;
-    document.getElementById('delivered-orders').innerText = deliveredOrders;
+<!--    document.getElementById('delivered-value').innerText = deliveredValue.toFixed(2);-->
+<!--    document.getElementById('delivered-quantity').innerText = deliveredQuantity;-->
+<!--    document.getElementById('delivered-orders').innerText = deliveredOrders;-->
 
     document.getElementById('returns-value').innerText = returnsValue.toFixed(2);
     document.getElementById('returns-quantity').innerText = returnsQuantity;
@@ -538,12 +548,15 @@ function updateOrderStats(orderDetails) {
     document.getElementById('shipped-value').innerText = shippedValue.toFixed(2);
     document.getElementById('shipped-quantity').innerText = shippedQuantity;
     document.getElementById('shipped-orders').innerText = shippedOrders;
+
+    document.getElementById('unbooked-value').innerText = unbookedValue.toFixed(2);
+    document.getElementById('unbooked-quantity').innerText = unbookedQuantity;
+    document.getElementById('unbooked-orders').innerText = unbookedOrders;
+
 }
 
 // Call the function with order details fetched from the server
 updateOrderStats({{ order_details|tojson }});
 
 </script>
-</body>
-
 </html>
