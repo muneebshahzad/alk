@@ -127,6 +127,64 @@
                     <!-- Page Heading -->
                     <h1 class="h3 mb-2 text-gray-800">Order Tracking</h1>
 
+                    <div class="row mb-4">
+    <div class="col-md-2">
+        <div class="card text-white bg-primary">
+            <div class="card-body">
+                <h5 class="card-title">All</h5>
+                <p>Total Value: Rs <span id="all-value">0</span></p>
+                <p>Total Quantity: <span id="all-quantity">0</span></p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-2">
+        <div class="card text-white bg-success">
+            <div class="card-body">
+                <h5 class="card-title">Dispatch</h5>
+                <p>Value: Rs <span id="dispatch-value">0</span></p>
+                <p>Quantity: <span id="dispatch-quantity">0</span></p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-2">
+        <div class="card text-white bg-warning">
+            <div class="card-body">
+                <h5 class="card-title">Booked</h5>
+                <p>Value: Rs <span id="booked-value">0</span></p>
+                <p>Quantity: <span id="booked-quantity">0</span></p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-2">
+        <div class="card text-white bg-danger">
+            <div class="card-body">
+                <h5 class="card-title">Delivered</h5>
+                <p>Value: Rs <span id="delivered-value">0</span></p>
+                <p>Quantity: <span id="delivered-quantity">0</span></p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-2">
+        <div class="card text-white bg-info">
+            <div class="card-body">
+                <h5 class="card-title">Returns</h5>
+                <p>Value: Rs <span id="returns-value">0</span></p>
+                <p>Quantity: <span id="returns-quantity">0</span></p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-2">
+        <div class="card text-white bg-secondary">
+            <div class="card-body">
+                <h5 class="card-title">Shipped</h5>
+                <p>Value: Rs <span id="shipped-value">0</span></p>
+                <p>Quantity: <span id="shipped-quantity">0</span></p>
+            </div>
+        </div>
+    </div>
+</div>
+
+
                     <!-- DataTales Example -->
                     <div class="card shadow mb-4">
                         <div class="card-header py-3">
@@ -403,6 +461,66 @@
             });
         });
     </script>
+
+<script>
+    // Function to calculate and update values for the cards
+function updateOrderStats(orderDetails) {
+    let allValue = 0, allQuantity = 0;
+    let dispatchValue = 0, dispatchQuantity = 0;
+    let bookedValue = 0, bookedQuantity = 0;
+    let deliveredValue = 0, deliveredQuantity = 0;
+    let returnsValue = 0, returnsQuantity = 0;
+
+    orderDetails.forEach(order => {
+        let orderValue = parseFloat(order.total_price) || 0;
+        let orderQuantity = order.line_items.reduce((sum, item) => sum + item.quantity, 0);
+
+        allValue += orderValue;
+        allQuantity += orderQuantity;
+
+        switch (order.status) {
+            case 'PICKED FROM SHIPPER':
+                dispatchValue += orderValue;
+                dispatchQuantity += orderQuantity;
+                break;
+            case 'CONSIGNMENT BOOKED':
+                bookedValue += orderValue;
+                bookedQuantity += orderQuantity;
+                break;
+            case 'DELIVERED':
+                deliveredValue += orderValue;
+                deliveredQuantity += orderQuantity;
+                break;
+            default:
+                if (order.status.includes('RETURN')) {
+                    returnsValue += orderValue;
+                    returnsQuantity += orderQuantity;
+                }
+        }
+    });
+
+    let shippedValue = allValue - (dispatchValue + bookedValue + deliveredValue + returnsValue);
+    let shippedQuantity = allQuantity - (dispatchQuantity + bookedQuantity + deliveredQuantity + returnsQuantity);
+
+    // Update card values in the DOM
+    document.getElementById('all-value').innerText = allValue.toFixed(2);
+    document.getElementById('all-quantity').innerText = allQuantity;
+    document.getElementById('dispatch-value').innerText = dispatchValue.toFixed(2);
+    document.getElementById('dispatch-quantity').innerText = dispatchQuantity;
+    document.getElementById('booked-value').innerText = bookedValue.toFixed(2);
+    document.getElementById('booked-quantity').innerText = bookedQuantity;
+    document.getElementById('delivered-value').innerText = deliveredValue.toFixed(2);
+    document.getElementById('delivered-quantity').innerText = deliveredQuantity;
+    document.getElementById('returns-value').innerText = returnsValue.toFixed(2);
+    document.getElementById('returns-quantity').innerText = returnsQuantity;
+    document.getElementById('shipped-value').innerText = shippedValue.toFixed(2);
+    document.getElementById('shipped-quantity').innerText = shippedQuantity;
+}
+
+// Call the function with order details fetched from the server
+updateOrderStats({{ order_details|tojson }});
+
+</script>
 
 </body>
 
