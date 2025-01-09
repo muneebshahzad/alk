@@ -127,13 +127,14 @@
                     <!-- Page Heading -->
                     <h1 class="h3 mb-2 text-gray-800">Order Tracking</h1>
 
-                    <div class="row mb-4">
+                   <div class="row mb-4">
     <div class="col-md-2">
         <div class="card text-white bg-primary">
             <div class="card-body">
                 <h5 class="card-title">All</h5>
                 <p>Total Value: Rs <span id="all-value">0</span></p>
                 <p>Total Quantity: <span id="all-quantity">0</span></p>
+                <p>Total Orders: <span id="all-orders">0</span></p>
             </div>
         </div>
     </div>
@@ -143,6 +144,7 @@
                 <h5 class="card-title">Dispatch</h5>
                 <p>Value: Rs <span id="dispatch-value">0</span></p>
                 <p>Quantity: <span id="dispatch-quantity">0</span></p>
+                <p>Orders: <span id="dispatch-orders">0</span></p>
             </div>
         </div>
     </div>
@@ -152,6 +154,7 @@
                 <h5 class="card-title">Booked</h5>
                 <p>Value: Rs <span id="booked-value">0</span></p>
                 <p>Quantity: <span id="booked-quantity">0</span></p>
+                <p>Orders: <span id="booked-orders">0</span></p>
             </div>
         </div>
     </div>
@@ -161,6 +164,7 @@
                 <h5 class="card-title">Delivered</h5>
                 <p>Value: Rs <span id="delivered-value">0</span></p>
                 <p>Quantity: <span id="delivered-quantity">0</span></p>
+                <p>Orders: <span id="delivered-orders">0</span></p>
             </div>
         </div>
     </div>
@@ -170,6 +174,7 @@
                 <h5 class="card-title">Returns</h5>
                 <p>Value: Rs <span id="returns-value">0</span></p>
                 <p>Quantity: <span id="returns-quantity">0</span></p>
+                <p>Orders: <span id="returns-orders">0</span></p>
             </div>
         </div>
     </div>
@@ -179,10 +184,12 @@
                 <h5 class="card-title">Shipped</h5>
                 <p>Value: Rs <span id="shipped-value">0</span></p>
                 <p>Quantity: <span id="shipped-quantity">0</span></p>
+                <p>Orders: <span id="shipped-orders">0</span></p>
             </div>
         </div>
     </div>
 </div>
+
 
 
                     <!-- DataTales Example -->
@@ -461,15 +468,14 @@
             });
         });
     </script>
-
 <script>
     // Function to calculate and update values for the cards
 function updateOrderStats(orderDetails) {
-    let allValue = 0, allQuantity = 0;
-    let dispatchValue = 0, dispatchQuantity = 0;
-    let bookedValue = 0, bookedQuantity = 0;
-    let deliveredValue = 0, deliveredQuantity = 0;
-    let returnsValue = 0, returnsQuantity = 0;
+    let allValue = 0, allQuantity = 0, allOrders = 0;
+    let dispatchValue = 0, dispatchQuantity = 0, dispatchOrders = 0;
+    let bookedValue = 0, bookedQuantity = 0, bookedOrders = 0;
+    let deliveredValue = 0, deliveredQuantity = 0, deliveredOrders = 0;
+    let returnsValue = 0, returnsQuantity = 0, returnsOrders = 0;
 
     orderDetails.forEach(order => {
         let orderValue = parseFloat(order.total_price) || 0;
@@ -477,51 +483,67 @@ function updateOrderStats(orderDetails) {
 
         allValue += orderValue;
         allQuantity += orderQuantity;
+        allOrders += 1; // Increment total orders
 
         switch (order.status) {
             case 'PICKED FROM SHIPPER':
                 dispatchValue += orderValue;
                 dispatchQuantity += orderQuantity;
+                dispatchOrders += 1; // Increment dispatch orders
                 break;
             case 'CONSIGNMENT BOOKED':
                 bookedValue += orderValue;
                 bookedQuantity += orderQuantity;
+                bookedOrders += 1; // Increment booked orders
                 break;
             case 'DELIVERED':
                 deliveredValue += orderValue;
                 deliveredQuantity += orderQuantity;
+                deliveredOrders += 1; // Increment delivered orders
                 break;
             default:
                 if (order.status.includes('RETURN')) {
                     returnsValue += orderValue;
                     returnsQuantity += orderQuantity;
+                    returnsOrders += 1; // Increment return orders
                 }
         }
     });
 
     let shippedValue = allValue - (dispatchValue + bookedValue + deliveredValue + returnsValue);
     let shippedQuantity = allQuantity - (dispatchQuantity + bookedQuantity + deliveredQuantity + returnsQuantity);
+    let shippedOrders = allOrders - (dispatchOrders + bookedOrders + deliveredOrders + returnsOrders);
 
     // Update card values in the DOM
     document.getElementById('all-value').innerText = allValue.toFixed(2);
     document.getElementById('all-quantity').innerText = allQuantity;
+    document.getElementById('all-orders').innerText = allOrders;
+
     document.getElementById('dispatch-value').innerText = dispatchValue.toFixed(2);
     document.getElementById('dispatch-quantity').innerText = dispatchQuantity;
+    document.getElementById('dispatch-orders').innerText = dispatchOrders;
+
     document.getElementById('booked-value').innerText = bookedValue.toFixed(2);
     document.getElementById('booked-quantity').innerText = bookedQuantity;
+    document.getElementById('booked-orders').innerText = bookedOrders;
+
     document.getElementById('delivered-value').innerText = deliveredValue.toFixed(2);
     document.getElementById('delivered-quantity').innerText = deliveredQuantity;
+    document.getElementById('delivered-orders').innerText = deliveredOrders;
+
     document.getElementById('returns-value').innerText = returnsValue.toFixed(2);
     document.getElementById('returns-quantity').innerText = returnsQuantity;
+    document.getElementById('returns-orders').innerText = returnsOrders;
+
     document.getElementById('shipped-value').innerText = shippedValue.toFixed(2);
     document.getElementById('shipped-quantity').innerText = shippedQuantity;
+    document.getElementById('shipped-orders').innerText = shippedOrders;
 }
 
 // Call the function with order details fetched from the server
 updateOrderStats({{ order_details|tojson }});
 
 </script>
-
 </body>
 
 </html>
