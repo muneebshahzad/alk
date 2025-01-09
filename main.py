@@ -156,7 +156,7 @@ async def process_order(session, order):
             'order_num': order.name.replace("#",""),
             'order_id': order.id,
             'created_at': formatted_date,
-            'total_price': order.total_price,
+            'total_price': order.current_subtotal_price,
             'line_items': [],
             'financial_status': order.financial_status.title(),
             'fulfillment_status': order.fulfillment_status or "Unfulfilled",
@@ -418,7 +418,7 @@ async def process_shopify_order_with_details(session, order):
         order_info = {
             'order_id': order.order_number,
             'created_at': order.created_at,
-            'total_price': order.total_price or "0.0",  # Default to 0.0 if missing
+            'total_price': order.current_subtotal_price or "0.0",  # Default to 0.0 if missing
             'line_items': [],
             'financial_status': order.financial_status.title() if order.financial_status else "Unknown",
             'fulfillment_status': order.fulfillment_status or "Unfulfilled",
