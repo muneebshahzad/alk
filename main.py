@@ -1,46 +1,27 @@
-import asyncio
-import os
 import smtplib
+import sys
+import threading
 import time
-from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from flask import Flask, render_template, jsonify, request, flash, redirect, url_for, abort
-import datetime, requests
-from datetime import datetime
-import pymssql, shopify
-import aiohttp
+from flask import render_template
+import datetime
 import lazop
-import aiohttp
-from tenacity import retry, stop_after_attempt, wait_exponential
-from aiohttp import ClientTimeout
-from aiohttp import ClientSession, ClientError
+import os
+import hmac
+import hashlib
+import base64
 import asyncio
-from tenacity import retry, stop_after_attempt, wait_exponential
+import aiohttp
+from flask import Flask
+import shopify
 
 app = Flask(__name__)
 app.debug = True
 app.secret_key = os.getenv('APP_SECRET_KEY', 'default_secret_key')  # Use environment variable
 pre_loaded = 0
 order_details = []
+daraz_orders = []
 semaphore = asyncio.Semaphore(2)
-
-
-@retry(stop=stop_after_attempt(5), wait=wait_exponential(min=1, max=10))
-async def fetch_with_retry(session, url, method="GET", **kwargs):
-    """Fetch data with retry logic."""
-    async with session.request(method, url, **kwargs) as response:
-        if response.status == 429:  # Rate limit exceeded
-            retry_after = int(response.headers.get("Retry-After", 1))
-            print(f"Rate limit hit. Retrying after {retry_after} seconds...")
-            await asyncio.sleep(retry_after)
-        response.raise_for_status()
-        return await response.json()
-
-async def limited_request(coroutine):
-    """Ensure requests adhere to rate limits."""
-    async with semaphore:
-        await asyncio.sleep(0.5)  # Enforce delay for Shopify rate limits (no more than 2 per second)
-        return await coroutine
 
 @app.route('/send-email', methods=['POST'])
 def send_email():
@@ -77,214 +58,311 @@ def send_email():
         return jsonify({'error': str(e)}), 500
 
 
-@retry(stop=stop_after_attempt(5), wait=wait_exponential(min=1, max=10))
-async def fetch_tracking_data(session, tracking_number):
-    url = f"https://cod.callcourier.com.pk/api/CallCourier/GetTackingHistory?cn={tracking_number}"
+def format_date(date_str):
+    # Parse the date string
+    date_obj = datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S %z")
+    # Format the date object to only show the date
+    return date_obj.strftime("%Y-%m-%d")
 
-    # Set a timeout of 10 seconds for the request
-    timeout = ClientTimeout(total=10)
+
+async def fetch_tracking_data(session, tracking_number):
+    api_key = os.getenv('LEOPARD_API_KEY')
+    api_password = os.getenv('LEOPARD_PASSWORD')
+    url = f"https://merchantapi.leopardscourier.com/api/trackBookedPacket/?api_key={api_key}&api_password={api_password}&track_numbers={tracking_number}"
+    async with session.get(url) as response:
+        return await response.json()
+
+
+from flask import Flask, request, jsonify
+import requests
+import os
+
+app = Flask(__name__)
+
+
+@app.route('/generate_loadsheet', methods=['POST'])
+def generate_loadsheet():
+    data = request.json
+    cn_numbers = data.get("cn_numbers", [])
+
+    if not cn_numbers:
+        return jsonify({"error": "No CN numbers provided"}), 400
+
+    api_key = os.getenv('LEOPARD_API_KEY')
+    api_password = os.getenv('LEOPARD_PASSWORD')
+    url = "https://merchantapi.leopardscourier.com/api/generateLoadSheet/"
+
+    payload = {
+        "api_key": api_key,
+        "api_password": api_password,
+        "cn_numbers": cn_numbers,
+        "courier_name": "1",
+        "courier_code": "1"
+    }
 
     try:
-        async with session.get(url, timeout=timeout) as response:
-            if response.status == 200:
-                return await response.json()
-            else:
-                print(f"Error: HTTP {response.status} for tracking number {tracking_number}")
-                return {"error": f"HTTP {response.status}"}
-    except ClientError as e:
-        print(f"Request failed: {e}")
-        return {"error": str(e)}
-    except asyncio.TimeoutError:
-        print(f"Request timed out for tracking number {tracking_number}")
-        return {"error": "Request timed out"}
+        response = requests.post(url, json=payload)
+        response_data = response.json()
+        print("Loadsheet Response:", response_data)  # ✅ Debugging: Print response
+        return jsonify(response_data)
 
-
-product_cache = {}
-
-
-async def limited_request(coroutine):
-    """Ensure requests adhere to rate limits."""
-    async with semaphore:
-        await asyncio.sleep(0.5)  # Enforce delay for Shopify rate limits
-        return await coroutine
+    except requests.exceptions.RequestException as e:
+        print("Error:", e)  # Log the error
+        return jsonify({"error": "Failed to connect to the API"}), 500
 
 
 async def process_line_item(session, line_item, fulfillments):
-    """Process individual line items."""
     if line_item.fulfillment_status is None and line_item.fulfillable_quantity == 0:
         return []
 
     tracking_info = []
+    name = 'N/A'
+    address = 'N/A'
+    phone = 'N/A'
+    city = 'N/A'
 
     if line_item.fulfillment_status == "fulfilled":
         for fulfillment in fulfillments:
             if fulfillment.status == "cancelled":
                 continue
-
             for item in fulfillment.line_items:
                 if item.id == line_item.id:
                     tracking_number = fulfillment.tracking_number
                     data = await fetch_tracking_data(session, tracking_number)
-                    if data:
-                        tracking_details = data[-1].get('ProcessDescForPortal', 'DELIVERED')
-                    else:
-                        tracking_details = "N/A"
+                    if data['status'] == 1 and not data['error']:
+                        packet_list = data['packet_list']
+                        if packet_list:
+                            name = packet_list[0]['consignment_name_eng']
+                            address = packet_list[0]['consignment_address']
+                            phone = packet_list[0]['consignment_phone']
+                            city = packet_list[0]['destination_city_name']
+                            tracking_details = packet_list[0].get('Tracking Detail', [])
 
+                            if tracking_details:
+                                last_tracking = tracking_details[-1]  # Last tracking update
+                                final_status = last_tracking.get('Status', 'Unknown')
+                                reason = last_tracking.get('Reason')
+
+                                # Append reason to final status if available
+                                if reason and reason != 'N/A':
+                                    final_status += f" - {reason}"
+
+                                keywords = ["Return", "hold", "UNTRACEABLE"]
+                                for detail in tracking_details:
+                                    status = detail['Status']
+                                    reason = detail.get('Reason', 'N/A')
+
+                                    # Check for keywords in both status and reason
+                                    if any(kw in status for kw in keywords) or any(
+                                            kw in (reason or '') for kw in keywords):
+                                        final_status = f"Being Return {reason}" if reason and reason != "N/A" else "Being Return"
+                                        break  # Exit early to avoid duplicates
+                                    elif reason and reason != "N/A" and reason not in final_status:
+                                        final_status += f" - {reason}"
+                            else:
+                                final_status = packet_list[0].get('booked_packet_status', 'Booked')
+                                final_status = "Booked" if "Pickup Request Sent" in final_status or "Pickup Request not Send" in final_status else final_status
+                        else:
+                            final_status = "Booked"
+                    else:
+                        final_status = "N/A"
+
+                    # Track quantity for each tracking number
                     tracking_info.append({
                         'tracking_number': tracking_number,
-                        'status': tracking_details,
-                        'quantity': item.quantity
+                        'status': final_status,
+                        'quantity': item.quantity,
+                        'name': name,
+                        'address': address,
+                        'city': city,
+                        "phone": phone,
                     })
 
     return tracking_info if tracking_info else [
-        {"tracking_number": "N/A", "status": "Un-Booked", "quantity": line_item.quantity}
-    ]
+        {"tracking_number": "N/A", "status": "Un-Booked", "name": 'N/A', "address": 'N/A', "phone": 'N/A', "city": 'N/A',
+         "quantity": line_item.quantity}]
+
+
 
 async def process_order(session, order):
-    """Process each order with optimized image fetching."""
+    global LAST_REQUEST_TIME
+
+    # Ensure we respect the rate limit
+    elapsed_time = time.time() - LAST_REQUEST_TIME
+    if elapsed_time < 1 / RATE_LIMIT:
+        await asyncio.sleep((1 / RATE_LIMIT) - elapsed_time)
+    LAST_REQUEST_TIME = time.time()
+
+    order_start_time = time.time()
+    input_datetime_str = order.created_at
+    parsed_datetime = datetime.fromisoformat(input_datetime_str[:-6])
+    formatted_datetime = parsed_datetime.strftime("%b %d, %Y")
+
     try:
-        order_start_time = time.time()
-        created_at_str = order.created_at  # Assuming it's in the format '2025-01-07T23:42:49+05:00'
+        status = (order.fulfillment_status).title()
+    except:
+        status = "Un-fulfilled"
+    print(order)
+    tags = []
+    try:
+        name = order.billing_address.name
+    except AttributeError:
+        name = " "
+        print("Error retrieving name")
 
-        # Parse the string into a datetime object
-        created_at_obj = datetime.fromisoformat(created_at_str)
+    try:
+        address = order.billing_address.address1
+    except AttributeError:
+        address = " "
+        print("Error retrieving address")
 
-        # Format the datetime object to 'YYYY-MM-DD'
-        formatted_date = created_at_obj.strftime('%Y-%m-%d')
+    try:
+        city = order.billing_address.city
+    except AttributeError:
+        city = " "
+        print("Error retrieving city")
 
-        order_info = {
-            'order_num': order.name.replace("#",""),
-            'order_id': order.id,
-            'created_at': formatted_date,
-            'total_price': order.current_subtotal_price,
-            'line_items': [],
-            'financial_status': order.financial_status.title(),
-            'fulfillment_status': order.fulfillment_status or "Unfulfilled",
-            'customer_details': {
-                "name": getattr(order.billing_address, "name", " "),
-                "address": getattr(order.billing_address, "address1", " "),
-                "city": getattr(order.billing_address, "city", " "),
-                "phone": getattr(order.billing_address, "phone", " ")
-            },
-            'tags': order.tags.split(", ") if order.tags else []
-        }
+    try:
+        phone = order.billing_address.phone
+    except AttributeError:
+        phone = " "
+        print("Error retrieving phone")
 
-        tasks = [process_line_item(session, line_item, order.fulfillments) for line_item in order.line_items]
-        results = await asyncio.gather(*tasks)
+    customer_details = {
+        "name": name,
+        "address": address,
+        "city": city,
+        "phone": phone
+    }
+    order_info = {
+        'order_link': "https://admin.shopify.com/store/tick-bags-best-bean-bags-in-pakistan/orders/" + str(order.id),
+        'order_id': order.name,
+        'tracking_id': 'N/A',
+        'created_at': formatted_datetime,
+        'total_price': order.total_price,
+        'line_items': [],
+        'financial_status': (order.financial_status).title(),
+        'fulfillment_status': status,
+        'customer_details': customer_details,
+        'tags' : [tag for tag in order.tags.split(", ") if tag != "Leopards Courier"],
+        'id': order.id
+    }
+    print(order.tags)
 
-        for tracking_info_list, line_item in zip(results, order.line_items):
-            if tracking_info_list is None:
-                continue
+    tasks = []
+    for line_item in order.line_items:
+        tasks.append(process_line_item(session, line_item, order.fulfillments))
 
-            # Use default image and variant name initially
+    results = await asyncio.gather(*tasks)
+    variant_name = ""
+    for tracking_info_list, line_item in zip(results, order.line_items):
+        if tracking_info_list is None:
+            continue
+
+        if line_item.product_id is not None:
+            product = shopify.Product.find(line_item.product_id)
+            if product and product.variants:
+                for variant in product.variants:
+                    if variant.id == line_item.variant_id:
+                        if variant.image_id is not None:
+                            images = shopify.Image.find(image_id=variant.image_id, product_id=line_item.product_id)
+                            variant_name = line_item.variant_title
+                            for image in images:
+                                if image.id == variant.image_id:
+                                    image_src = image.src
+                        else:
+                            variant_name = ""
+                            image_src = product.image.src
+        else:
             image_src = "https://static.thenounproject.com/png/1578832-200.png"
-            variant_name = line_item.variant_title or ""
 
-            # Check if image fetching is necessary
-            if line_item.product_id is not None:
-                try:
-                    # Fetch product and check for cached data or default
-                    product = shopify.Product.find(line_item.product_id)
-                    if product and product.variants:
-                        for variant in product.variants:
-                            if variant.id == line_item.variant_id:
-                                if variant.image_id is not None:
-                                    images = shopify.Image.find(image_id=variant.image_id,
-                                                                product_id=line_item.product_id)
-                                    variant_name = line_item.variant_title
-                                    for image in images:
-                                        if image.id == variant.image_id:
-                                            image_src = image.src
-                                else:
-                                    variant_name = ""
-                                    image_src = product.image.src
-                                    break
-                    else:
-                        image_src = "https://static.thenounproject.com/png/1578832-200.png"
-                except Exception as e:
-                    print(f"Error fetching product details for product ID {line_item.product_id}: {e}")
+        for info in tracking_info_list:
+            order_info['line_items'].append({
+                'fulfillment_status': line_item.fulfillment_status,
+                'image_src': image_src,
+                'product_title': line_item.title + " - " + variant_name,
+                'quantity': info['quantity'],
+                'tracking_number': info['tracking_number'],
+                'status': info['status'],
+                'name': info.get('name', 'N/A'),
+                'address': info.get('address', 'N/A'),
+                'city': info.get('city', 'N/A'),
+                'phone': info.get('phone', 'N/A'),
+            })
+            order_info['status'] = info['status']
 
-            # Append tracking and line item details
-            for info in tracking_info_list:
-                order_info['line_items'].append({
-                    'fulfillment_status': line_item.fulfillment_status,
-                    'image_src': image_src,
-                    'product_title': line_item.title + (f" - {variant_name}" if variant_name else ""),
-                    'quantity': info['quantity'],
-                    'tracking_number': info['tracking_number'],
-                    'status': info['status']
-                })
-                order_info['status'] = info['status']
+    order_end_time = time.time()
+    print(f"Time taken to process order {order.order_number}: {order_end_time - order_start_time:.2f} seconds")
 
-        order_end_time = time.time()
-        print(f"Processed order {order.order_number} in {order_end_time - order_start_time:.2f} seconds")
-        return order_info
+    return order_info
+
+
+
+@app.route('/apply_tag', methods=['POST'])
+def apply_tag():
+    data = request.json
+    order_id = data.get('order_id')
+    tag = data.get('tag')
+
+    # Get today's date in YYYY-MM-DD format
+    today_date = datetime.now().strftime('%Y-%m-%d')
+    tag_with_date = f"{tag.strip()} ({today_date})"
+
+    try:
+        # Fetch the order
+        order = shopify.Order.find(order_id)
+
+        # If the tag is "Returned", cancel the order
+        if tag.strip().lower() == "returned":
+            # Attempt to cancel the order
+            if order.cancel():
+                print("Order Cancelled")
+            else:
+                print("Order Cancellation Failed")
+        if tag.strip().lower() == "delivered":
+            if order.close():
+                print("Order Cloed")
+            else:
+                print("Order Closing Failed")
+
+        # Process existing tags
+        if order.tags:
+            tags = [t.strip() for t in order.tags.split(", ")]  # Remove excess spaces
+        else:
+            tags = []
+
+        # Remove a specific tag if needed (e.g., "Leopards Courier")
+        if "Leopards Courier" in tags:
+            tags.remove("Leopards Courier")
+
+        # Add new tag if it doesn't already exist
+        if tag_with_date not in tags:
+            tags.append(tag_with_date)
+
+        # Update the order with the new tags
+        order.tags = ", ".join(tags)
+
+        # Save the order
+        if order.save():
+            return jsonify({"success": True, "message": "Tag applied successfully."})
+        else:
+            return jsonify({"success": False, "error": "Failed to save order changes."})
 
     except Exception as e:
-        print(f"Error processing order {order.order_number}: {e}")
-        return None
+        print(f"Error: {e}")
+        return jsonify({"success": False, "error": str(e)})
 
 
-
-@app.route('/pending')
-def pending_orders():
-    all_orders = []
-    pending_items_dict = {}  # Dictionary to track quantities of each unique item
-
-    global order_details
+RATE_LIMIT = 2  # 2 requests per second
+LAST_REQUEST_TIME = 0
 
 
-    # Process Shopify orders with the specified statuses
-    for shopify_order in order_details:
-        if not shopify_order:  # Skip if shopify_order is None or empty
-            continue
-        if shopify_order['status'] in ['CONSIGNMENT BOOKED', 'Un-Booked']:
-            shopify_items_list = [
-                {
-                    'item_image': item['image_src'],
-                    'item_title': item['product_title'],
-                    'quantity': item['quantity'],
-                    'tracking_number': item['tracking_number'],
-                    'status': item['status']
-                }
-                for item in shopify_order['line_items']
-            ]
+async def limited_request(coroutine):
+    """Ensure requests adhere to rate limits."""
+    async with semaphore:
+        await asyncio.sleep(0.5)  # Enforce delay for Shopify rate limits (no more than 2 per second)
+        return await coroutine
 
-            shopify_order_data = {
-                'order_via': 'Shopify',
-                'order_id': shopify_order['order_id'],
-                'status': shopify_order['status'],
-                'tracking_number': shopify_order.get('tracking_number', 'N/A'),
-                'date': shopify_order['created_at'],
-                'items_list': shopify_items_list
-            }
-            all_orders.append(shopify_order_data)
-
-            # Count quantities for each item in the Shopify order
-            for item in shopify_items_list:
-                product_title = item['item_title']
-                quantity = item['quantity']
-                item_image = item['item_image']
-
-                if product_title in pending_items_dict:
-                    pending_items_dict[product_title]['quantity'] += quantity
-                else:
-                    pending_items_dict[product_title] = {
-                        'item_image': item_image,
-                        'item_title': product_title,
-                        'quantity': quantity
-                    }
-
-    pending_items = list(pending_items_dict.values())
-    pending_items_sorted = sorted(
-        pending_items,
-        key=lambda x: x.get('item_title', '').lower() if x.get('item_title') else '',
-        reverse=True
-    )
-
-    half = len(pending_items_sorted) // 2
-
-    return render_template('pending.html', all_orders=all_orders, pending_items=pending_items_sorted, half=half)
 
 async def getShopifyOrders():
     start_date = datetime(2024, 9, 1).isoformat()
@@ -323,284 +401,104 @@ async def getShopifyOrders():
     return order_details
 
 
-from datetime import datetime, timedelta
-import pytz
-
-
-def adjust_to_shopify_timezone(from_date, to_date):
-    # Parse input dates (assumed to be in GMT+5 already)
-    from_date = datetime.strptime(from_date, "%Y-%m-%d").replace(hour=0, minute=0, second=0)
-    to_date = datetime.strptime(to_date, "%Y-%m-%d").replace(hour=23, minute=59, second=59)
-
-    # Format the dates with explicit GMT+5 offset
-    from_date_gmt_plus_5 = from_date.strftime('%Y-%m-%dT%H:%M:%S+05:00')
-    to_date_gmt_plus_5 = to_date.strftime('%Y-%m-%dT%H:%M:%S+05:00')
-
-    return from_date_gmt_plus_5, to_date_gmt_plus_5
-
-
-async def getShopifyOrderswithDates(start_date: str, end_date: str):
-    order_details = []
-    total_start_time = time.time()
-
-    try:
-        orders = shopify.Order.find(
-            limit=250,
-            order="created_at DESC",
-            created_at_min=start_date,
-            created_at_max=end_date,
-            status='any'
-        )
-    except Exception as e:
-        print(f"Error fetching orders: {e}")
-        return []
-
-    async with aiohttp.ClientSession() as session:
-        while True:
-            tasks = [process_shopify_order_with_details(session, order) for order in orders]
-            results = await asyncio.gather(*tasks, return_exceptions=True)
-
-            for result in results:
-                if isinstance(result, Exception):
-                    print(f"Error processing an order: {result}")
-                else:
-                    order_details.append(result)
-
-            try:
-                if not orders.has_next_page():
-                    break
-                orders = orders.next_page()
-            except Exception as e:
-                print(f"Error fetching next page: {e}")
-                break
-
-    total_end_time = time.time()
-    print(f"Processed {len(order_details)} orders in {total_end_time - total_start_time:.2f} seconds")
-    return order_details
-
-
-@app.route('/fetch-orders', methods=['POST'])
-def fetch_orders():
-    data = request.get_json()
-
-    # Ensure the fromDate and toDate are passed correctly (format: YYYY-MM-DD)
-    from_date = data.get('fromDate')
-    to_date = data.get('toDate')
-
-    # Adjust the dates to Shopify's timezone (convert to UTC)
-    from_date_utc, to_date_utc = adjust_to_shopify_timezone(from_date, to_date)
-    print(from_date_utc)
-    print(to_date_utc)
-    # Now pass the adjusted UTC dates to fetch orders
-    orders = asyncio.run(getShopifyOrderswithDates(from_date_utc, to_date_utc))
-
-    total_sales = 0.0
-    total_cost = 0.0
-    for order in orders:
-        total_sales += float(order['total_price'])  # Assuming total_price is a string, convert to float
-        total_cost += float(order['total_item_cost'])  # Assuming total_item_cost is a string, convert to float
-
-    # Return the orders with totals
-    return jsonify({
-        'orders': orders,
-        'total_sales': total_sales,
-        'total_cost': total_cost
-    })
-
-
-async def process_shopify_order_with_details(session, order):
-    try:
-        # Ensure required keys are present in the order
-        if not hasattr(order, 'order_number') or not hasattr(order, 'line_items'):
-            raise ValueError(f"Order {order.id} is missing critical attributes.")
-
-        # Prepare order information
-        order_info = {
-            'order_id': order.order_number,
-            'created_at': order.created_at,
-            'total_price': order.current_subtotal_price or "0.0",  # Default to 0.0 if missing
-            'line_items': [],
-            'financial_status': order.financial_status.title() if order.financial_status else "Unknown",
-            'fulfillment_status': order.fulfillment_status or "Unfulfilled",
-            'total_item_cost': 0,  # To track the total cost of the items
-            'tracking_info': [],  # For all tracking details
-            'status': "Unfulfilled",  # Default status
-        }
-
-        # Process line items with tracking and cost details
-        tasks = [process_line_item(session, line_item, order.fulfillments) for line_item in order.line_items]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-
-        for line_item, tracking_info_list in zip(order.line_items, results):
-            if isinstance(tracking_info_list, Exception):
-                print(f"Error processing line item {line_item.id}: {tracking_info_list}")
-                continue
-
-            # Initialize placeholders for image, variant details, and cost
-            image_src = "https://static.thenounproject.com/png/1578832-200.png"
-            variant_name = ""
-            line_item_cost = 0.0  # Initialize cost for this line item
-
-            # Fetch product and variant details for the line item
-            if line_item.product_id is not None:
-                try:
-                    product = shopify.Product.find(line_item.product_id)
-                    if product and product.variants:
-                        for variant in product.variants:
-                            if variant.id == line_item.variant_id:
-                                # Fetch variant-specific image
-                                if variant.image_id:
-                                    images = shopify.Image.find(image_id=variant.image_id,
-                                                                product_id=line_item.product_id)
-                                    for image in images:
-                                        if image.id == variant.image_id:
-                                            image_src = image.src
-                                            break
-                                else:
-                                    # Fallback to product-level image
-                                    image_src = product.image.src if product.image else image_src
-                                variant_name = line_item.variant_title
-
-                                # Fetch cost from inventory item
-                                if hasattr(variant, "inventory_item_id"):
-                                    inventory_item = shopify.InventoryItem.find(variant.inventory_item_id)
-                                    if inventory_item and hasattr(inventory_item, "cost"):
-                                        line_item_cost = float(inventory_item.cost) if inventory_item.cost else 0.0
-                                break
-
-                except Exception as e:
-                    print(f"Error fetching product details for product ID {line_item.product_id}: {e}")
-
-            # Append tracking and line item details
-            for info in tracking_info_list:
-                order_info['line_items'].append({
-                    'fulfillment_status': line_item.fulfillment_status,
-                    'image_src': image_src,
-                    'product_title': line_item.title + (f" - {variant_name}" if variant_name else ""),
-                    'quantity': info['quantity'],
-                    'tracking_number': info['tracking_number'],
-                    'status': info['status'],
-                    'cost': line_item_cost,  # Include the cost for the line item
-                })
-
-            # Update the total item cost for the order
-            order_info['total_item_cost'] += line_item_cost * sum(info['quantity'] for info in tracking_info_list)
-
-            # Update order-level status based on tracking details
-            if tracking_info_list:
-                order_info['status'] = tracking_info_list[-1]['status']  # Use the last tracking status
-
-        return order_info
-
-    except Exception as e:
-        print(f"Failed to process order {getattr(order, 'order_number', 'Unknown')}: {e}")
-        return None
-
-
-async def fetch_line_item_cost_and_tracking(session, line_item, fulfillments):
-    """
-    Fetch the tracking information of a line item.
-
-    Args:
-        session (aiohttp.ClientSession): The HTTP session for API requests.
-        line_item: A Shopify line item object.
-        fulfillments: List of fulfillments related to the order.
-
-    Returns:
-        tuple: (tracking_info_list)
-    """
-    try:
-        # Step 1: Initialize an empty tracking info list
-        tracking_info_list = []
-
-        # Step 2: Fetch tracking information
-        if line_item.fulfillment_status == "fulfilled":
-            for fulfillment in fulfillments:
-                if fulfillment.status == "cancelled":
-                    continue
-
-                for item in fulfillment.line_items:
-                    if item.id == line_item.id:
-                        tracking_number = fulfillment.tracking_number
-                        data = await fetch_tracking_data(session, tracking_number)
-                        tracking_details = (
-                            data[-1].get("ProcessDescForPortal", "DELIVERED") if data else "N/A"
-                        )
-                        tracking_info_list.append({
-                            'tracking_number': tracking_number,
-                            'status': tracking_details,
-                            'quantity': item.quantity
-                        })
-
-        return tracking_info_list
-
-    except Exception as e:
-        print(f"Error fetching tracking for line item {getattr(line_item, 'id', 'Unknown')}: {e}")
-        return []
-
-
-@app.route('/apply_tag', methods=['POST'])
-def apply_tag():
-    data = request.json
-    order_id = data.get('order_id')
-    print(order_id)
-    tag = data.get('tag')
-
-    # Get today's date in YYYY-MM-DD format
-    today_date = datetime.now().strftime('%Y-%m-%d')
-    tag_with_date = f"{tag.strip()} ({today_date})"
-    try:
-        # Fetch the order
-        order = shopify.Order.find(order_id)
-
-        # Ensure it's a single order
-        if not hasattr(order, 'tags'):
-            raise ValueError("Could not fetch a valid order. Ensure the order ID is correct.")
-
-        # If the tag is "Returned", cancel the order
-        if tag.strip().lower() == "returned":
-            if order.cancel():
-                print("Order Cancelled")
-            else:
-                print("Order Cancellation Failed")
-        if tag.strip().lower() == "delivered":
-            if order.close():
-                print("Order Closed")
-            else:
-                print("Order Closing Failed")
-
-        # Process existing tags
-        tags = [t.strip() for t in order.tags.split(", ")] if order.tags else []
-
-        if "Leopards Courier" in tags:
-            tags.remove("Leopards Courier")
-
-        if tag_with_date not in tags:
-            tags.append(tag_with_date)
-
-        # Update and save the order
-        order.tags = ", ".join(tags)
-        if order.save():
-            return jsonify({"success": True, "message": "Tag applied successfully."})
-        else:
-            return jsonify({"success": False, "error": "Failed to save order changes."})
-
-    except Exception as e:
-        print(f"Error: {e}")
-        return jsonify({"success": False, "error": str(e)})
 
 
 @app.route("/")
 def tracking():
-    global order_details
-    return render_template("track_alk.html", order_details=order_details)
+    global order_details, pre_loaded, daraz_orders
+    return render_template("track.html", order_details=order_details, darazOrders=daraz_orders)
 
 
-def format_date(date_str):
-    # Parse the date string
-    date_obj = datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S %z")
-    # Format the date object to only show the date
-    return date_obj.strftime("%Y-%m-%d")
+def get_daraz_orders(statuses):
+    try:
+        access_token = '50000902021Yejq5rSzhGiOp0hRUGDxjt12fb1602qewR3toNX4APiKiju3bxu'
+        client = lazop.LazopClient('https://api.daraz.pk/rest', '501554', 'nrP3XFN7ChZL53cXyVED1yj4iGZZtlcD')
+
+        all_orders = []
+
+        for status in statuses:
+            request = lazop.LazopRequest('/orders/get', 'GET')
+            request.add_api_param('sort_direction', 'DESC')
+            request.add_api_param('update_before', '2025-02-10T16:00:00+08:00')
+            request.add_api_param('offset', '0')
+            request.add_api_param('created_before', '2025-02-10T16:00:00+08:00')
+            request.add_api_param('created_after', '2017-02-10T09:00:00+08:00')
+            request.add_api_param('limit', '50')
+            request.add_api_param('update_after', '2017-02-10T09:00:00+08:00')
+            request.add_api_param('sort_by', 'updated_at')
+            request.add_api_param('status', status)
+            request.add_api_param('access_token', access_token)
+
+            response = client.execute(request)
+            darazOrders = response.body.get('data', {}).get('orders', [])
+
+            for order in darazOrders:
+                order_id = order.get('order_id', 'Unknown')
+
+                item_request = lazop.LazopRequest('/order/items/get', 'GET')
+                item_request.add_api_param('order_id', order_id)
+                item_request.add_api_param('access_token', access_token)
+
+                item_response = client.execute(item_request)
+                items = item_response.body.get('data', [])
+
+                item_details = []
+                for item in items:
+                    tracking_num = item.get('tracking_code', 'Unknown')
+
+                    tracking_req = lazop.LazopRequest('/logistic/order/trace', 'GET')
+                    tracking_req.add_api_param('order_id', order_id)
+                    tracking_req.add_api_param('access_token', access_token)
+                    tracking_response = client.execute(tracking_req)
+
+                    tracking_data = tracking_response.body.get('result', {})
+                    packages = tracking_data.get('data', [{}])[0].get('package_detail_info_list', [])
+
+                    track_status = "N/A"
+                    for package in packages:
+                        if package.get("tracking_number") == tracking_num:
+                            track_status = package.get('logistic_detail_info_list', [{}])[-1].get('title', "N/A")
+                            break
+                    product_title = f"{item.get('name', 'Unknown')} {item.get('variation', 'N/A')}"
+                    if "Color family:" in product_title:
+                        product_info, color_info = product_title.split("Color family:", 1)
+                        product_title = f"{product_info.strip()} - {color_info.strip()}"
+
+                    item_detail = {
+                        'item_image': item.get('product_main_image', 'N/A'),
+                        'item_title': product_title,
+                        'quantity': 1,
+                        'tracking_number': item.get('tracking_code', 'N/A'),
+                        'status': track_status
+                    }
+                    item_details.append(item_detail)
+
+                filtered_order = {
+                    'order_id': f"{order.get('order_id', 'Unknown')}",
+                    'customer': {
+                        'name': f"{order.get('customer_first_name', 'Unknown')} {order.get('customer_last_name', 'Unknown')}",
+                        'address': order.get('address_shipping', {}).get('address', 'N/A'),
+                        'phone': order.get('address_shipping', {}).get('phone', 'N/A')
+                    },
+                    'status': status.replace('_', ' ').title(),
+                    'date': format_date(order.get('created_at', 'N/A')),
+                    'total_price': order.get('price', '0.00'),
+                    'items_list': item_details,
+                    'tracking_id': 'N/A',
+                }
+                all_orders.append(filtered_order)
+
+        return all_orders
+    except Exception as e:
+        print(f"Error fetching darazOrders: {e}")
+        return []
+
+
+@app.route('/daraz')
+def daraz():
+    statuses = ['shipped', 'pending', 'ready_to_ship']
+    darazOrders = get_daraz_orders(statuses)
+    return render_template('daraz.html', darazOrders=darazOrders)
 
 
 @app.route('/refresh', methods=['POST'])
@@ -608,7 +506,7 @@ def refresh_data():
     global order_details
     try:
         order_details = asyncio.run(getShopifyOrders())
-        return render_template("track_alk.html", order_details=order_details)
+        return render_template("track.html", order_details=order_details)
     except Exception as e:
         print(f"Error refreshing data: {e}")
         return jsonify({'message': 'Failed to refresh data'}), 500
@@ -628,29 +526,238 @@ def displayTracking(tracking_num):
 
     data = run_async(async_func)
 
-    return render_template('trackingdata_alk.html', data=data)
+    return render_template('trackingdata.html', data=data)
 
 
+from flask import request, jsonify
+from datetime import datetime
+
+
+async def fetch_order_details():
+    # Run the function in the background
+    global order_details
+    order_details = await getShopifyOrders()
+
+
+@app.route('/pending')
+def pending_orders():
+    all_orders = []
+    pending_items_dict = {}  # Dictionary to track quantities of each unique item
+
+    global daraz_orders, order_details
+
+    # Process Daraz orders with the specified statuses
+    for daraz_order in daraz_orders:
+        if daraz_order['status'] in ['Ready To Ship', 'Pending']:
+            daraz_order_data = {
+                'order_via': 'Daraz',
+                'order_id': daraz_order['order_id'],
+                'status': daraz_order['status'],
+                'tracking_number': daraz_order['items_list'][0]['tracking_number'],
+                'date': daraz_order['date'],
+                'items_list': daraz_order['items_list']
+            }
+            all_orders.append(daraz_order_data)
+
+            for item in daraz_order['items_list']:
+                product_title = item['item_title']
+                quantity = item['quantity']
+                item_image = item['item_image']
+
+                if product_title in pending_items_dict:
+                    pending_items_dict[product_title]['quantity'] += quantity
+                else:
+                    pending_items_dict[product_title] = {
+                        'item_image': item_image,
+                        'item_title': product_title,
+                        'quantity': quantity
+                    }
+
+    # Process Shopify orders with the specified statuses
+    for shopify_order in order_details:
+        # Skip orders with tags starting with "Dispatched"
+        if any(tag.startswith("Dispatched") for tag in shopify_order.get('tags', [])):
+            continue
+
+        if shopify_order['status'] in ['Booked', 'Un-Booked']:
+            shopify_items_list = [
+                {
+                    'item_image': item['image_src'],
+                    'item_title': item['product_title'],
+                    'quantity': item['quantity'],
+                    'tracking_number': item['tracking_number'],
+                    'status': item['status']
+                }
+                for item in shopify_order['line_items']
+            ]
+
+            shopify_order_data = {
+                'order_via': 'Shopify',
+                'order_id': shopify_order['order_id'],
+                'status': shopify_order['status'],
+                'tracking_number': shopify_order['tracking_id'],
+                'date': shopify_order['created_at'],
+                'items_list': shopify_items_list
+            }
+            all_orders.append(shopify_order_data)
+
+            # Count quantities for each item in the Shopify order
+            for item in shopify_items_list:
+                product_title = item['item_title']
+                quantity = item['quantity']
+                item_image = item['item_image']
+
+                if product_title in pending_items_dict:
+                    pending_items_dict[product_title]['quantity'] += quantity
+                else:
+                    pending_items_dict[product_title] = {
+                        'item_image': item_image,
+                        'item_title': product_title,
+                        'quantity': quantity
+                    }
+
+    pending_items = list(pending_items_dict.values())
+    pending_items_sorted = sorted(pending_items, key=lambda x: x['quantity'], reverse=True)
+
+    # Split the list into two halves
+    half = len(pending_items_sorted) // 2
+
+    return render_template('pending.html', all_orders=all_orders, pending_items=pending_items_sorted, half=half)
 
 
 @app.route('/undelivered')
 def undelivered():
-    global order_details, pre_loaded
-    return render_template("undelivered.html", order_details=order_details)
+    global order_details, pre_loaded, daraz_orders
+    return render_template("undelivered.html", order_details=order_details, darazOrders=daraz_orders)
 
 
-@app.route('/report')
-def report():
-    global order_details, pre_loaded
-    # Ensure order_details is a list of dictionaries (or the desired structure)
-    if not isinstance(order_details, list):
-        order_details = []
-    return render_template("report.html", order_details=order_details)
+def verify_shopify_webhook(request):
+    """
+    Verify the webhook using HMAC with the shared secret.
+    """
+    shopify_hmac = request.headers.get('X-Shopify-Hmac-Sha256')
+    data = request.get_data()  # Raw request body (bytes)
 
-@app.route("/track")
-def tracking_track():
-    global order_details
-    return render_template("track_alk.html", order_details=order_details)
+    # Retrieve the secret from environment variables
+    secret = os.getenv('SHOPIFY_WEBHOOK_SECRET')
+
+    # Check that the secret is set. If not, raise an error.
+    if secret is None:
+        raise ValueError("SHOPIFY_WEBHOOK_SECRET is not set. Please configure the environment variable.")
+
+    # Compute the HMAC digest and base64 encode it.
+    digest = hmac.new(
+        secret.encode('utf-8'),
+        data,
+        hashlib.sha256
+    ).digest()
+    computed_hmac = base64.b64encode(digest).decode('utf-8')
+
+    # Compare the computed HMAC with the one sent by Shopify.
+    return hmac.compare_digest(computed_hmac, shopify_hmac)
+
+
+@app.route('/shopify/webhook/order_updated', methods=['POST'])
+def shopify_order_updated():
+    global order_details  # Ensure we're modifying the global variable
+    try:
+        # Verify the webhook request is from Shopify
+        if not verify_shopify_webhook(request):
+            return jsonify({'error': 'Invalid webhook signature'}), 401
+
+        # Parse the JSON payload sent by Shopify
+        order_data = request.get_json()
+        order_id = order_data.get('id')
+        if not order_id:
+            return jsonify({'error': 'No order id found in payload'}), 400
+
+        print(f"Received webhook for order ID: {order_id}")
+
+        # Fetch the complete order from Shopify
+        order = shopify.Order.find(order_id)
+        if not order:
+            return jsonify({'error': f'Order {order_id} not found'}), 404
+
+        # Process the order update asynchronously.
+        async def update_order():
+            async with aiohttp.ClientSession() as session:
+                updated_order_info = await process_order(session, order)
+                return updated_order_info
+
+        updated_order_info = asyncio.run(update_order())
+
+        # Update the global order_details list with the new info.
+        # Assuming each order has a unique 'id' field:
+        updated = False
+        for idx, existing_order in enumerate(order_details):
+            if existing_order.get('id') == updated_order_info.get('id'):
+                order_details[idx] = updated_order_info
+                updated = True
+                break
+        # If the order wasn't in the list, you might want to add it:
+        if not updated:
+            order_details.append(updated_order_info)
+
+        # Optionally, log the updated global orders
+        print("Updated order_details:", order_details)
+
+        return jsonify({
+            'success': True,
+            'message': f'Order {order_id} processed successfully',
+            'order': updated_order_info
+        }), 200
+
+    except Exception as e:
+        print(f"Webhook processing error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+from flask import request, render_template, redirect, url_for
+
+
+@app.route('/scan', methods=['GET', 'POST'])
+def search():
+    search_term = (request.args.get('term') or request.form.get('search_term') or "").split(',')[0].strip()
+    if not search_term:
+        return render_template('scan.html')
+
+    order_found = None
+
+    for order in order_details:
+        if order.get('order_id') == search_term or order.get('tracking_id') == search_term:
+            order_found = order
+            break
+        for item in order.get('line_items', []):
+            if item.get('tracking_number') == search_term:
+                order_found = order
+                break
+        if order_found:
+            break
+
+    if request.method == 'POST':
+        return render_template('scan.html', search_term=search_term, order_found=order_found)
+
+    return jsonify(order_found if order_found else {"error": "Order not found"}), 200 if order_found else 404
+
+
+@app.route('/dispatch', methods=['GET'])
+def dispatch():
+    # Fetch orders for dispatch
+    dispatch_orders = []
+    for order in order_details:
+        # Add filtering logic if necessary
+        dispatch_orders.append(order)
+    return jsonify(dispatch_orders)
+
+
+@app.route('/return', methods=['GET'])
+def return_orders():
+    # Fetch orders for return
+    return_orders = []
+    for order in order_details:
+        # Add filtering logic if necessary
+        return_orders.append(order)
+    return jsonify(return_orders)
 
 
 shop_url = os.getenv('SHOP_URL')
@@ -659,10 +766,37 @@ password = os.getenv('PASSWORD')
 shopify.ShopifyResource.set_site(shop_url)
 shopify.ShopifyResource.set_user(api_key)
 shopify.ShopifyResource.set_password(password)
+statuses = ['shipped', 'pending', 'ready_to_ship']
+daraz_orders = get_daraz_orders(statuses)
+
 order_details = asyncio.run(getShopifyOrders())
 
+def restart_program():
+    """Restarts the current Python script."""
+    print("Restarting the program...")
+    os.execv(sys.executable, ['python'] + sys.argv)  # Restart script
+
+def check_restart_times():
+    """Checks the time and restarts the script if needed."""
+    target_times = ["10:00", "20:00", "02:00"]  # 10 AM, 8 PM, 2 AM GMT+5
+
+    while True:
+        now = datetime.now().strftime("%H:%M")
+
+        if now in target_times:
+            restart_program()
+
+        time.sleep(30)
+
 if __name__ == "__main__":
+    # Load environment variables
     shop_url = os.getenv('SHOP_URL')
     api_key = os.getenv('API_KEY')
     password = os.getenv('PASSWORD')
-    app.run(port=5001)
+
+    # Start the time checker in a separate thread
+    restart_thread = threading.Thread(target=check_restart_times, daemon=True)
+    restart_thread.start()
+
+    # Start Flask app
+    app.run(host="0.0.0.0", port=5001, debug=True)
