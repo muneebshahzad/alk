@@ -288,12 +288,12 @@
         {% if order.status not in ['Booked', 'Un-Booked'] %}
 
             <tr>
-                <td>{{ order.order_id }}</td>
+                <td>{{ order.order_num }}</td>
                 <td>
-                    {{ order.line_items[0].name }}<br>
-                    {{ order.line_items[0].address }}<br>
-                    {{ order.line_items[0].city }}<br>
-                    {{ order.line_items[0].phone }}<br>
+                     {{ order.customer_details.name or "Unknown" }}<br>
+                {{ order.customer_details.address or "Not provided" }}<br>
+                {{ order.customer_details.city or "Unknown" }}<br>
+                {{ order.customer_details.phone or "Not provided" }}<br>
                     <a href="tel:{{ order.line_items[0].phone }}" class="btn btn-primary btn-sm">Call</a>
                     <div class="btn-group">
                         <button type="button" class="btn btn-success btn-sm dropdown-toggle" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
@@ -535,3 +535,4 @@
 
 
 </html>
+
