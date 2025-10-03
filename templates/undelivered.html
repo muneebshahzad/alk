@@ -362,7 +362,8 @@
                         <button class="btn btn-primary btn-sm" onclick="toggleStatusButtons(this)">Mark As</button>
                         <div class="status-buttons">
                              <button class="btn btn-outline-success btn-sm" onclick="applyTag('{{ order.id }}', 'Delivered')">Delivered</button>
-                            <button class="btn btn-outline-danger btn-sm" onclick="applyTag('{{ order.id }}', 'Returned')">Returned</button>
+                            <button class="btn btn-outline-danger btn-sm" onclick="applyTag('{{ order.id }}', 'Returned')">Close Order</button>
+                            <button class="btn btn-outline-danger btn-sm" onclick="applyTag('{{ order.id }}', 'Return Received')">Return Received</button>
                             <button class="btn btn-outline-warning btn-sm" onclick="applyTag('{{ order.id }}', 'Cancelled')">Cancelled</button>
                             <button class="btn btn-outline-info btn-sm" onclick="applyTag('{{ order.id }}', 'Confirmed')">Confirmed</button>
                             <button class="btn btn-outline-secondary btn-sm" onclick="applyTag('{{ order.id }}', 'Call Not Attended')">Call Not Attended</button>
@@ -531,5 +532,6 @@
     </script>
 
 </body>
+
 
 </html>
