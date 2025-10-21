@@ -8,8 +8,9 @@ import time
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from flask import Flask, render_template, jsonify, request, flash, redirect, url_for, abort
-import datetime, requests
-from datetime import datetime
+# FIX: Explicitly import timedelta to avoid name collision with the datetime class
+import requests
+from datetime import datetime, timedelta
 import pymssql, shopify
 import aiohttp
 import lazop
@@ -276,71 +277,10 @@ async def process_order(session, order):
         return None
 
 
-@app.route('/pending')
-def pending_orders():
-    all_orders = []
-    pending_items_dict = {}
-
-    global order_details
-
-    for shopify_order in order_details:
-        if not shopify_order:
-            continue
-        if shopify_order.get('status') in ['CONSIGNMENT BOOKED', 'Un-Booked']:
-            shopify_items_list = [
-                {
-                    'item_image': item['image_src'],
-                    'item_title': item['product_title'],
-                    'quantity': item['quantity'],
-                    'tracking_number': item['tracking_number'],
-                    'status': item['status']
-                }
-                for item in shopify_order['line_items']
-            ]
-
-            shopify_order_data = {
-                'order_link' : shopify_order['order_link'],
-                'order_via': 'Shopify',
-                'order_id': shopify_order['order_id'],
-                'order_num': shopify_order['order_num'],
-                'status': shopify_order.get('status'),
-                'tracking_number': shopify_order.get('tracking_number', 'N/A'),
-                'date': shopify_order['created_at'],
-                'items_list': shopify_items_list,
-                'total_price': shopify_order['total_price']
-            }
-            all_orders.append(shopify_order_data)
-
-            # Count quantities for each item in the Shopify order
-            for item in shopify_items_list:
-                product_title = item['item_title']
-                quantity = item['quantity']
-                item_image = item['item_image']
-
-                if product_title in pending_items_dict:
-                    pending_items_dict[product_title]['quantity'] += quantity
-                else:
-                    pending_items_dict[product_title] = {
-                        'item_image': item_image,
-                        'item_title': product_title,
-                        'quantity': quantity
-                    }
-
-    pending_items = list(pending_items_dict.values())
-    pending_items_sorted = sorted(
-        pending_items,
-        key=lambda x: x.get('item_title', '').lower() if x.get('item_title') else '',
-        reverse=True
-    )
-
-    half = len(pending_items_sorted) // 2
-
-    return render_template('pending.html', all_orders=all_orders, pending_items=pending_items_sorted, half=half)
-
-
 async def getShopifyOrders():
     # Only pull orders from the last 10 months to manage list size
-    start_date = (datetime.now() - datetime.timedelta(days=300)).isoformat()
+    # FIX: Use timedelta directly now that it's imported
+    start_date = (datetime.now() - timedelta(days=300)).isoformat()
     order_details = []
     total_start_time = time.time()
 
