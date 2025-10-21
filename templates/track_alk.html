@@ -235,7 +235,8 @@
     <tbody>
         {% for order in order_details %}
             <tr>
-                        <td>{{ order.order_num }}</td>
+                                                                        <td><a href="{{ order.order_link }}" target="_blank">{{ order.order_num }}</a></td>
+
         <td>
             {% if order.customer_details %}
                 {{ order.customer_details.name or "Unknown" }}<br>

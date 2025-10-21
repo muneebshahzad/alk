@@ -289,7 +289,7 @@
         {% for order in order_details %}
         {% if order.status not in ['Booked', 'Un-Booked'] %}
             <tr>
-                <td>{{ order.order_num }}</td>
+                <td><a href="{{ order.order_link }}" target="_blank">{{ order.order_num }}</a></td>
                 <td>
                     {% if order.customer_details %}
                         {{ order.customer_details.name or "Unknown" }}<br>
