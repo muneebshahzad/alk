@@ -254,6 +254,8 @@ async def process_order(session, order):
                 
                 # Use variant name from sync fetch if available, otherwise fall back
                 variant_name = raw_variant_name if raw_variant_name else (line_item.variant_title or "")
+                if variant_name.strip().lower() == "default title":
+                    variant_name = ""
             
             # Append tracking and line item details
             for info in tracking_info_list:
@@ -771,5 +773,6 @@ except Exception as e:
 
 if __name__ == "__main__":
     app.run(port=5001)
+
 
 
