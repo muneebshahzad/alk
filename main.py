@@ -257,12 +257,15 @@ def pending_orders():
             ]
 
             shopify_order_data = {
+                'order_link' : shopify_order['order_link'],
                 'order_via': 'Shopify',
                 'order_id': shopify_order['order_id'],
+                'order_num': shopify_order['order_num'],
                 'status': shopify_order.get('status'),
                 'tracking_number': shopify_order.get('tracking_number', 'N/A'),
                 'date': shopify_order['created_at'],
-                'items_list': shopify_items_list
+                'items_list': shopify_items_list,
+                'total_price': shopify_order['total_price']
             }
             all_orders.append(shopify_order_data)
 
