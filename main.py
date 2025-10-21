@@ -160,6 +160,7 @@ async def process_order(session, order):
         formatted_date = created_at_obj.strftime('%Y-%m-%d')
 
         order_info = {
+            'order_link': "https://admin.shopify.com/store/alkaramat/orders/" + str(order.id),
             'order_num': order.name.replace("#", ""),  # Used for display and matching in webhooks
             'order_id': order.id,  # The unique numeric Shopify ID
             'created_at': formatted_date,
@@ -298,7 +299,7 @@ async def getShopifyOrders():
     total_start_time = time.time()
 
     try:
-        orders = shopify.Order.find(limit=50, order="created_at DESC", created_at_min=start_date)
+        orders = shopify.Order.find(limit=250, order="created_at DESC", created_at_min=start_date)
     except Exception as e:
         print(f"Error fetching orders: {e}")
         return []
@@ -317,7 +318,7 @@ async def getShopifyOrders():
             try:
                 if not orders.has_next_page():
                     break
-                break
+
 
                 orders = orders.next_page()
 
@@ -624,6 +625,119 @@ def shopify_order_updated():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+
+##SCANNER
+
+@app.route('/scanner')
+def scanner_page():
+    """Renders the scanner HTML page."""
+    return render_template('scanner.html')
+
+
+@app.route('/api/scan/order', methods=['POST'])
+def scan_single_order():
+    # order_details is the global list containing all processed orders
+    scanned_value = request.json.get('scan_input')
+
+    if not scanned_value:
+        return jsonify({'error': 'No input provided'}), 400
+
+    scan_term = str(scanned_value).strip().replace("#", "")
+
+    found_order = None
+
+    # 1. Search by Shopify Order Number (e.g., '9899300')
+    found_order = next((o for o in order_details if o.get('order_num') == scan_term), None)
+
+    # 2. If not found, search by Tracking Number within the line_items of ALL orders
+    if not found_order:
+        for order in order_details:
+            # Iterate through the line items list of the current order
+            if order.get('line_items'):
+                for item in order['line_items']:
+                    # Check if the tracking number matches the scan term
+                    if item.get('tracking_number') == scan_term:
+                        found_order = order
+                        break  # Stop searching line items for this order
+                if found_order:
+                    break  # Stop searching all orders
+
+    if found_order:
+        # Prepare the response data from the found order
+        items_list = [
+            {
+                'title': item['product_title'],
+                'quantity': item['quantity'],
+                'image_src': item['image_src']
+            }
+            for item in found_order['line_items']
+        ]
+
+        return jsonify({
+            'success': True,
+            'order_num': found_order['order_num'],
+            'order_id': found_order['order_id'],
+            'customer': found_order['customer_details']['name'],
+            'items': items_list
+        }), 200
+    else:
+        return jsonify({'success': False, 'error': f'Order/Tracking ID "{scan_term}" not found in loaded orders.'}), 404
+
+
+import shopify # Make sure this is imported at the top
+
+@app.route('/api/apply_bulk_tag', methods=['POST'])
+def apply_bulk_tag():
+    data = request.json
+    order_ids_to_tag = data.get('order_ids', []) # List of Shopify numeric IDs
+    tag_type = data.get('tag_type') # Expected: 'RETURNED' or 'DISPATCHED'
+
+    if not order_ids_to_tag or tag_type not in ['RETURNED', 'DISPATCHED']:
+        return jsonify({"success": False, "error": "Invalid input or tag type."}), 400
+
+    today_date = datetime.now().strftime('%Y-%m-%d')
+    results = []
+
+    for order_shopify_id in order_ids_to_tag:
+        try:
+            # 1. Determine the correct tag name based on the type
+            if tag_type == 'RETURNED':
+                base_tag = "Return Received"
+            elif tag_type == 'DISPATCHED':
+                base_tag = "DISPATCHED" # Keeps the original DISPATCHED tag
+
+            final_tag = f"{base_tag} ({today_date})"
+
+            # 2. Fetch the order using the numeric ID
+            order = shopify.Order.find(order_shopify_id)
+            if not order:
+                results.append({'id': order_shopify_id, 'status': 'failed', 'message': 'Order not found.'})
+                continue
+
+            # 3. Get existing tags
+            tags = [t.strip() for t in order.tags.split(", ")] if order.tags else []
+
+            # Ensure the dated tag is unique before adding
+            if final_tag not in tags:
+                tags.append(final_tag)
+
+            # 4. Save the order with the updated tags
+            order.tags = ", ".join(tags)
+            if order.save():
+                results.append({'id': order_shopify_id, 'status': 'success', 'message': f'Tag "{final_tag}" applied.'})
+            else:
+                results.append({'id': order_shopify_id, 'status': 'failed', 'message': 'Failed to save order changes on Shopify.'})
+
+        except Exception as e:
+            results.append({'id': order_shopify_id, 'status': 'error', 'message': str(e)})
+
+    return jsonify({
+        'success': True,
+        'tag_applied': final_tag,
+        'total_orders': len(order_ids_to_tag),
+        'results': results
+    }), 200
+
 shop_url = os.getenv('SHOP_URL')
 api_key = os.getenv('API_KEY')
 password = os.getenv('PASSWORD')
@@ -640,10 +754,12 @@ except Exception as e:
     print(f"Initial order loading failed: {e}")
     order_details = []
 
+
 if __name__ == "__main__":
     # Environment variable check is redundant here but safe
     shop_url = os.getenv('SHOP_URL')
     api_key = os.getenv('API_KEY')
     password = os.getenv('PASSWORD')
     app.run(port=5001)
+
 
