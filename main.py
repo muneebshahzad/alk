@@ -288,16 +288,20 @@ def pending_orders():
         if not shopify_order:  # Skip if shopify_order is None or empty
             continue
         if shopify_order.get('status') in ['CONSIGNMENT BOOKED', 'Un-Booked']:
-            shopify_items_list = [
-                {
+            shopify_items_list = []
+            for item in shopify_order['line_items']:
+                # Clean the product title by removing " - Default Title"
+                product_title = item['product_title']
+                cleaned_title = product_title.replace(" - Default Title", "")
+
+                item_data = {
                     'item_image': item['image_src'],
-                    'item_title': item['product_title'],
+                    'item_title': cleaned_title,  # Store the cleaned title
                     'quantity': item['quantity'],
                     'tracking_number': item['tracking_number'],
                     'status': item['status']
                 }
-                for item in shopify_order['line_items']
-            ]
+                shopify_items_list.append(item_data)
 
             shopify_order_data = {
                 'order_link' : shopify_order['order_link'],
@@ -314,16 +318,17 @@ def pending_orders():
 
             # Count quantities for each item in the Shopify order
             for item in shopify_items_list:
-                product_title = item['item_title']
+                # Use the cleaned title for combining items in the summary list
+                product_title_for_dict = item['item_title'] # This is the already cleaned title
                 quantity = item['quantity']
                 item_image = item['item_image']
 
-                if product_title in pending_items_dict:
-                    pending_items_dict[product_title]['quantity'] += quantity
+                if product_title_for_dict in pending_items_dict:
+                    pending_items_dict[product_title_for_dict]['quantity'] += quantity
                 else:
-                    pending_items_dict[product_title] = {
+                    pending_items_dict[product_title_for_dict] = {
                         'item_image': item_image,
-                        'item_title': product_title,
+                        'item_title': product_title_for_dict,
                         'quantity': quantity
                     }
 
@@ -337,7 +342,6 @@ def pending_orders():
     half = len(pending_items_sorted) // 2
 
     return render_template('pending.html', all_orders=all_orders, pending_items=pending_items_sorted, half=half)
-
 
 
 async def getShopifyOrders():
@@ -767,4 +771,5 @@ except Exception as e:
 
 if __name__ == "__main__":
     app.run(port=5001)
+
 
