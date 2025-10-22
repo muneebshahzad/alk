@@ -4,8 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Order Scanning Center</title>
-    <!-- NEW: Link to html5-qrcode for reliable scanning -->
-  <script src="{{ url_for('static', filename='html5-qrcode.min.js') }}"></script>
+    <script src="https://unpkg.com/quagga@0.12.1/dist/quagga.min.js"></script>
 
     <style>
         /* General Styling */
@@ -72,7 +71,7 @@
             box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
         }
 
-        /* NEW: Changed scanner-view to hold the html5-qrcode reader */
+        /* This div is the target element for the video stream */
         #scanner-view {
             width: 100%;
             max-height: 400px; /* Adjusted height for better viewing */
@@ -83,7 +82,7 @@
             border-radius: 8px;
         }
 
-        /* This is now the target element for the html5-qrcode view */
+        /* This is now the target element for the QuaggaJS view */
         #reader {
             width: 100%;
             height: 100%;
@@ -110,16 +109,12 @@
 </head>
 <body>
 
-<!-- 🔑 Full-Screen Scanner OVERLAY -->
 <div id="scanner-overlay" class="hidden">
     <div id="scanner-content">
-        <!-- UPDATED: Call goBack or openBulkList based on currentMode -->
         <button onclick="handleScannerBackClick()" style="background: none; border: 1px solid #fff; color: white; padding: 8px 15px; border-radius: 4px; cursor: pointer; float: left;">← Back</button>
         <h2 id="scanViewTitle" style="margin-top: 0; padding-top: 10px; font-size: 20px;"></h2>
 
-        <!-- Camera Area for html5-qrcode -->
         <div id="scanner-view">
-            <!-- This div is the target element for the Html5Qrcode instance -->
             <div id="reader"></div>
         </div>
 
@@ -132,10 +127,8 @@
     </div>
 </div>
 
-<!-- Main Page Content (Visible when scanner overlay is hidden) -->
 <div id="main-content" class="page-container">
 
-    <!-- Main Menu (Default View) -->
     <div id="main-menu">
         <h1>Scan Orders</h1>
         <button class="menu-button blue" onclick="startSingleScan()">🔍 Search Order</button>
@@ -143,7 +136,6 @@
         <button class="menu-button red" onclick="startBulkScan('RETURNED')">↩️ Scan for Return</button>
     </div>
 
-    <!-- 1. Single Scan Details -->
     <div id="single-details" class="hidden table-container">
         <button onclick="goBackToMenu()" style="margin-bottom: 20px;">← Back to Menu</button>
         <h2>Order Details</h2>
@@ -156,7 +148,6 @@
         </table>
     </div>
 
-    <!-- 2 & 3. Bulk Scan List (The background table when scanner is open) -->
     <div id="bulk-list" class="hidden table-container">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
             <h2 id="bulkListTitle" style="margin: 0;">Dispatch List (0)</h2>
@@ -164,9 +155,7 @@
         </div>
 
         <div style="display: flex; justify-content: flex-start; gap: 10px; margin-bottom: 15px;">
-            <!-- Scan More Button (Visible when overlay is CLOSED) -->
             <button id="scanMoreBtn" class="menu-button green" style="width: 150px; padding: 10px; font-size: 16px;" onclick="resumeScanning()">Scan More</button>
-            <!-- Generate Report Button -->
             <button id="generateReportBtn" class="menu-button red" style="width: 250px; padding: 10px; font-size: 16px;" onclick="generateReport()">Generate Dispatch Report</button>
         </div>
 
@@ -184,8 +173,7 @@
     // ====================================================================
     let currentMode = null; // 'SINGLE', 'DISPATCHED', or 'RETURNED'
     let scannedOrderCache = {};
-    // FIX: Switched from Html5QrcodeScanner (for UI) to Html5Qrcode (for manual control)
-    let html5QrcodeReader = null;
+    // FIX: Removed html5QrcodeReader variable
     let isScanning = false; // Tracks if the camera stream is actively running
 
     // Placeholder sound objects
@@ -209,38 +197,41 @@
     }
 
     // ====================================================================
-    // 📸 html5-qrcode (Barcode Scanner) Logic
+    // 📸 QuaggaJS (Barcode Scanner) Logic - REPLACED HTML5-QRCODE LOGIC
     // ====================================================================
 
-    // FIX: Using Html5Qrcode for manual start/stop control
-    function getScannerInstance() {
-        if (!html5QrcodeReader && typeof Html5Qrcode !== 'undefined') {
-            // Html5Qrcode takes the ID of the element where the video stream will go.
-            html5QrcodeReader = new Html5Qrcode("reader");
-        }
-        return html5QrcodeReader;
-    }
-
     // NEW: Function executed on successful code detection
-    function onScanSuccess(decodedText) {
+    function onScanSuccess(result) {
+        // Prevent the scanner from repeatedly detecting the same code by pausing detection
+        Quagga.offDetected(onScanSuccess); 
+        
+        const decodedText = result.codeResult.code;
+        
         // Pass the decoded text to the main handler, which will process it
-        handleScanInput(decodedText, true); // True indicates it came from the camera
+        handleScanInput(decodedText, true); 
+        
+        // If not in SINGLE mode (where we stop the scanner), re-attach the handler after a short delay
+        if (currentMode !== 'SINGLE') {
+            setTimeout(() => {
+                Quagga.onDetected(onScanSuccess);
+            }, 500); // 500ms delay to prevent rapid-fire duplicate scans
+        }
     }
 
     function startScanner() {
-        const reader = getScannerInstance();
+        // Check if Quagga is available (optional safety check)
+        if (typeof Quagga === 'undefined') {
+            document.getElementById('scanFeedback').textContent = "ERROR: Scanning library not loaded. Please enter the ID manually below.";
+            return;
+        }
+        
         const feedbackElement = document.getElementById('scanFeedback');
         const manualEntryField = document.getElementById('manualEntryField');
 
         // Ensure input field is always enabled and focused when the overlay is active
-        manualEntryField.disabled = false; // *** FIX: KEEP ENABLED ***
+        manualEntryField.disabled = false;
         manualEntryField.value = '';
         manualEntryField.focus();
-
-        if (!reader) {
-            feedbackElement.textContent = "ERROR: Scanning library not initialized. Please enter the ID manually below.";
-            return;
-        }
 
         if (isScanning) {
             feedbackElement.textContent = "Camera ON. Point at a barcode or QR code, or enter the ID manually.";
@@ -249,53 +240,64 @@
 
         feedbackElement.textContent = "Starting camera. Please grant access...";
 
-        // 2. Start the camera, passing configuration options
-        reader.start(
-            { facingMode: "environment" }, // Camera selection
-            {
-                fps: 10,
-                qrbox: {width: 250, height: 250},
-                formatsToSupport: [
-                    Html5QrcodeSupportedFormats.CODE_128,
-                    Html5QrcodeSupportedFormats.QR_CODE,
-                    Html5QrcodeSupportedFormats.EAN_13,
-                    Html5QrcodeSupportedFormats.CODE_39
-                ]
+        // 1. Initialize QuaggaJS
+        Quagga.init({
+            inputStream: {
+                name: "Live",
+                type: "LiveStream",
+                target: document.querySelector('#reader'), // Target the 'reader' div
+                constraints: {
+                    facingMode: "environment" // Prioritize the back camera
+                },
             },
-            onScanSuccess,
-            (errorMessage) => {
-                // Scan failure/no code detected handler (usually silent)
+            decoder: {
+                // Configure the formats most common in logistics (Code 128 is key)
+                readers: [
+                    "code_128_reader",
+                    "ean_reader",
+                    "ean_8_reader",
+                    "code_39_reader",
+                    // Add other readers if needed (e.g., "qrcode_reader" for 2D codes)
+                ],
+                multiple: false // We only want one code at a time
             }
-        )
-        .then(() => {
+        }, function(err) {
+            if (err) {
+                console.error("Quagga initialization error:", err);
+                // This now defaults to manual input since the field is always enabled
+                feedbackElement.textContent = `ERROR: Could not start camera. Please enter the ID manually below.`;
+                isScanning = false;
+                return;
+            }
+            
+            // 2. Start the camera stream
+            Quagga.start();
+            
+            // 3. Attach detection handler
+            Quagga.onDetected(onScanSuccess);
+
             isScanning = true;
             feedbackElement.textContent = "Camera ON. Point at a barcode or QR code, or enter the ID manually.";
             manualEntryField.focus();
-        })
-        .catch(err => {
-            console.error("html5-qrcode start error:", err);
-            // This now defaults to manual input since the field is always enabled
-            feedbackElement.textContent = `ERROR: Could not start camera. Please enter the ID manually below.`;
-            isScanning = false;
         });
     }
 
-    async function stopScanner() {
-        const reader = getScannerInstance();
-
-        if (!reader || !isScanning) {
+    function stopScanner() {
+        if (!isScanning) {
             isScanning = false;
             return;
         }
 
         try {
-            await reader.stop();
+            // Stop Quagga and remove any event handlers
+            Quagga.stop();
             isScanning = false;
             document.getElementById('scanFeedback').textContent = "Scanner stopped.";
-            // Clear the visual artifacts left by html5-qrcode
+            
+            // Clear the visual artifacts left by the video stream
             document.getElementById('reader').innerHTML = '';
         } catch (e) {
-            console.warn("html5-qrcode stop error (may be harmless if already stopped):", e);
+            console.warn("Quagga stop error (may be harmless if already stopped):", e);
         }
     }
 
@@ -398,7 +400,7 @@
 
 
     // ====================================================================
-    // ⚡ Master Handler: Called by manual input OR html5-qrcode
+    // ⚡ Master Handler: Called by manual input OR QuaggaJS
     // ====================================================================
 
     // Added optional wasCameraScan flag (defaults to false for manual input)
@@ -424,7 +426,7 @@
 
         // If it was a camera scan in SINGLE mode, we stop the scanner immediately after the read.
         if (currentMode === 'SINGLE' && wasCameraScan) {
-            await stopScanner();
+            stopScanner(); // Quagga.stop() is synchronous
         }
 
         // 1. Check for Duplicate (Bulk Mode Only)
@@ -432,6 +434,11 @@
             playSound('warning');
             feedbackElement.textContent = `WARNING: Order ${orderNum} already in the list. Scan next or type a new ID.`;
             manualEntryField.focus();
+            
+            // Re-enable detection if Quagga.offDetected was called in onScanSuccess
+            if (wasCameraScan && currentMode !== 'SINGLE') {
+                Quagga.onDetected(onScanSuccess);
+            }
             return;
         }
 
@@ -463,12 +470,22 @@
                 // Display the specific error from the server
                 feedbackElement.textContent = `ERROR: ${data.error || 'Unknown server error'}. Please retry or try a different ID.`;
                 manualEntryField.focus();
+                
+                // Re-enable detection if Quagga.offDetected was called in onScanSuccess
+                if (wasCameraScan && currentMode !== 'SINGLE') {
+                    Quagga.onDetected(onScanSuccess);
+                }
             }
         } catch (error) {
             playSound('error');
             feedbackElement.textContent = 'API Error: Could not connect to server.';
             console.error("API Fetch failed:", error);
             manualEntryField.focus();
+
+            // Re-enable detection if Quagga.offDetected was called in onScanSuccess
+            if (wasCameraScan && currentMode !== 'SINGLE') {
+                Quagga.onDetected(onScanSuccess);
+            }
         }
     }
 
