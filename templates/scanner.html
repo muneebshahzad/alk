@@ -194,17 +194,54 @@
         document.getElementById('bulk-list').classList.add('hidden');
         document.getElementById('scanner-overlay').classList.add('hidden');
     }
+    
+    // ====================================================================
+    // 📸 QuaggaJS (Barcode Scanner) Logic - ADVANCED FILTERING APPLIED
+    // ====================================================================
+    
+    // NEW: Function to check if a decoded text looks like a valid ID (numeric/alphanumeric)
+    function isValidScanCode(code) {
+        // Your expected Order/Tracking IDs are typically long numbers or structured alphanumerics.
+        
+        // 1. Basic Length Check: Must be between 7 and 25 characters (adjust as needed for your IDs)
+        if (code.length < 7 || code.length > 25) {
+            console.warn(`[Filter] Rejected: Length ${code.length}`);
+            return false;
+        }
 
-    // ====================================================================
-    // 📸 QuaggaJS (Barcode Scanner) Logic - REPLACED HTML5-QRCODE LOGIC
-    // ====================================================================
+        // 2. Character Check: Reject if it contains too many non-numeric/non-alphanumeric symbols
+        // Example: allow only digits and common tracking/order chars (A-Z, 0-9, dash/space)
+        // If your IDs are purely numeric (like 98962500), use: /^\d+$/.test(code)
+        if (/[^a-zA-Z0-9\-\s]/.test(code)) {
+            // Check if there are too many symbols/garbage characters
+             const symbolCount = (code.match(/[^a-zA-Z0-9]/g) || []).length;
+             if (symbolCount > 2) { // Allow a few symbols, but not excessive garbage
+                 console.warn(`[Filter] Rejected: Too many symbols (${symbolCount})`);
+                 return false;
+             }
+        }
+
+        // 3. Format Check: If your codes always start with a specific prefix (e.g., '104' for tracking), check it here
+        // if (code.startsWith('104')) { ... }
+
+        return true;
+    }
 
     // NEW: Function executed on successful code detection
     function onScanSuccess(result) {
+        const decodedText = result.codeResult.code;
+
+        // CRITICAL FILTER: Check if the decoded text meets our quality standard
+        if (result.codeResult.code === undefined || !isValidScanCode(decodedText)) {
+            // Do not pass to handler, simply re-enable detection after a short pause
+            setTimeout(() => {
+                Quagga.onDetected(onScanSuccess);
+            }, 100); 
+            return;
+        }
+
         // Prevent the scanner from repeatedly detecting the same code by pausing detection
         Quagga.offDetected(onScanSuccess); 
-        
-        const decodedText = result.codeResult.code;
         
         // Pass the decoded text to the main handler, which will process it
         handleScanInput(decodedText, true); 
@@ -218,7 +255,6 @@
     }
 
     function startScanner() {
-        // Check if Quagga is available (optional safety check)
         if (typeof Quagga === 'undefined') {
             document.getElementById('scanFeedback').textContent = "ERROR: Scanning library not loaded. Please enter the ID manually below.";
             return;
@@ -227,7 +263,6 @@
         const feedbackElement = document.getElementById('scanFeedback');
         const manualEntryField = document.getElementById('manualEntryField');
 
-        // Ensure input field is always enabled and focused when the overlay is active
         manualEntryField.disabled = false;
         manualEntryField.value = '';
         manualEntryField.focus();
@@ -253,17 +288,18 @@
             locator: {
                 patchSize: "medium", 
                 halfSample: true, 
+                // Set the min confidence level required for a decode (0.75-0.9 is strict)
+                minConfidence: 0.8, 
             },
             decoder: {
-                // Configure the formats most common in logistics (Code 128 is key)
+                // Focus on the most common 1D codes and Interleaved 2 of 5
                 readers: [
                     "code_128_reader",
                     "code_39_reader",
                     "ean_reader",
                     "i2of5_reader",
-                    // "qrcode_reader" // Include this only if you must scan QR codes.
                 ],
-                multiple: false // We only want one code at a time
+                multiple: false 
             },
             // NEW: Image processing pipeline tweaks
             singleChannel: false,
@@ -644,3 +680,4 @@
 </script>
 </body>
 </html>
+
