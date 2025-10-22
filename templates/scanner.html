@@ -173,7 +173,6 @@
     // ====================================================================
     let currentMode = null; // 'SINGLE', 'DISPATCHED', or 'RETURNED'
     let scannedOrderCache = {};
-    // FIX: Removed html5QrcodeReader variable
     let isScanning = false; // Tracks if the camera stream is actively running
 
     // Placeholder sound objects
@@ -240,7 +239,7 @@
 
         feedbackElement.textContent = "Starting camera. Please grant access...";
 
-        // 1. Initialize QuaggaJS
+        // 1. Initialize QuaggaJS with improved configuration
         Quagga.init({
             inputStream: {
                 name: "Live",
@@ -250,21 +249,29 @@
                     facingMode: "environment" // Prioritize the back camera
                 },
             },
+            // NEW: Locator to improve accuracy/speed
+            locator: {
+                patchSize: "medium", 
+                halfSample: true, 
+            },
             decoder: {
                 // Configure the formats most common in logistics (Code 128 is key)
                 readers: [
                     "code_128_reader",
-                    "ean_reader",
-                    "ean_8_reader",
                     "code_39_reader",
-                    // Add other readers if needed (e.g., "qrcode_reader" for 2D codes)
+                    "ean_reader",
+                    "i2of5_reader",
+                    // "qrcode_reader" // Include this only if you must scan QR codes.
                 ],
                 multiple: false // We only want one code at a time
-            }
+            },
+            // NEW: Image processing pipeline tweaks
+            singleChannel: false,
+            frequency: 10,
+            numOfWorkers: navigator.hardwareConcurrency || 2
         }, function(err) {
             if (err) {
                 console.error("Quagga initialization error:", err);
-                // This now defaults to manual input since the field is always enabled
                 feedbackElement.textContent = `ERROR: Could not start camera. Please enter the ID manually below.`;
                 isScanning = false;
                 return;
@@ -419,6 +426,11 @@
         if (!orderNum) {
             feedbackElement.textContent = 'Invalid scan/entry. Please retry.';
             manualEntryField.focus();
+            
+            // Re-enable detection if Quagga.offDetected was called by a false read
+            if (wasCameraScan && currentMode !== 'SINGLE') {
+                Quagga.onDetected(onScanSuccess);
+            }
             return;
         }
 
@@ -478,7 +490,8 @@
             }
         } catch (error) {
             playSound('error');
-            feedbackElement.textContent = 'API Error: Could not connect to server.';
+            // Enhanced error message for network issues
+            feedbackElement.textContent = `NETWORK ERROR: Could not connect to server. Check network/server status.`;
             console.error("API Fetch failed:", error);
             manualEntryField.focus();
 
