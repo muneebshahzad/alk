@@ -4,10 +4,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Order Scanning Center</title>
-    <script src="https://unpkg.com/quagga@0.12.1/dist/quagga.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
 
     <style>
-        /* General Styling */
+        /* General Styling (Unchanged) */
         body { font-family: 'Inter', sans-serif; padding: 0; margin: 0; background-color: #f4f4f4; }
         .page-container { max-width: 1000px; margin: 0 auto; padding: 20px; }
         .menu-button {
@@ -24,11 +24,11 @@
 
         .hidden { display: none !important; }
 
-        /* Table Styling */
+        /* Table Styling (Unchanged) */
         .table-container { text-align: left; padding-top: 20px; }
         table {
             width: 100%; border-collapse: collapse; margin-top: 15px;
-            border-radius: 8px; overflow: hidden; /* For rounded corners */
+            border-radius: 8px; overflow: hidden;
             box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
         }
         th { background-color: #374151; color: white; padding: 12px 10px; font-size: 14px; }
@@ -36,74 +36,57 @@
 
         .item-image { width: 40px; height: 40px; object-fit: cover; border-radius: 4px; vertical-align: middle; margin-right: 8px; }
 
-        /* Report row specific style */
         .report-summary-row td {
-            background-color: #d1fae5; /* light green background */
+            background-color: #d1fae5;
             font-weight: bold;
             text-align: center;
             padding: 15px;
             border: none;
         }
 
-        /* --- 🔑 SCANNER OVERLAY STYLING (The Transparent Background Effect) --- */
+        /* --- SCANNER OVERLAY STYLING (Unchanged) --- */
         #scanner-overlay {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            /* Semi-transparent dark background for the "ghosted" effect */
-            background-color: rgba(0, 0, 0, 0.85);
-            z-index: 1000;
-            display: flex;
-            justify-content: center;
-            align-items: center;
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background-color: rgba(0, 0, 0, 0.85); z-index: 1000;
+            display: flex; justify-content: center; align-items: center;
         }
 
         #scanner-content {
-            width: 90%;
-            max-width: 500px;
-            padding: 20px;
-            background: #2d3748; /* Dark background for scanner box */
-            border-radius: 12px;
-            text-align: center;
-            color: white;
+            width: 90%; max-width: 500px; padding: 20px;
+            background: #2d3748; border-radius: 12px;
+            text-align: center; color: white;
             box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
         }
 
-        /* This div is the target element for the video stream */
-        #scanner-view {
-            width: 100%;
-            max-height: 400px; /* Adjusted height for better viewing */
-            margin: 15px auto;
-            position: relative;
-            overflow: hidden;
-            background-color: #000;
-            border-radius: 8px;
-        }
-
-        /* This is now the target element for the QuaggaJS view */
+        /* Video element inside reader div is required for jsQR */
         #reader {
             width: 100%;
             height: 100%;
+            position: relative;
+        }
+
+        #scanner-view {
+            width: 100%; max-height: 400px; margin: 15px auto;
+            position: relative; overflow: hidden; background-color: #000;
+            border-radius: 8px;
+        }
+
+        /* NEW: Styles for the video stream and canvas */
+        video {
+            width: 100%;
+            height: auto;
+            display: block;
+        }
+        
+        /* The canvas is needed for processing, but we hide it */
+        canvas {
+            display: none;
         }
 
         #manualEntryField {
-            width: calc(100% - 20px);
-            padding: 10px;
-            margin: 10px 0;
-            border-radius: 6px;
-            border: 1px solid #3b82f6; /* Highlight border when enabled */
-            background-color: white; /* White background when enabled */
-            color: #1a202c; /* Dark text when enabled */
-            text-align: center;
-        }
-        /* Style for disabled input - kept for safety but should not be active */
-        #manualEntryField:disabled {
-            background-color: #4a5568;
-            cursor: not-allowed;
-            color: #ccc;
-            border: 1px solid #4a5568;
+            width: calc(100% - 20px); padding: 10px; margin: 10px 0;
+            border-radius: 6px; border: 1px solid #3b82f6;
+            background-color: white; color: #1a202c; text-align: center;
         }
     </style>
 </head>
@@ -115,7 +98,10 @@
         <h2 id="scanViewTitle" style="margin-top: 0; padding-top: 10px; font-size: 20px;"></h2>
 
         <div id="scanner-view">
-            <div id="reader"></div>
+            <div id="reader">
+                <video id="videoElement"></video>
+                <canvas id="canvasElement"></canvas>
+            </div>
         </div>
 
         <input type="text" id="manualEntryField"
@@ -171,18 +157,22 @@
     // ====================================================================
     // 💡 Setup - State Variables and Sounds
     // ====================================================================
-    let currentMode = null; // 'SINGLE', 'DISPATCHED', or 'RETURNED'
+    let currentMode = null;
     let scannedOrderCache = {};
-    // FIX: Removed html5QrcodeReader variable
-    let isScanning = false; // Tracks if the camera stream is actively running
+    let isScanning = false;
+    let videoElement = document.getElementById('videoElement');
+    let canvasElement = document.getElementById('canvasElement');
+    let canvasContext = canvasElement.getContext('2d', { willReadFrequently: true });
+    let stream = null; // To hold the media stream reference
+    let requestAnimationFrameId; // To control the decoding loop
 
-    // Placeholder sound objects
+    // Placeholder sound objects (Unchanged)
     const successBeep = { play: () => console.log('Beep Success') };
     const errorBeep = { play: () => console.log('Beep Error') };
     const warningBeep = { play: () => console.log('Beep Warning') };
 
     // ====================================================================
-    // 🔊 Utility Functions
+    // 🔊 Utility Functions (Unchanged)
     // ====================================================================
 
     function playSound(type) {
@@ -197,38 +187,49 @@
     }
 
     // ====================================================================
-    // 📸 QuaggaJS (Barcode Scanner) Logic - REPLACED HTML5-QRCODE LOGIC
+    // 📸 jsQR (High-Performance Scanner) Logic
     // ====================================================================
 
-    // NEW: Function executed on successful code detection
-    function onScanSuccess(result) {
-        // Prevent the scanner from repeatedly detecting the same code by pausing detection
-        Quagga.offDetected(onScanSuccess); 
+    function tick() {
+        if (videoElement.readyState === videoElement.HAVE_ENOUGH_DATA) {
+            // Resize canvas to video size
+            canvasElement.height = videoElement.videoHeight;
+            canvasElement.width = videoElement.videoWidth;
+
+            // Draw the current video frame onto the canvas
+            canvasContext.drawImage(videoElement, 0, 0, canvasElement.width, canvasElement.height);
+
+            // Get the image data from the canvas
+            const imageData = canvasContext.getImageData(0, 0, canvasElement.width, canvasElement.height);
+
+            // This is the core-jsQR call: decode the data
+            const code = jsQR(imageData.data, imageData.width, imageData.height, {
+                // Inversion less likely with modern labels/QR codes
+                inversionAttempts: "dontInvert", 
+            });
+
+            if (code) {
+                // Code detected! Stop the loop and handle the input.
+                cancelAnimationFrame(requestAnimationFrameId);
+                onScanSuccess(code.data);
+                return; // Stop processing frame for this tick
+            }
+        }
         
-        const decodedText = result.codeResult.code;
-        
+        // Loop: Continue processing frames if a code wasn't found
+        requestAnimationFrameId = requestAnimationFrame(tick);
+    }
+
+    function onScanSuccess(decodedText) {
         // Pass the decoded text to the main handler, which will process it
         handleScanInput(decodedText, true); 
-        
-        // If not in SINGLE mode (where we stop the scanner), re-attach the handler after a short delay
-        if (currentMode !== 'SINGLE') {
-            setTimeout(() => {
-                Quagga.onDetected(onScanSuccess);
-            }, 500); // 500ms delay to prevent rapid-fire duplicate scans
-        }
+        // Note: handleScanInput will restart the loop in bulk mode if needed.
     }
 
     function startScanner() {
-        // Check if Quagga is available (optional safety check)
-        if (typeof Quagga === 'undefined') {
-            document.getElementById('scanFeedback').textContent = "ERROR: Scanning library not loaded. Please enter the ID manually below.";
-            return;
-        }
-        
         const feedbackElement = document.getElementById('scanFeedback');
         const manualEntryField = document.getElementById('manualEntryField');
 
-        // Ensure input field is always enabled and focused when the overlay is active
         manualEntryField.disabled = false;
         manualEntryField.value = '';
         manualEntryField.focus();
@@ -239,47 +240,28 @@
         }
 
         feedbackElement.textContent = "Starting camera. Please grant access...";
+        
+        // 1. Get media stream
+        navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
+            .then(mediaStream => {
+                stream = mediaStream;
+                videoElement.srcObject = mediaStream;
+                videoElement.setAttribute("playsinline", true); // Required for iOS
+                videoElement.play();
 
-        // 1. Initialize QuaggaJS
-        Quagga.init({
-            inputStream: {
-                name: "Live",
-                type: "LiveStream",
-                target: document.querySelector('#reader'), // Target the 'reader' div
-                constraints: {
-                    facingMode: "environment" // Prioritize the back camera
-                },
-            },
-            decoder: {
-                // Configure the formats most common in logistics (Code 128 is key)
-                readers: [
-                    "code_128_reader",
-                    "ean_reader",
-                    "ean_8_reader",
-                    "code_39_reader",
-                    // Add other readers if needed (e.g., "qrcode_reader" for 2D codes)
-                ],
-                multiple: false // We only want one code at a time
-            }
-        }, function(err) {
-            if (err) {
-                console.error("Quagga initialization error:", err);
-                // This now defaults to manual input since the field is always enabled
-                feedbackElement.textContent = `ERROR: Could not start camera. Please enter the ID manually below.`;
+                videoElement.onloadedmetadata = () => {
+                    // 2. Start the decoding loop once video metadata is loaded
+                    isScanning = true;
+                    requestAnimationFrame(tick);
+                    feedbackElement.textContent = "Camera ON. Point at a barcode or QR code, or enter the ID manually.";
+                    manualEntryField.focus();
+                };
+            })
+            .catch(err => {
+                console.error("Camera access error:", err);
+                feedbackElement.textContent = `ERROR: Could not start camera (${err.name}). Please enter the ID manually below.`;
                 isScanning = false;
-                return;
-            }
-            
-            // 2. Start the camera stream
-            Quagga.start();
-            
-            // 3. Attach detection handler
-            Quagga.onDetected(onScanSuccess);
-
-            isScanning = true;
-            feedbackElement.textContent = "Camera ON. Point at a barcode or QR code, or enter the ID manually.";
-            manualEntryField.focus();
-        });
+            });
     }
 
     function stopScanner() {
@@ -288,21 +270,24 @@
             return;
         }
 
-        try {
-            // Stop Quagga and remove any event handlers
-            Quagga.stop();
-            isScanning = false;
-            document.getElementById('scanFeedback').textContent = "Scanner stopped.";
-            
-            // Clear the visual artifacts left by the video stream
-            document.getElementById('reader').innerHTML = '';
-        } catch (e) {
-            console.warn("Quagga stop error (may be harmless if already stopped):", e);
+        // 1. Stop the decoding loop
+        cancelAnimationFrame(requestAnimationFrameId);
+
+        // 2. Stop the video stream
+        if (stream) {
+            stream.getTracks().forEach(track => track.stop());
+            videoElement.srcObject = null;
         }
+        
+        isScanning = false;
+        document.getElementById('scanFeedback').textContent = "Scanner stopped.";
+        
+        // Clear the visual element (though less necessary with video tag)
+        canvasContext.clearRect(0, 0, canvasElement.width, canvasElement.height);
     }
 
     // ====================================================================
-    // ↩️ Navigation and Flow Control
+    // ↩️ Navigation and Flow Control (Minor Adjustments)
     // ====================================================================
 
     function handleScannerBackClick() {
@@ -333,12 +318,9 @@
     function startSingleScan() {
         hideAll();
         currentMode = 'SINGLE';
-
         document.getElementById('scanner-overlay').classList.remove('hidden');
-
         document.getElementById('scanViewTitle').textContent = 'Search Order';
         document.getElementById('manualEntryField').value = '';
-
         startScanner();
     }
 
@@ -347,68 +329,46 @@
         currentMode = mode;
         const title = mode === 'DISPATCHED' ? 'Dispatch List' : 'Return List';
 
-        // 1. Show the bulk list (as the transparent background)
         document.getElementById('bulk-list').classList.remove('hidden');
         document.getElementById('bulkListTitle').textContent = `${title} (0)`;
         document.getElementById('generateReportBtn').textContent = `Generate ${title} Report`;
-
-        // Ensure table is empty on start of a new bulk scan
         document.getElementById('bulkOrdersTable').getElementsByTagName('tbody')[0].innerHTML = '';
-
-        // 2. Show the scanner OVERLAY (on top)
         document.getElementById('scanViewTitle').textContent = `Scan for ${title}`;
         document.getElementById('scanner-overlay').classList.remove('hidden');
-
         document.getElementById('manualEntryField').value = '';
         document.getElementById('scanFeedback').textContent = 'Scan your first order, or type the ID.';
-
-        // Ensure "Scan More" button is hidden when the scanner is active
         document.getElementById('scanMoreBtn').classList.add('hidden');
         document.getElementById('scanMoreBtn').disabled = false;
 
         startScanner();
     }
 
-    // Transitions from Scanner (Overlay) to List (Background becomes main focus)
     function openBulkList() {
         stopScanner();
-
-        // Simply hide the scanner overlay, leaving the bulk list visible underneath
         document.getElementById('scanner-overlay').classList.add('hidden');
-
-        // Show the 'Scan More' button now that the scanner is closed
         document.getElementById('scanMoreBtn').classList.remove('hidden');
-
         const count = Object.keys(scannedOrderCache).length;
         document.getElementById('bulkListTitle').textContent = `${currentMode === 'DISPATCHED' ? 'Dispatch' : 'Return'} List (${count})`;
         document.getElementById('generateReportBtn').disabled = count === 0;
     }
 
-    // Re-opens scanner view from the bulk list
     function resumeScanning() {
-        // Show the overlay again and restart the camera
         document.getElementById('scanner-overlay').classList.remove('hidden');
         document.getElementById('manualEntryField').value = '';
-
         document.getElementById('scanFeedback').textContent = `Ready to scan more orders for ${currentMode}, or type manually.`;
-
-        // Hide "Scan More" button while scanning is active
         document.getElementById('scanMoreBtn').classList.add('hidden');
-
         startScanner();
     }
 
 
     // ====================================================================
-    // ⚡ Master Handler: Called by manual input OR QuaggaJS
+    // ⚡ Master Handler: Called by manual input OR jsQR
     // ====================================================================
 
-    // Added optional wasCameraScan flag (defaults to false for manual input)
     async function handleScanInput(scanInput, wasCameraScan = false) {
         const manualEntryField = document.getElementById('manualEntryField');
 
         if (!wasCameraScan) {
-            // Only clear the input field if the user typed it manually
             manualEntryField.value = '';
         }
 
@@ -426,7 +386,7 @@
 
         // If it was a camera scan in SINGLE mode, we stop the scanner immediately after the read.
         if (currentMode === 'SINGLE' && wasCameraScan) {
-            stopScanner(); // Quagga.stop() is synchronous
+            stopScanner();
         }
 
         // 1. Check for Duplicate (Bulk Mode Only)
@@ -435,14 +395,14 @@
             feedbackElement.textContent = `WARNING: Order ${orderNum} already in the list. Scan next or type a new ID.`;
             manualEntryField.focus();
             
-            // Re-enable detection if Quagga.offDetected was called in onScanSuccess
+            // Restart the scanning loop for the next item
             if (wasCameraScan && currentMode !== 'SINGLE') {
-                Quagga.onDetected(onScanSuccess);
+                requestAnimationFrame(tick);
             }
             return;
         }
 
-        // 2. Call API Lookup (using the corrected payload from previous iteration)
+        // 2. Call API Lookup
         try {
             const response = await fetch('/api/scan/order', {
                 method: 'POST',
@@ -457,45 +417,44 @@
                 feedbackElement.textContent = `SUCCESS: Order ${data.order_num} added. Scan next or click 'Back'.`;
 
                 if (currentMode === 'SINGLE') {
-                    // Single scan mode displays details and closes the scanner overlay
                     document.getElementById('scanner-overlay').classList.add('hidden');
                     displaySingleOrderDetails(data);
                 } else {
-                    // Bulk scan mode adds to the list and keeps the scanner open
                     addOrderToBulkTable(orderNum, data);
                     manualEntryField.focus();
+                    
+                    // Restart the scanning loop for the next item
+                    requestAnimationFrame(tick);
                 }
             } else {
                 playSound('error');
-                // Display the specific error from the server
                 feedbackElement.textContent = `ERROR: ${data.error || 'Unknown server error'}. Please retry or try a different ID.`;
                 manualEntryField.focus();
                 
-                // Re-enable detection if Quagga.offDetected was called in onScanSuccess
+                // Restart the scanning loop for the next item
                 if (wasCameraScan && currentMode !== 'SINGLE') {
-                    Quagga.onDetected(onScanSuccess);
+                    requestAnimationFrame(tick);
                 }
             }
         } catch (error) {
             playSound('error');
-            feedbackElement.textContent = 'API Error: Could not connect to server.';
+            feedbackElement.textContent = `NETWORK ERROR: Could not connect to server. Check your network connection and server status.`;
             console.error("API Fetch failed:", error);
             manualEntryField.focus();
 
-            // Re-enable detection if Quagga.offDetected was called in onScanSuccess
+            // Restart the scanning loop
             if (wasCameraScan && currentMode !== 'SINGLE') {
-                Quagga.onDetected(onScanSuccess);
+                requestAnimationFrame(tick);
             }
         }
     }
 
     // ====================================================================
-    // 🔄 List Management
+    // 🔄 List Management (Unchanged)
     // ====================================================================
 
     function displaySingleOrderDetails(data) {
-        // Assumes scanner overlay is already hidden
-        hideAll(); // hides everything else
+        hideAll();
         document.getElementById('single-details').classList.remove('hidden');
         document.getElementById('singleOrderNum').textContent = data.order_num;
         document.getElementById('singleCustomerName').textContent = data.customer;
@@ -518,28 +477,23 @@
         let totalPieces = 0;
         data.items.forEach(item => totalPieces += item.quantity);
 
-        // Store in cache
         scannedOrderCache[orderNum] = { id: numericShopifyId, items: data.items, pieces: totalPieces };
 
         const tbody = document.getElementById('bulkOrdersTable').getElementsByTagName('tbody')[0];
 
-        // Ensure one row per unique order
         let existingRow = document.getElementById(`bulk-row-${orderNum}`);
         let row;
 
         if (existingRow) {
             row = existingRow;
-            row.innerHTML = ''; // Clear existing cells if updating
+            row.innerHTML = '';
         } else {
-            // Insert a NEW row at the top (0 index)
             row = tbody.insertRow(0);
             row.id = `bulk-row-${orderNum}`;
         }
 
-        // 1. Order # Cell
         row.insertCell(0).textContent = orderNum;
 
-        // 2. Items Cell (Consolidated List)
         const itemsCell = row.insertCell(1);
         let itemsHTML = '';
         data.items.forEach(item => {
@@ -552,10 +506,8 @@
         });
         itemsCell.innerHTML = itemsHTML;
 
-        // 3. Total Pieces Cell
         row.insertCell(2).textContent = totalPieces;
 
-        // Update counts and title
         const count = Object.keys(scannedOrderCache).length;
         document.getElementById('scannedOrderCount').textContent = count;
         document.getElementById('bulkListTitle').textContent = `${currentMode === 'DISPATCHED' ? 'Dispatch' : 'Return'} List (${count})`;
@@ -563,7 +515,7 @@
     }
 
 
-    // 4. Generate Report Logic
+    // 4. Generate Report Logic (Unchanged)
     async function generateReport() {
         const orderIds = Object.values(scannedOrderCache).map(o => o.id);
         const reportBtn = document.getElementById('generateReportBtn');
@@ -594,23 +546,16 @@
             if (response.ok && data.success) {
                 playSound('success');
 
-                // 1. Update Title and Button
                 bulkListTitle.textContent = `${tagTitle} Report Generated!`;
                 reportBtn.textContent = 'Report Generated (Done)';
-
-                // 2. Clear Report button but keep the list visible
                 reportBtn.classList.add('hidden');
-
-                // 3. Disable and visually update Scan More button
                 scanMoreBtn.disabled = true;
                 scanMoreBtn.textContent = 'Report Processed';
 
-                // 4. Add a visual confirmation row at the top of the table
                 const date = new Date().toLocaleDateString();
                 const confirmationRow = tbody.insertRow(0);
                 confirmationRow.className = 'report-summary-row';
 
-                // We span all three columns
                 const cell = confirmationRow.insertCell(0);
                 cell.colSpan = 3;
                 cell.innerHTML = `✅ **${tagType}** tag applied to **${count}** orders successfully. (${date})`;
