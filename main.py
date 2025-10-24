@@ -8,24 +8,25 @@ import time
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from flask import Flask, render_template, jsonify, request, flash, redirect, url_for, abort
-# FIX: Explicitly import timedelta to avoid name collision with the datetime class
-import requests
-from datetime import datetime, timedelta
+import datetime, requests
+from datetime import datetime
 import pymssql, shopify
 import aiohttp
 import lazop
+import aiohttp
 from tenacity import retry, stop_after_attempt, wait_exponential
 from aiohttp import ClientTimeout
 from aiohttp import ClientSession, ClientError
+import asyncio
+from tenacity import retry, stop_after_attempt, wait_exponential
 import pytz
 
 app = Flask(__name__)
 app.debug = True
-app.secret_key = os.getenv('APP_SECRET_KEY', 'default_secret_key')
+app.secret_key = os.getenv('APP_SECRET_KEY', 'default_secret_key')  # Use environment variable
 pre_loaded = 0
 order_details = []
-semaphore = asyncio.Semaphore(2) # Limit to 2 concurrent API calls
-product_cache = {} # Global cache for product data to reduce Shopify API calls
+semaphore = asyncio.Semaphore(2)
 
 
 @retry(stop=stop_after_attempt(5), wait=wait_exponential(min=1, max=10))
@@ -41,7 +42,7 @@ async def fetch_with_retry(session, url, method="GET", **kwargs):
 
 
 async def limited_request(coroutine):
-    """Ensure requests adhere to rate limits by using a semaphore and delay."""
+    """Ensure requests adhere to rate limits."""
     async with semaphore:
         await asyncio.sleep(0.5)  # Enforce delay for Shopify rate limits (no more than 2 per second)
         return await coroutine
@@ -59,8 +60,8 @@ def send_email():
         # SMTP server configuration
         smtp_server = 'smtp.gmail.com'
         smtp_port = 587
-        smtp_user = os.getenv('SMTP_USER')
-        smtp_password = os.getenv('SMTP_PASSWORD')
+        smtp_user = os.getenv('SMTP_USER')  # Use environment variable
+        smtp_password = os.getenv('SMTP_PASSWORD')  # Use environment variable
 
         # Create the message
         msg = MIMEText(body)
@@ -104,55 +105,18 @@ async def fetch_tracking_data(session, tracking_number):
         return {"error": "Request timed out"}
 
 
-def fetch_product_details_sync(product_id, variant_id):
-    """
-    Synchronous function to fetch product and variant details from Shopify.
-    This function runs in a separate thread pool to prevent blocking the async loop.
-    It uses caching to drastically reduce API calls.
-    """
-    default_image = "https://static.thenounproject.com/png/1578832-200.png"
-    try:
-        # 1. Use Cache
-        if product_id in product_cache:
-            product = product_cache[product_id]
-        else:
-            # 2. Fetch Product (Blocking call)
-            product = shopify.Product.find(product_id)
-            if product:
-                product_cache[product_id] = product
-            else:
-                return default_image, ""
+product_cache = {}
 
-        image_src = default_image
-        variant_name = ""
 
-        # 3. Find Variant and Image
-        if product.variants:
-            for variant in product.variants:
-                if variant.id == variant_id:
-                    variant_name = variant.title or ""
-
-                    # Prioritize variant image if available on the product object
-                    variant_image_src = next((img.src for img in product.images if img.id == variant.image_id), None)
-
-                    if variant_image_src:
-                        image_src = variant_image_src
-                    elif product.image:
-                         # Fallback to the main product image
-                         image_src = product.image.src
-
-                    break
-
-        return image_src, variant_name
-
-    except Exception as e:
-        # Catch specific exceptions from Shopify API if possible
-        print(f"Error in fetch_product_details_sync for product ID {product_id}: {e}")
-        return default_image, ""
+async def limited_request(coroutine):
+    """Ensure requests adhere to rate limits."""
+    async with semaphore:
+        await asyncio.sleep(0.5)  # Enforce delay for Shopify rate limits
+        return await coroutine
 
 
 async def process_line_item(session, line_item, fulfillments):
-    """Process individual line items and tracking status."""
+    """Process individual line items."""
     if line_item.fulfillment_status is None and line_item.fulfillable_quantity == 0:
         return []
 
@@ -167,11 +131,10 @@ async def process_line_item(session, line_item, fulfillments):
                 if item.id == line_item.id:
                     tracking_number = fulfillment.tracking_number
                     data = await fetch_tracking_data(session, tracking_number)
-                    if isinstance(data, dict) and data.get('error'):
-                         tracking_details = "N/A" # Default if tracking fetch failed
+                    if data:
+                        tracking_details = data[-1].get('ProcessDescForPortal', 'DELIVERED')
                     else:
-                         tracking_details = data[-1].get('ProcessDescForPortal', 'DELIVERED') if data and isinstance(data, list) else "N/A"
-
+                        tracking_details = "N/A"
 
                     tracking_info.append({
                         'tracking_number': tracking_number,
@@ -185,19 +148,21 @@ async def process_line_item(session, line_item, fulfillments):
 
 
 async def process_order(session, order):
-    """Process each order, ensuring synchronous Shopify API calls are threaded and rate-limited."""
+    """Process each order with optimized image fetching."""
     try:
         order_start_time = time.time()
-        
-        # 1. Prepare Order Meta Data
-        created_at_str = order.created_at
+        created_at_str = order.created_at  # Assuming it's in the format '2025-01-07T23:42:49+05:00'
+
+        # Parse the string into a datetime object
         created_at_obj = datetime.fromisoformat(created_at_str)
+
+        # Format the datetime object to 'YYYY-MM-DD'
         formatted_date = created_at_obj.strftime('%Y-%m-%d')
-        
+
         order_info = {
             'order_link': "https://admin.shopify.com/store/alkaramat/orders/" + str(order.id),
-            'order_num': order.name.replace("#", ""),
-            'order_id': order.id,
+            'order_num': order.name.replace("#", ""),  # Used for display and matching in webhooks
+            'order_id': order.id,  # The unique numeric Shopify ID
             'created_at': formatted_date,
             'total_price': order.current_subtotal_price,
             'line_items': [],
@@ -212,63 +177,52 @@ async def process_order(session, order):
             'tags': order.tags.split(", ") if order.tags else []
         }
 
-        # 2. Concurrently fetch tracking data (AIOHTTP calls - already async)
-        tracking_tasks = [process_line_item(session, line_item, order.fulfillments) for line_item in order.line_items]
-        tracking_results = await asyncio.gather(*tracking_tasks)
-        
-        # 3. Concurrently fetch product details (Synchronous Shopify API calls - must be threaded and rate-limited)
-        loop = asyncio.get_event_loop()
-        product_detail_tasks = []
-        
-        for line_item in order.line_items:
-            if line_item.product_id is not None:
-                # Wrap the synchronous fetch in limited_request and run_in_executor
-                task = limited_request(
-                    loop.run_in_executor(
-                        None, 
-                        fetch_product_details_sync, 
-                        line_item.product_id, 
-                        line_item.variant_id
-                    )
-                )
-            else:
-                # Immediate execution for items without product_id
-                task = loop.run_in_executor(None, lambda: ("https://static.thenounproject.com/png/1578832-200.png", ""))
+        tasks = [process_line_item(session, line_item, order.fulfillments) for line_item in order.line_items]
+        results = await asyncio.gather(*tasks)
 
-            product_detail_tasks.append(task)
-            
-        product_details = await asyncio.gather(*product_detail_tasks, return_exceptions=True)
-
-        # 4. Combine Results
-        for (tracking_info_list, line_item), product_info in zip(zip(tracking_results, order.line_items), product_details):
+        for tracking_info_list, line_item in zip(results, order.line_items):
             if tracking_info_list is None:
                 continue
-            
-            # Handle potential error from the product detail fetch
-            if isinstance(product_info, Exception):
-                print(f"Error fetching product details for product ID {line_item.product_id}: {product_info}")
-                image_src = "https://static.thenounproject.com/png/1578832-200.png"
-                variant_name = line_item.variant_title or ""
-            else:
-                image_src, raw_variant_name = product_info
-                
-                # Use variant name from sync fetch if available, otherwise fall back
-                variant_name = raw_variant_name if raw_variant_name else (line_item.variant_title or "")
-                if variant_name.strip().lower() == "default title":
-                    variant_name = ""
-            
+
+            # Use default image and variant name initially
+            image_src = "https://static.thenounproject.com/png/1578832-200.png"
+            variant_name = line_item.variant_title or ""
+
+            # Check if image fetching is necessary
+            if line_item.product_id is not None:
+                try:
+                    # Fetch product and check for cached data or default
+                    product = shopify.Product.find(line_item.product_id)
+                    if product and product.variants:
+                        for variant in product.variants:
+                            if variant.id == line_item.variant_id:
+                                if variant.image_id is not None:
+                                    images = shopify.Image.find(image_id=variant.image_id,
+                                                                product_id=line_item.product_id)
+                                    variant_name = line_item.variant_title
+                                    for image in images:
+                                        if image.id == variant.image_id:
+                                            image_src = image.src
+                                else:
+                                    variant_name = ""
+                                    image_src = product.image.src if product.image else image_src
+                                    break
+                    else:
+                        image_src = "https://static.thenounproject.com/png/1578832-200.png"
+                except Exception as e:
+                    print(f"Error fetching product details for product ID {line_item.product_id}: {e}")
+
             # Append tracking and line item details
             for info in tracking_info_list:
                 order_info['line_items'].append({
                     'fulfillment_status': line_item.fulfillment_status,
                     'image_src': image_src,
-                    # Construct product title
                     'product_title': line_item.title + (f" - {variant_name}" if variant_name else ""),
                     'quantity': info['quantity'],
                     'tracking_number': info['tracking_number'],
                     'status': info['status']
                 })
-                order_info['status'] = info['status'] # Overwrites status with the last item's status, which might be incorrect but reflects the original logic
+                order_info['status'] = info['status']
 
         order_end_time = time.time()
         print(f"Processed order {order.order_number} in {order_end_time - order_start_time:.2f} seconds")
@@ -277,6 +231,7 @@ async def process_order(session, order):
     except Exception as e:
         print(f"Error processing order {order.order_number}: {e}")
         return None
+
 
 @app.route('/pending')
 def pending_orders():
@@ -290,20 +245,16 @@ def pending_orders():
         if not shopify_order:  # Skip if shopify_order is None or empty
             continue
         if shopify_order.get('status') in ['CONSIGNMENT BOOKED', 'Un-Booked']:
-            shopify_items_list = []
-            for item in shopify_order['line_items']:
-                # Clean the product title by removing " - Default Title"
-                product_title = item['product_title']
-                cleaned_title = product_title.replace(" - Default Title", "")
-
-                item_data = {
+            shopify_items_list = [
+                {
                     'item_image': item['image_src'],
-                    'item_title': cleaned_title,  # Store the cleaned title
+                    'item_title': item['product_title'],
                     'quantity': item['quantity'],
                     'tracking_number': item['tracking_number'],
                     'status': item['status']
                 }
-                shopify_items_list.append(item_data)
+                for item in shopify_order['line_items']
+            ]
 
             shopify_order_data = {
                 'order_link' : shopify_order['order_link'],
@@ -320,17 +271,16 @@ def pending_orders():
 
             # Count quantities for each item in the Shopify order
             for item in shopify_items_list:
-                # Use the cleaned title for combining items in the summary list
-                product_title_for_dict = item['item_title'] # This is the already cleaned title
+                product_title = item['item_title']
                 quantity = item['quantity']
                 item_image = item['item_image']
 
-                if product_title_for_dict in pending_items_dict:
-                    pending_items_dict[product_title_for_dict]['quantity'] += quantity
+                if product_title in pending_items_dict:
+                    pending_items_dict[product_title]['quantity'] += quantity
                 else:
-                    pending_items_dict[product_title_for_dict] = {
+                    pending_items_dict[product_title] = {
                         'item_image': item_image,
-                        'item_title': product_title_for_dict,
+                        'item_title': product_title,
                         'quantity': quantity
                     }
 
@@ -347,25 +297,19 @@ def pending_orders():
 
 
 async def getShopifyOrders():
-    # Only pull orders from the last 10 months to manage list size
-    # FIX: Use timedelta directly now that it's imported
-    start_date = (datetime.now() - timedelta(days=300)).isoformat()
+    start_date = datetime(2024, 9, 1).isoformat()
     order_details = []
     total_start_time = time.time()
 
     try:
-        # Initial call to get the first page
-        orders = shopify.Order.find(limit=50, order="created_at DESC", created_at_min=start_date)
+        orders = shopify.Order.find(limit=250, order="created_at DESC", created_at_min=start_date)
     except Exception as e:
-        print(f"Error fetching initial orders: {e}")
+        print(f"Error fetching orders: {e}")
         return []
 
     async with aiohttp.ClientSession() as session:
         while True:
-            # Prepare tasks for the current page
-            # Note: We do not wrap process_order with limited_request here, 
-            # as the rate limiting is handled internally for the sync API calls within process_order.
-            tasks = [process_order(session, order) for order in orders]
+            tasks = [limited_request(process_order(session, order)) for order in orders]
             results = await asyncio.gather(*tasks, return_exceptions=True)
 
             for result in results:
@@ -375,9 +319,10 @@ async def getShopifyOrders():
                     order_details.append(result)
 
             try:
-                # Check for next page
                 if not orders.has_next_page():
                     break
+
+
                 orders = orders.next_page()
 
             except Exception as e:
@@ -390,17 +335,13 @@ async def getShopifyOrders():
 
 
 def adjust_to_shopify_timezone(from_date, to_date):
-    # Parse input dates (assumed to be in YYYY-MM-DD)
-    from_date_obj = datetime.strptime(from_date, "%Y-%m-%d")
-    to_date_obj = datetime.strptime(to_date, "%Y-%m-%d").replace(hour=23, minute=59, second=59)
+    # Parse input dates (assumed to be in GMT+5 already)
+    from_date = datetime.strptime(from_date, "%Y-%m-%d").replace(hour=0, minute=0, second=0)
+    to_date = datetime.strptime(to_date, "%Y-%m-%d").replace(hour=23, minute=59, second=59)
 
-    # Assume GMT+5 is the local shopify timezone for explicit formatting
-    # Note: Shopify API expects ISO 8601 with offset
-    gmt_plus_5 = pytz.timezone('Asia/Karachi') # Using a known GMT+5 timezone
-    
-    from_date_gmt_plus_5 = gmt_plus_5.localize(from_date_obj).isoformat()
-    to_date_gmt_plus_5 = gmt_plus_5.localize(to_date_obj).isoformat()
-
+    # Format the dates with explicit GMT+5 offset
+    from_date_gmt_plus_5 = from_date.strftime('%Y-%m-%dT%H:%M:%S+05:00')
+    to_date_gmt_plus_5 = to_date.strftime('%Y-%m-%dT%H:%M:%S+05:00')
 
     return from_date_gmt_plus_5, to_date_gmt_plus_5
 
@@ -423,6 +364,7 @@ async def getShopifyOrderswithDates(start_date: str, end_date: str):
 
     async with aiohttp.ClientSession() as session:
         while True:
+            # Use the process_order function for consistency and simplicity (it no longer calculates cost)
             tasks = [process_order(session, order) for order in orders]
             results = await asyncio.gather(*tasks, return_exceptions=True)
 
@@ -435,6 +377,7 @@ async def getShopifyOrderswithDates(start_date: str, end_date: str):
             try:
                 if not orders.has_next_page():
                     break
+                break
                 orders = orders.next_page()
             except Exception as e:
                 print(f"Error fetching next page: {e}")
@@ -449,27 +392,37 @@ async def getShopifyOrderswithDates(start_date: str, end_date: str):
 def fetch_orders():
     data = request.get_json()
 
+    # Ensure the fromDate and toDate are passed correctly (format: YYYY-MM-DD)
     from_date = data.get('fromDate')
     to_date = data.get('toDate')
 
-    from_date_iso, to_date_iso = adjust_to_shopify_timezone(from_date, to_date)
-    print(f"Fetching from {from_date_iso} to {to_date_iso}")
+    # Adjust the dates to Shopify's timezone (convert to UTC)
+    from_date_utc, to_date_utc = adjust_to_shopify_timezone(from_date, to_date)
+    print(f"Fetching from {from_date_utc} to {to_date_utc}")
 
-    orders = asyncio.run(getShopifyOrderswithDates(from_date_iso, to_date_iso))
+    # Now pass the adjusted UTC dates to fetch orders
+    orders = asyncio.run(getShopifyOrderswithDates(from_date_utc, to_date_utc))
 
     total_sales = 0.0
     for order in orders:
+        # Cost feature removed, only calculate sales
         try:
             total_sales += float(order['total_price'])
         except (TypeError, ValueError):
             print(f"Warning: Could not parse total_price for order {order.get('order_num', 'N/A')}")
             pass
 
+    # Return the orders with totals
     return jsonify({
         'orders': orders,
         'total_sales': total_sales,
-        'total_cost': 0.0
+        'total_cost': 0.0  # Total cost removed/set to zero
     })
+
+
+# REMOVED: process_shopify_order_with_details function is no longer needed/redundant with process_order
+
+# REMOVED: fetch_line_item_cost_and_tracking function is no longer needed
 
 
 @app.route('/apply_tag', methods=['POST'])
@@ -479,14 +432,18 @@ def apply_tag():
     print(order_id)
     tag = data.get('tag')
 
+    # Get today's date in YYYY-MM-DD format
     today_date = datetime.now().strftime('%Y-%m-%d')
     tag_with_date = f"{tag.strip()} ({today_date})"
     try:
+        # Fetch the order
         order = shopify.Order.find(order_id)
 
+        # Ensure it's a single order
         if not hasattr(order, 'tags'):
             raise ValueError("Could not fetch a valid order. Ensure the order ID is correct.")
 
+        # If the tag is "Returned", cancel the order
         if tag.strip().lower() == "returned":
             if order.cancel():
                 print("Order Cancelled")
@@ -498,6 +455,7 @@ def apply_tag():
             else:
                 print("Order Closing Failed")
 
+        # Process existing tags
         tags = [t.strip() for t in order.tags.split(", ")] if order.tags else []
 
         if "Leopards Courier" in tags:
@@ -506,6 +464,7 @@ def apply_tag():
         if tag_with_date not in tags:
             tags.append(tag_with_date)
 
+        # Update and save the order
         order.tags = ", ".join(tags)
         if order.save():
             return jsonify({"success": True, "message": "Tag applied successfully."})
@@ -524,15 +483,15 @@ def tracking():
 
 
 def format_date(date_str):
+    # Parse the date string
     date_obj = datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S %z")
+    # Format the date object to only show the date
     return date_obj.strftime("%Y-%m-%d")
 
 
 @app.route('/refresh', methods=['POST'])
 def refresh_data():
-    global order_details, product_cache
-    # Clear cache on refresh
-    product_cache = {}
+    global order_details
     try:
         order_details = asyncio.run(getShopifyOrders())
         return render_template("track_alk.html", order_details=order_details)
@@ -547,7 +506,7 @@ def run_async(func, *args, **kwargs):
 
 @app.route('/track/<tracking_num>')
 def displayTracking(tracking_num):
-    print(f"Tracking Number: {tracking_num}")
+    print(f"Tracking Number: {tracking_num}")  # Debug line
 
     async def async_func():
         async with aiohttp.ClientSession() as session:
@@ -567,6 +526,7 @@ def undelivered():
 @app.route('/report')
 def report():
     global order_details, pre_loaded
+    # Ensure order_details is a list of dictionaries (or the desired structure)
     if not isinstance(order_details, list):
         order_details = []
     return render_template("report.html", order_details=order_details)
@@ -583,14 +543,17 @@ def verify_shopify_webhook(request):
     Verify the webhook using HMAC with the shared secret.
     """
     shopify_hmac = request.headers.get('X-Shopify-Hmac-Sha256')
-    data = request.get_data()
+    data = request.get_data()  # Raw request body (bytes)
 
+    # Retrieve the secret from environment variables
     secret = os.getenv('SHOPIFY_WEBHOOK_SECRET')
 
+    # Check that the secret is set. If not, fail verification (or raise error)
     if secret is None:
         print("SECURITY ALERT: SHOPIFY_WEBHOOK_SECRET is not set.")
-        return False
+        return False  # Fail verification if secret is not set
 
+    # Compute the HMAC digest and base64 encode it.
     digest = hmac.new(
         secret.encode('utf-8'),
         data,
@@ -598,6 +561,7 @@ def verify_shopify_webhook(request):
     ).digest()
     computed_hmac = base64.b64encode(digest).decode('utf-8')
 
+    # Compare the computed HMAC with the one sent by Shopify.
     return hmac.compare_digest(computed_hmac, shopify_hmac)
 
 
@@ -605,6 +569,7 @@ def verify_shopify_webhook(request):
 def shopify_order_updated():
     global order_details
     try:
+        # **WEBHOOK DEBUG FIX: 1. Verify HMAC**
         if not verify_shopify_webhook(request):
             print("Webhook verification failed (HMAC mismatch or no secret).")
             return jsonify({'error': 'Invalid webhook signature'}), 401
@@ -616,31 +581,40 @@ def shopify_order_updated():
 
         print(f"Received webhook for order Shopify ID: {order_shopify_id}")
 
+        # **WEBHOOK DEBUG FIX: 2. Handle closed/archived orders**
+        # The order_id from the webhook payload is the numeric Shopify ID.
         if order_data.get('closed_at'):
             print(f"Order {order_shopify_id} is closed. Attempting removal from list.")
+            # Find the order in the list by its numeric 'order_id'
             order_details[:] = [o for o in order_details if o.get('order_id') != order_shopify_id]
             return jsonify({'success': True, 'message': f'Order {order_shopify_id} removed.'}), 200
 
-        # Fetch and process the updated order
+        # **WEBHOOK DEBUG FIX: 3. Fetch and process the updated order**
+        # Use the raw Shopify API to get the current state
         order = shopify.Order.find(order_shopify_id)
         if not order:
             return jsonify({'error': f'Order {order_shopify_id} not found'}), 404
 
         async def update_order():
             async with aiohttp.ClientSession() as session:
+                # Use the main processing function
                 return await process_order(session, order)
 
         updated_order_info = asyncio.run(update_order())
 
+        # The 'order_num' is the human-readable order name (e.g., #1001) used for matching in your list
         order_num_to_match = updated_order_info.get('order_num')
 
+        # **WEBHOOK DEBUG FIX: 4. Update the global list by matching on 'order_num'**
         updated = False
         for idx, existing_order in enumerate(order_details):
+            # Match using the human-readable 'order_num' since that's what process_order returns
             if existing_order.get('order_num') == order_num_to_match:
                 order_details[idx] = updated_order_info
                 updated = True
                 break
         if not updated:
+            # If it's a new order or the first time it's been processed, append it
             order_details.append(updated_order_info)
 
         return jsonify({
@@ -652,6 +626,7 @@ def shopify_order_updated():
     except Exception as e:
         print(f"Webhook processing error: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
+
 
 
 ##SCANNER
@@ -707,12 +682,13 @@ def scan_single_order():
     else:
         return jsonify({'success': False, 'error': f'Order/Tracking ID "{scan_term}" not found in loaded orders.'}), 404
 
+import shopify # Make sure this is imported at the top
 
 @app.route('/api/apply_bulk_tag', methods=['POST'])
 def apply_bulk_tag():
     data = request.json
-    order_ids_to_tag = data.get('order_ids', [])
-    tag_type = data.get('tag_type')
+    order_ids_to_tag = data.get('order_ids', []) # List of Shopify numeric IDs
+    tag_type = data.get('tag_type') # Expected: 'RETURNED' or 'DISPATCHED'
 
     if not order_ids_to_tag or tag_type not in ['RETURNED', 'DISPATCHED']:
         return jsonify({"success": False, "error": "Invalid input or tag type."}), 400
@@ -722,23 +698,28 @@ def apply_bulk_tag():
 
     for order_shopify_id in order_ids_to_tag:
         try:
+            # 1. Determine the correct tag name based on the type
             if tag_type == 'RETURNED':
                 base_tag = "Return Received"
             elif tag_type == 'DISPATCHED':
-                base_tag = "DISPATCHED"
+                base_tag = "DISPATCHED" # Keeps the original DISPATCHED tag
 
             final_tag = f"{base_tag} ({today_date})"
 
+            # 2. Fetch the order using the numeric ID
             order = shopify.Order.find(order_shopify_id)
             if not order:
                 results.append({'id': order_shopify_id, 'status': 'failed', 'message': 'Order not found.'})
                 continue
 
+            # 3. Get existing tags
             tags = [t.strip() for t in order.tags.split(", ")] if order.tags else []
 
+            # Ensure the dated tag is unique before adding
             if final_tag not in tags:
                 tags.append(final_tag)
 
+            # 4. Save the order with the updated tags
             order.tags = ", ".join(tags)
             if order.save():
                 results.append({'id': order_shopify_id, 'status': 'success', 'message': f'Tag "{final_tag}" applied.'})
@@ -755,7 +736,6 @@ def apply_bulk_tag():
         'results': results
     }), 200
 
-# Shopify Configuration
 shop_url = os.getenv('SHOP_URL')
 api_key = os.getenv('API_KEY')
 password = os.getenv('PASSWORD')
@@ -763,7 +743,9 @@ shopify.ShopifyResource.set_site(shop_url)
 shopify.ShopifyResource.set_user(api_key)
 shopify.ShopifyResource.set_password(password)
 
-# Initial Data Load
+# Only run initial load if outside the `if __name__ == "__main__"` block for Gunicorn/WSGI
+# If you are running with `python app.py`, you might want this inside the main block.
+# Keeping it outside for general Flask/WSGI setup compatibility.
 try:
     order_details = asyncio.run(getShopifyOrders())
 except Exception as e:
@@ -772,7 +754,10 @@ except Exception as e:
 
 
 if __name__ == "__main__":
+    # Environment variable check is redundant here but safe
+    shop_url = os.getenv('SHOP_URL')
+    api_key = os.getenv('API_KEY')
+    password = os.getenv('PASSWORD')
     app.run(port=5001)
-
 
 
