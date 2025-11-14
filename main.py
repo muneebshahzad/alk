@@ -88,7 +88,7 @@ async def fetch_tracking_data(session, tracking_number):
     url = f"https://cod.callcourier.com.pk/api/CallCourier/GetTackingHistory?cn={tracking_number}"
 
     # Set a timeout of 10 seconds for the request
-    timeout = ClientTimeout(total=50)
+    timeout = ClientTimeout(total=100)
 
     try:
         async with session.get(url, timeout=timeout) as response:
@@ -759,6 +759,7 @@ if __name__ == "__main__":
     api_key = os.getenv('API_KEY')
     password = os.getenv('PASSWORD')
     app.run(port=5001)
+
 
 
 
