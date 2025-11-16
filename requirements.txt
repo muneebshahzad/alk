@@ -1,8 +1,11 @@
 Flask
 requests
-python-shopify
 pymssql
 aiohttp
 tenacity
 pytz
 gunicorn  # <-- ADD THIS
+ShopifyAPI
+gunicorn 
+pytz
+tenacity
