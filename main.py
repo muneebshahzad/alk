@@ -5,6 +5,7 @@ import hmac
 import os
 import smtplib
 import time
+from urllib.parse import urlparse
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from flask import Flask, render_template, jsonify, request, flash, redirect, url_for, abort
@@ -666,3 +667,4 @@ if __name__ == "__main__":
     # Render deployment solution: Use '0.0.0.0' and the PORT environment variable
     port = int(os.environ.get('PORT', 5001))
     app.run(host='0.0.0.0', port=port)
+
