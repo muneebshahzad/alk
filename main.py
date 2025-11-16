@@ -5,7 +5,6 @@ import hmac
 import os
 import smtplib
 import time
-from urllib.parse import urlparse
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from flask import Flask, render_template, jsonify, request, flash, redirect, url_for, abort
@@ -20,6 +19,8 @@ from aiohttp import ClientSession, ClientError
 import asyncio
 from tenacity import retry, stop_after_attempt, wait_exponential
 import pytz
+from apscheduler.schedulers.background import BackgroundScheduler # NEW IMPORT
+import threading # Used for thread-safe global access management (optional, but good practice)
 
 app = Flask(__name__)
 app.debug = True
@@ -27,6 +28,13 @@ app.secret_key = os.getenv('APP_SECRET_KEY', 'default_secret_key')
 pre_loaded = 0
 order_details = []
 semaphore = asyncio.Semaphore(2)
+
+# --- APScheduler Setup ---
+scheduler = BackgroundScheduler()
+# Lock for thread-safe access to global order_details
+data_lock = threading.Lock()
+# --- END APScheduler Setup ---
+
 
 @retry(stop=stop_after_attempt(5), wait=wait_exponential(min=1, max=10))
 async def fetch_with_retry(session, url, method="GET", **kwargs):
@@ -126,7 +134,7 @@ async def process_order(session, order):
     try:
         order_start_time = time.time()
         created_at_str = order.created_at
-        created_at_obj = datetime.fromisoformat(created_at_str.replace('Z', '+00:00'))
+        created_at_obj = datetime.fromisoformat(created_at_str.replace('Z', '+00:00')) # Ensure Z is handled
         formatted_date = created_at_obj.strftime('%Y-%m-%d')
         order_info = {
             'order_link': "https://admin.shopify.com/store/alkaramat/orders/" + str(order.id),
@@ -156,13 +164,14 @@ async def process_order(session, order):
             image_src = "https://static.thenounproject.com/png/1578832-200.png"
             variant_name = line_item.variant_title or ""
             
-            # Synchronous Shopify Product Data Fetch (inside async function)
+            # Optimized Image/Variant Name Fetch (still synchronous/blocking, consider optimization)
             if line_item.product_id is not None:
                 try:
                     product = shopify.Product.find(line_item.product_id)
                     if product and product.variants:
                         for variant in product.variants:
                             if variant.id == line_item.variant_id:
+                                # Fetch image source from variant or product image
                                 if variant.image_id is not None:
                                     images = shopify.Image.find(image_id=variant.image_id, product_id=line_item.product_id)
                                     for image in images:
@@ -187,6 +196,7 @@ async def process_order(session, order):
                     'tracking_number': info['tracking_number'],
                     'status': info['status']
                 })
+                # Set the overall order status based on the last line item's tracking status
                 order_info['status'] = info['status']
 
         order_end_time = time.time()
@@ -198,8 +208,9 @@ async def process_order(session, order):
 
 @app.route('/pending')
 def pending_orders():
-    global order_details
-    current_orders = order_details
+    # Use data_lock to read the global state safely
+    with data_lock:
+        current_orders = order_details
     
     all_orders = []
     pending_items_dict = {}
@@ -255,11 +266,12 @@ def pending_orders():
 
 async def getShopifyOrders():
     """Fetches and processes recent Shopify orders (last few months)."""
-    start_date = (datetime.now() - datetime.timedelta(days=90)).isoformat()
+    start_date = (datetime.now() - datetime.timedelta(days=90)).isoformat() # Look back 90 days
     
     new_order_details = []
     total_start_time = time.time()
     try:
+        # Fetching latest 250 orders, ordered by creation date descending
         orders = shopify.Order.find(limit=250, order="created_at DESC", created_at_min=start_date)
     except Exception as e:
         print(f"Error fetching initial orders: {e}")
@@ -267,6 +279,7 @@ async def getShopifyOrders():
     
     async with aiohttp.ClientSession() as session:
         while True:
+            # Note: limited_request is removed here as it's now handled by the outer scheduler thread for simplicity
             tasks = [process_order(session, order) for order in orders]
             results = await asyncio.gather(*tasks, return_exceptions=True)
             
@@ -347,7 +360,6 @@ def fetch_orders():
     from_date_utc, to_date_utc = adjust_to_shopify_timezone(from_date, to_date)
     print(f"Fetching from {from_date_utc} to {to_date_utc}")
     
-    # Synchronously run the async fetch
     orders = asyncio.run(getShopifyOrderswithDates(from_date_utc, to_date_utc))
     total_sales = 0.0
     for order in orders:
@@ -365,7 +377,6 @@ def fetch_orders():
 
 @app.route('/apply_tag', methods=['POST'])
 def apply_tag():
-    global order_details
     data = request.json
     order_id = data.get('order_id')
     tag = data.get('tag')
@@ -399,10 +410,9 @@ def apply_tag():
             
         order.tags = ", ".join(tags)
         if order.save():
-            # Trigger immediate synchronous refresh of the order details list
-            global order_details
-            order_details = asyncio.run(getShopifyOrders())
-            return jsonify({"success": True, "message": "Tag applied successfully and list refreshed."})
+            # Trigger immediate background refresh to update the global list
+            scheduler.add_job(run_data_refresh, 'date') 
+            return jsonify({"success": True, "message": "Tag applied successfully and refresh scheduled."})
         else:
             return jsonify({"success": False, "error": "Failed to save order changes."})
             
@@ -412,27 +422,38 @@ def apply_tag():
 
 @app.route("/")
 def tracking():
-    global order_details
-    return render_template("track_alk.html", order_details=order_details)
+    with data_lock:
+        current_orders = order_details
+    return render_template("track_alk.html", order_details=current_orders)
 
 def format_date(date_str):
     date_obj = datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S %z")
     return date_obj.strftime("%Y-%m-%d")
 
+def run_data_refresh():
+    """Synchronous wrapper to run the asynchronous data load function for the scheduler."""
+    global order_details
+    print("--- Starting Background Order Refresh Job ---")
+    try:
+        new_orders = asyncio.run(getShopifyOrders())
+        with data_lock:
+            order_details = new_orders # Update the global list safely
+        print(f"--- Background Refresh Complete. Loaded {len(order_details)} orders. ---")
+    except Exception as e:
+        print(f"--- Background Refresh Failed: {e} ---")
+
 @app.route('/refresh', methods=['POST'])
 def refresh_data():
-    """Performs a full synchronous refresh of order tracking data."""
-    global order_details
+    """Triggers the background refresh job immediately."""
     try:
-        print("--- Starting Synchronous Order Refresh ---")
-        # Blocks the thread until all orders and tracking data are fetched
-        order_details = asyncio.run(getShopifyOrders())
-        print(f"--- Synchronous Refresh Complete. Loaded {len(order_details)} orders. ---")
-        # Return a success message (client side can then redirect or update)
-        return jsonify({'message': 'Data refresh complete'}), 200
+        # Schedule a one-off job to run immediately in the background thread
+        scheduler.add_job(run_data_refresh, 'date', run_date=datetime.now())
+        return jsonify({
+            'message': 'Data refresh job scheduled successfully (202 Accepted). Please wait a few moments and refresh the dashboard page.'
+        }), 202
     except Exception as e:
-        print(f"Error refreshing data: {e}")
-        return jsonify({'message': 'Failed to refresh data'}), 500
+        print(f"Error scheduling refresh: {e}")
+        return jsonify({'message': 'Failed to schedule refresh'}), 500
 
 def run_async(func, *args, **kwargs):
     return asyncio.run(func(*args, **kwargs))
@@ -448,20 +469,21 @@ def displayTracking(tracking_num):
 
 @app.route('/undelivered')
 def undelivered():
-    global order_details, pre_loaded
-    return render_template("undelivered.html", order_details=order_details)
+    with data_lock:
+        current_orders = order_details
+    return render_template("undelivered.html", order_details=current_orders)
 
 @app.route('/report')
 def report():
-    global order_details, pre_loaded
-    if not isinstance(order_details, list):
-        order_details = []
-    return render_template("report.html", order_details=order_details)
+    with data_lock:
+        current_orders = order_details
+    return render_template("report.html", order_details=current_orders)
 
 @app.route("/track")
 def tracking_track():
-    global order_details
-    return render_template("track_alk.html", order_details=order_details)
+    with data_lock:
+        current_orders = order_details
+    return render_template("track_alk.html", order_details=current_orders)
 
 def verify_shopify_webhook(request):
     """Verify the webhook using HMAC with the shared secret."""
@@ -500,7 +522,8 @@ def shopify_order_updated():
         # Handle closed/archived orders
         if order_data.get('closed_at'):
             print(f"Order {order_shopify_id} is closed. Attempting removal from list.")
-            order_details[:] = [o for o in order_details if o.get('order_id') != order_shopify_id]
+            with data_lock:
+                order_details[:] = [o for o in order_details if o.get('order_id') != order_shopify_id]
             return jsonify({'success': True, 'message': f'Order {order_shopify_id} removed.'}), 200
             
         # Fetch and process the updated order
@@ -512,7 +535,6 @@ def shopify_order_updated():
             async with aiohttp.ClientSession() as session:
                 return await process_order(session, order)
                 
-        # Synchronously run the update for the single order
         updated_order_info = asyncio.run(update_order())
         
         if updated_order_info is None:
@@ -520,15 +542,16 @@ def shopify_order_updated():
             
         order_num_to_match = updated_order_info.get('order_num')
         
-        # Update the global list
-        updated = False
-        for idx, existing_order in enumerate(order_details):
-            if existing_order.get('order_num') == order_num_to_match:
-                order_details[idx] = updated_order_info
-                updated = True
-                break
-        if not updated:
-            order_details.append(updated_order_info)
+        # Update the global list safely
+        with data_lock:
+            updated = False
+            for idx, existing_order in enumerate(order_details):
+                if existing_order.get('order_num') == order_num_to_match:
+                    order_details[idx] = updated_order_info
+                    updated = True
+                    break
+            if not updated:
+                order_details.append(updated_order_info)
 
         return jsonify({
             'success': True,
@@ -548,28 +571,29 @@ def scanner_page():
 
 @app.route('/api/scan/order', methods=['POST'])
 def scan_single_order():
-    global order_details
     scanned_value = request.json.get('scan_input')
     if not scanned_value:
         return jsonify({'error': 'No input provided'}), 400
         
     scan_term = str(scanned_value).strip().replace("#", "")
     found_order = None
-    current_orders = order_details
+    
+    with data_lock:
+        current_orders = order_details
         
-    # 1. Search by Shopify Order Number
-    found_order = next((o for o in current_orders if o.get('order_num') == scan_term), None)
+        # 1. Search by Shopify Order Number
+        found_order = next((o for o in current_orders if o.get('order_num') == scan_term), None)
         
-    # 2. If not found, search by Tracking Number
-    if not found_order:
-        for order in current_orders:
-            if order.get('line_items'):
-                for item in order['line_items']:
-                    if item.get('tracking_number') == scan_term:
-                        found_order = order
+        # 2. If not found, search by Tracking Number
+        if not found_order:
+            for order in current_orders:
+                if order.get('line_items'):
+                    for item in order['line_items']:
+                        if item.get('tracking_number') == scan_term:
+                            found_order = order
+                            break
+                    if found_order:
                         break
-                if found_order:
-                    break
                         
     if found_order:
         items_list = [
@@ -592,7 +616,6 @@ def scan_single_order():
 
 @app.route('/api/apply_bulk_tag', methods=['POST'])
 def apply_bulk_tag():
-    global order_details
     data = request.json
     order_ids_to_tag = data.get('order_ids', [])
     tag_type = data.get('tag_type')
@@ -630,8 +653,8 @@ def apply_bulk_tag():
         except Exception as e:
             results.append({'id': order_shopify_id, 'status': 'error', 'message': str(e)})
 
-    # Trigger full synchronous refresh after bulk tagging
-    order_details = asyncio.run(getShopifyOrders())
+    # Trigger immediate background refresh after bulk tagging
+    scheduler.add_job(run_data_refresh, 'date')
     
     return jsonify({
         'success': True,
@@ -646,7 +669,7 @@ shop_url = os.getenv('SHOP_URL')
 api_key = os.getenv('API_KEY')
 password = os.getenv('PASSWORD')
 
-# Set Shopify credentials
+# Set Shopify credentials (keep this outside the if __name__ == "__main__" for WSGI)
 try:
     shopify.ShopifyResource.set_site(shop_url)
     shopify.ShopifyResource.set_user(api_key)
@@ -654,17 +677,19 @@ try:
 except Exception as e:
     print(f"Shopify configuration failed: {e}")
 
-# Initial synchronous load is back
-try:
-    print("--- Starting Initial Synchronous Load ---")
-    order_details = asyncio.run(getShopifyOrders())
-    print(f"--- Initial Load Complete. Loaded {len(order_details)} orders. ---")
-except Exception as e:
-    print(f"Initial order loading failed: {e}")
-    order_details = []
+# Initial load and Periodic refresh setup
+# Start the scheduler and the initial job once
+# The job will run every 60 minutes
+scheduler.add_job(run_data_refresh, 'interval', minutes=60, id='shopify_data_refresh', replace_existing=True)
+scheduler.start()
 
 if __name__ == "__main__":
+    # In local development, force an initial synchronous load for immediate UI data.
+    if not order_details:
+         print("Running initial load sync for local development...")
+         run_data_refresh()
+         print("Initial load finished.")
+         
     # Render deployment solution: Use '0.0.0.0' and the PORT environment variable
     port = int(os.environ.get('PORT', 5001))
     app.run(host='0.0.0.0', port=port)
-
