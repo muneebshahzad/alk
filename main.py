@@ -824,4 +824,4 @@ if __name__ == "__main__":
         shop_url = os.getenv('SHOP_URL')
         api_key = os.getenv('API_KEY')
         password = os.getenv('PASSWORD')
-        app.run(port=5001)
+    app.run(host="0.0.0.0", port=5001, debug=True)
