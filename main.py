@@ -298,6 +298,8 @@ async def process_order(session, order):
 def pending_orders():
     all_orders = []
     pending_items_dict = {}  # Dictionary to track quantities of each unique item
+    # Dictionary to track quantity per status for use in pending.html
+    pending_statuses_dict = {}
 
     global order_details
 
@@ -335,15 +337,23 @@ def pending_orders():
                 product_title = item['item_title']
                 quantity = item['quantity']
                 item_image = item['item_image']
+                status = item['status']  # Get the item status
 
-                if product_title in pending_items_dict:
-                    pending_items_dict[product_title]['quantity'] += quantity
-                else:
+                if product_title not in pending_items_dict:
+                    # Initialize with basic item data
                     pending_items_dict[product_title] = {
                         'item_image': item_image,
                         'item_title': product_title,
-                        'quantity': quantity
+                        'quantity': 0,
+                        'statuses': {}  # Add the statuses dictionary here!
                     }
+
+                # Update total quantity
+                pending_items_dict[product_title]['quantity'] += quantity
+
+                # Update quantity per status
+                current_statuses = pending_items_dict[product_title]['statuses']
+                current_statuses[status] = current_statuses.get(status, 0) + quantity
 
     pending_items = list(pending_items_dict.values())
     pending_items_sorted = sorted(
@@ -803,15 +813,17 @@ shopify.ShopifyResource.set_site(shop_url)
 shopify.ShopifyResource.set_user(api_key)
 shopify.ShopifyResource.set_password(password)
 
-# Initial load: Now runs much faster due to the async fixes
-try:
-    order_details = asyncio.run(getShopifyOrders())
-except Exception as e:
-    print(f"Initial order loading failed: {e}")
-    order_details = []
-
+# --- FIX 4: Moving initial data load inside __main__ to prevent double fetch in dev ---
 if __name__ == "__main__":
+    # Load orders only when the script is run directly (not by the Flask reloader's parent process)
+    try:
+        order_details = asyncio.run(getShopifyOrders())
+    except Exception as e:
+        print(f"Initial order loading failed: {e}")
+        order_details = []
+
     shop_url = os.getenv('SHOP_URL')
     api_key = os.getenv('API_KEY')
     password = os.getenv('PASSWORD')
     app.run(port=5001)
+# --- END FIX 4 ---
