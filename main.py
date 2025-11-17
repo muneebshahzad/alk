@@ -805,6 +805,7 @@ def apply_bulk_tag():
     }), 200
 
 
+
 # Shopify initial setup remains synchronous here, which is fine for setup
 shop_url = os.getenv('SHOP_URL')
 api_key = os.getenv('API_KEY')
@@ -813,14 +814,30 @@ shopify.ShopifyResource.set_site(shop_url)
 shopify.ShopifyResource.set_user(api_key)
 shopify.ShopifyResource.set_password(password)
 
-# --- FIX 4: Moving initial data load inside __main__ to prevent double fetch in dev ---
-if __name__ == "__main__":
-    # Load orders only when the script is run directly (not by the Flask reloader's parent process)
-    print("Starting Fetching Orders")
-    order_details = []
-    shop_url = os.getenv('SHOP_URL')
-    api_key = os.getenv('API_KEY')
-    password = os.getenv('PASSWORD')
-    order_details = asyncio.run(getShopifyOrders())
-    app.run(host="0.0.0.0", port=5001, debug=True)
+# ----------------------------------------------------------------------
+# === FIX: INITIAL LOAD MOVED HERE FOR GUNICORN DEPLOYMENT ===
+# This code executes immediately when Gunicorn imports 'main.py'
+# ----------------------------------------------------------------------
 
+try:
+    print("Starting initial synchronous order fetch for Gunicorn worker...")
+    # This executes before any requests are handled by Gunicorn workers
+    order_details = asyncio.run(getShopifyOrders())
+    print(f"Initial order fetch completed. Loaded {len(order_details)} orders.")
+except Exception as e:
+    print(f"Initial order loading failed during deployment startup: {e}")
+    order_details = []
+
+# ----------------------------------------------------------------------
+# === END FIX ===
+# ----------------------------------------------------------------------
+
+if __name__ == "__main__":
+    # This block is only for running the development server locally (using app.run)
+    # The essential data loading logic is now handled above.
+    
+    shop_url = os.getenv('SHOP_URL') 
+    api_key = os.getenv('API_KEY')
+    password = os.getenv('PASSWORD') 
+    
+    app.run(port=5001)
