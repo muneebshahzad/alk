@@ -821,9 +821,7 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"Initial order loading failed: {e}")
         order_details = []
-
-    shop_url = os.getenv('SHOP_URL')
-    api_key = os.getenv('API_KEY')
-    password = os.getenv('PASSWORD')
-    app.run(port=5001)
-# --- END FIX 4 ---
+        shop_url = os.getenv('SHOP_URL')
+        api_key = os.getenv('API_KEY')
+        password = os.getenv('PASSWORD')
+        app.run(port=5001)
