@@ -816,12 +816,11 @@ shopify.ShopifyResource.set_password(password)
 # --- FIX 4: Moving initial data load inside __main__ to prevent double fetch in dev ---
 if __name__ == "__main__":
     # Load orders only when the script is run directly (not by the Flask reloader's parent process)
-    try:
-        order_details = asyncio.run(getShopifyOrders())
-    except Exception as e:
-        print(f"Initial order loading failed: {e}")
-        order_details = []
-        shop_url = os.getenv('SHOP_URL')
-        api_key = os.getenv('API_KEY')
-        password = os.getenv('PASSWORD')
+    print("Starting Fetching Orders")
+    order_details = []
+    shop_url = os.getenv('SHOP_URL')
+    api_key = os.getenv('API_KEY')
+    password = os.getenv('PASSWORD')
+    order_details = asyncio.run(getShopifyOrders())
     app.run(host="0.0.0.0", port=5001, debug=True)
+
