@@ -11,13 +11,16 @@
 
     <title>Daily Tasker - Pending Orders</title>
 
+    <!-- Custom fonts for this template -->
     <link href="static/assets/vendor/fontawesome-free/css/all.min.css" rel="stylesheet" type="text/css">
     <link
         href="https://fonts.googleapis.com/css?family=Nunito:200,200i,300,300i,400,400i,600,600i,700,700i,800,800i,900,900i"
         rel="stylesheet">
 
+    <!-- Custom styles for this template -->
     <link href="static/assets/css/sb-admin-2.min.css" rel="stylesheet">
 
+    <!-- Custom styles for this page -->
     <link href="static/assets/vendor/datatables/dataTables.bootstrap4.min.css" rel="stylesheet">
  <style>
         .status-buttons {
@@ -29,59 +32,45 @@
             margin-bottom: 5px;
         }
     </style>
-    <style>
-  /* Let the two tables shrink properly */
-  .top-products .table-responsive { flex: 1 1 0; min-width: 0; }
-
-  /* Keep sensible widths on desktop */
-  .top-products table th:first-child,
-  .top-products table td:first-child { width: 90px; }   /* Image */
-  .top-products table th:nth-child(3),
-  .top-products table td:nth-child(3) { width: 80px; }  /* Qty */
-
-  /* Stack vertically on tablets/phones */
-  @media (max-width: 992px) {
-    .top-products { flex-direction: column; align-items: stretch; }
-  }
-
-  /* Phone fixes: wrap long titles, avoid overflow */
-  @media (max-width: 576px) {
-    .top-products table { table-layout: fixed; }
-    .top-products th, .top-products td { white-space: normal; word-break: break-word; }
-    .top-products th:nth-child(2), .top-products td:nth-child(2) { width: auto !important; }
-    .top-products img { width: 64px; height: 64px; object-fit: cover; }
-  }
-
-  /* Make the search bar fluid on mobile (overrides inline max-width) */
-  #topProductsSearch { width: 100%; min-width: 0; }
-  .input-group.input-group-sm[style*="max-width:420px"] { max-width: 100% !important; }
-</style>
-
 </head>
 
 <body id="page-top">
 
+    <!-- Page Wrapper -->
     <div id="wrapper">
 
+        <!-- Sidebar -->
         {% include 'header.html' %}
+        <!-- End of Sidebar -->
+
+        <!-- Content Wrapper -->
         <div id="content-wrapper" class="d-flex flex-column">
 
+            <!-- Main Content -->
             <div id="content">
 
+                <!-- Topbar -->
                 <nav class="navbar navbar-expand navbar-light bg-white topbar mb-4 static-top shadow">
 
+                    <!-- Sidebar Toggle (Topbar) -->
                     <form class="form-inline">
                         <button id="sidebarToggleTop" class="btn btn-link d-md-none rounded-circle mr-3">
                             <i class="fa fa-bars"></i>
                         </button>
                     </form>
 
+                    <!-- Topbar Search -->
+
+
+                    <!-- Topbar Navbar -->
                     <ul class="navbar-nav ml-auto">
 
+                        <!-- Nav Item - Search Dropdown (Visible Only XS) -->
                         <li class="nav-item dropdown no-arrow d-sm-none">
                             <a class="nav-link dropdown-toggle" href="#" id="searchDropdown" role="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
                                 <i class="fas fa-search fa-fw"></i>
                             </a>
+                            <!-- Dropdown - Messages -->
                             <div class="dropdown-menu dropdown-menu-right p-3 shadow animated--grow-in" aria-labelledby="searchDropdown">
                                 <form class="form-inline mr-auto w-100 navbar-search">
                                     <div class="input-group">
@@ -100,11 +89,13 @@
 
                          <div class="topbar-divider d-none d-sm-block"></div>
 
+                        <!-- Nav Item - User Information -->
                         <li class="nav-item dropdown no-arrow">
                             <a class="nav-link dropdown-toggle" href="#" id="userDropdown" role="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
                                 <span class="mr-2 d-none d-lg-inline text-gray-600 small">User</span>
                                 <img class="img-profile rounded-circle" src="static/img/undraw_profile.svg">
                             </a>
+                            <!-- Dropdown - User Information -->
                             <div class="dropdown-menu dropdown-menu-right shadow animated--grow-in" aria-labelledby="userDropdown">
                                 <a class="dropdown-item" href="#">
                                     <i class="fas fa-user fa-sm fa-fw mr-2 text-gray-400"></i>
@@ -129,20 +120,18 @@
                     </ul>
 
                 </nav>
+                <!-- End of Topbar -->
+
+                <!-- Begin Page Content -->
                 <div class="container-fluid">
 
 
+                    <!-- DataTales Example -->
                     <div class="card shadow mb-4">
-                        <div class="card-header py-3 d-flex justify-content-between align-items-center">
+                        <div class="card-header py-3">
                             <h6 class="m-0 font-weight-bold text-primary">Pending Orders </h6>
-                            <div class="input-group" style="width: auto;">
-                                <div class="input-group-prepend">
-                                    <label class="input-group-text" for="datetime-filter">From:</label>
-                                </div>
-                                <input type="datetime-local" id="datetime-filter" class="form-control form-control-sm">
-                            </div>
                         </div>
-<div class="top-products" style="display: flex; justify-content: center; gap: 20px;">
+                      <div style="display: flex; justify-content: center; gap: 20px;">
     <div class="table-responsive" style="flex: 1;">
         <table class="table table-bordered" width="100%" cellspacing="0">
             <thead>
@@ -150,17 +139,32 @@
                     <th>Image</th>
                     <th style="width: 30%;">Title</th>
                     <th>Quantity</th>
-                    <th style="width: 10%;">Done</th>
+                    <th> </th>
                 </tr>
             </thead>
             <tbody>
                 {% for item in pending_items[:half] %}
-                <tr data-order-date="{{ item.order_date }}">
-                    <td><img src="{{ item.item_image }}" width="75" height="75"></td>
-                    <td><span contenteditable="true">{{ item.item_title }}</span></td>
-                    <td><span contenteditable="true">{{ item.quantity }}</span></td>
-                    <td><button class="btn btn-success btn-circle btn-sm mark-done"><i class="fas fa-check"></i></button></td>
-                </tr>
+<!-- FIX: Use | default({}) to provide an empty dictionary if 'statuses' is missing, preventing TypeError -->
+<tr data-statuses='{{ item.statuses | default({}) | tojson | safe }}'>
+
+    <td>
+        <img src="{{ item.item_image }}" width="75" height="75">
+    </td>
+    <td contenteditable="true" style="cursor:text;">
+        {{ item.item_title }}
+    </td>
+    <td class="qty-cell" contenteditable="true" style="cursor:text; text-align: center;">
+            {{ item.quantity }}
+
+    </td>
+    <td style="text-align:center;">
+        <button onclick="this.closest('tr').style.display='none'" class="btn btn-sm btn-primary">
+    &#10003;
+</button>
+
+    </td>
+</tr>
+
                 {% endfor %}
             </tbody>
         </table>
@@ -173,22 +177,47 @@
                     <th>Image</th>
                     <th style="width: 30%;">Title</th>
                     <th>Quantity</th>
-                    <th style="width: 10%;">Done</th>
+                    <th> </th>
                 </tr>
             </thead>
             <tbody>
                 {% for item in pending_items[half:] %}
-                <tr data-order-date="{{ item.order_date }}">
-                    <td><img src="{{ item.item_image }}" width="75" height="75"></td>
-                    <td><span contenteditable="true">{{ item.item_title }}</span></td>
-                    <td><span contenteditable="true">{{ item.quantity }}</span></td>
-                    <td><button class="btn btn-success btn-circle btn-sm mark-done"><i class="fas fa-check"></i></button></td>
-                </tr>
+<!-- FIX: Use | default({}) to provide an empty dictionary if 'statuses' is missing, preventing TypeError -->
+<tr data-statuses='{{ item.statuses | default({}) | tojson | safe }}'>
+
+    <td>
+        <img src="{{ item.item_image }}" width="75" height="75">
+    </td>
+    <td contenteditable="true" style="cursor:text;">
+        {{ item.item_title }}
+    </td>
+        <td class="qty-cell" contenteditable="true" style="cursor:text; text-align: center;">
+            {{ item.quantity }}
+
+    </td>
+
+    <td style="text-align:center;">
+        <button onclick="this.closest('tr').style.display='none'" class="btn btn-sm btn-primary">
+    &#10003;
+</button>
+
+    </td>
+</tr>
+
                 {% endfor %}
             </tbody>
         </table>
+
     </div>
+
+
 </div>
+<div class="mb-3">
+    <button class="btn btn-warning" onclick="hideBooked()">Hide BOOKED</button>
+    <button class="btn btn-info" onclick="filterBooked()">Filter BOOKED</button> <!-- NEW BUTTON ADDED -->
+    <button class="btn btn-secondary" onclick="resetView()">Reset</button>
+</div>
+
 
 
                         <div style="overflow-x:auto;" class="card-body">
@@ -197,7 +226,6 @@
                                 <table class="table table-bordered" id="dataTable" width="100%" cellspacing="0">
     <thead>
         <tr>
-            <th>Pending Since</th>
             <th>Order#</th>
             <th>Total</th>
             <th>Total Items</th>
@@ -207,7 +235,6 @@
     </thead>
     <tfoot>
         <tr>
-            <th>Pending Since</th>
             <th>Order#</th>
             <th>Total</th>
             <th>Total Items</th>
@@ -218,9 +245,7 @@
     <tbody>
         {% for order in all_orders %}
             <tr>
-                <td class="pending-since" data-order-date="{{ order.date }}" style="font-size: 18px; font-weight: bold;"></td>
-
-                <td>{{ order.order_num }} <br>{{ order.date }}</td>
+                <td>{{ order.order_via }} <br> <a href="{{order.order_link}}"><p>{{ order.order_id }}</p></a> <br>{{ order.date }}</td>
                 <td>{{ order.total_price }}</td>
                 <td>
                     <table class="table table-sm nested-table">
@@ -268,7 +293,12 @@
     <p>Total Value: <span id="totalValue">0.00</span></p>
 </div>
                 </div>
-                </div>
+                <!-- /.container-fluid -->
+
+            </div>
+            <!-- End of Main Content -->
+
+            <!-- Footer -->
             <footer class="sticky-footer bg-white">
                 <div class="container my-auto">
                     <div class="copyright text-center my-auto">
@@ -276,12 +306,20 @@
                     </div>
                 </div>
             </footer>
-            </div>
+            <!-- End of Footer -->
+
         </div>
+        <!-- End of Content Wrapper -->
+
+    </div>
+    <!-- End of Page Wrapper -->
+
+    <!-- Scroll to Top Button-->
     <a class="scroll-to-top rounded" href="#page-top">
         <i class="fas fa-angle-up"></i>
     </a>
 
+    <!-- Logout Modal-->
     <div class="modal fade" id="logoutModal" tabindex="-1" role="dialog" aria-labelledby="exampleModalLabel"
         aria-hidden="true">
         <div class="modal-dialog" role="document">
@@ -301,16 +339,21 @@
         </div>
     </div>
 
+    <!-- Bootstrap core JavaScript-->
     <script src="static/assets/vendor/jquery/jquery.min.js"></script>
     <script src="static/assets/vendor/bootstrap/js/bootstrap.bundle.min.js"></script>
 
+    <!-- Core plugin JavaScript-->
     <script src="static/assets/vendor/jquery-easing/jquery.easing.min.js"></script>
 
+    <!-- Custom scripts for all pages-->
     <script src="static/assets/js/sb-admin-2.min.js"></script>
 
+    <!-- Page level plugins -->
     <script src="static/assets/vendor/datatables/jquery.dataTables.min.js"></script>
     <script src="static/assets/vendor/datatables/dataTables.bootstrap4.min.js"></script>
 
+    <!-- Page level custom scripts -->
     <script src="static/assets/js/demo/datatables-demo.js"></script>
         <script src="static/assets/js/demo/datatables-demo.js"></script>
     <script src="static/assets/js/track.js"></script>
@@ -350,11 +393,11 @@ function updateTotals() {
 
     filteredData.each(function (row) {
         // Get the total column value (e.g. Rs 13498.00)
-        var amount = parseFloat($(row).find('td:eq(2)').text().replace(/,/g, '')) || 0;
+        var amount = parseFloat($(row).find('td:eq(1)').text().replace(/,/g, '')) || 0;
         totalValue += amount;
 
         // Now count quantities from the nested "Total Items" cell (3rd column, index 2)
-        $(row).find('td:eq(3) table tbody tr').each(function () {
+        $(row).find('td:eq(2) table tbody tr').each(function () {
             var qtyText = $(this).find('td').eq(2).text().trim(); // Quantity is in 3rd column inside nested table
             var qty = parseInt(qtyText) || 0;
             totalItems += qty;
@@ -367,339 +410,71 @@ function updateTotals() {
 
     // Initial call
     updateTotals();
-    </script>
-<script>
-  function parseFlexibleDate(dateStr) {
-    if (!dateStr) return null;
 
-    // Clean and normalize date string
-    dateStr = dateStr.trim().replace(/\s+/g, ' ');
 
-    // Try direct parse
-    let date = new Date(dateStr);
-    if (!isNaN(date.getTime())) return date;
+function hideBooked() {
+    document.querySelectorAll('tr[data-statuses]').forEach(row => {
+        // FIX: Ensure statusData is parsed correctly, it should now exist as a dictionary
+        const statusData = JSON.parse(row.getAttribute('data-statuses'));
 
-    // Try "Aug 06, 2025"
-    const match = dateStr.match(/([A-Za-z]+ \d{1,2}, \d{4})/);
-    if (match) {
-      let parsed = Date.parse(match[1]);
-      if (!isNaN(parsed)) return new Date(parsed);
-    }
-
-    // Try "2025-08-06"
-    const isoMatch = dateStr.match(/(\d{4}-\d{2}-\d{2})/);
-    if (isoMatch) return new Date(isoMatch[1]);
-
-    return null;
-  }
-
-  function updatePendingSince() {
-    const cells = document.querySelectorAll(".pending-since");
-
-    cells.forEach(cell => {
-      const dateStr = cell.getAttribute("data-order-date");
-      const orderDate = parseFlexibleDate(dateStr);
-
-      if (!orderDate) {
-        cell.textContent = "—";
-        return;
-      }
-
-      const now = new Date();
-      const diffTime = now.setHours(0, 0, 0, 0) - orderDate.setHours(0, 0, 0, 0);
-      const diffDays = Math.max(Math.floor(diffTime / (1000 * 60 * 60 * 24)), 0);
-
-      cell.textContent = `${diffDays} day${diffDays !== 1 ? 's' : ''}`;
-      cell.style.fontSize = "18px";
-      cell.style.fontWeight = "bold";
-    });
-  }
-
-  document.addEventListener("DOMContentLoaded", function () {
-    // Initialize DataTable if you're using it
-    const table = $('#dataTable').DataTable();
-
-    // Update initially
-    updatePendingSince();
-
-    // Update on every redraw (pagination, sort, etc.)
-    table.on('draw', function () {
-      updatePendingSince();
-    });
-  });
-</script>
-
-<script>
-(function () {
-  document.addEventListener('DOMContentLoaded', initTopProductsLogic);
-
-  function initTopProductsLogic() {
-    // Find the flex container holding the two small product tables
-    const flex = document.querySelector('.card .card-header + div[style*="display: flex"]');
-    if (!flex) { console.warn('Top products flex container not found'); return; }
-
-    const tables = flex.querySelectorAll('table.table');
-    if (tables.length < 2) { console.warn('Expected two top product tables; found:', tables.length); return; }
-
-    const [leftTable, rightTable] = tables;
-    const leftBody  = leftTable.tBodies && leftTable.tBodies[0];
-    const rightBody = rightTable.tBodies && rightTable.tBodies[0];
-    if (!leftBody || !rightBody) { console.warn('One of the top tables has no <tbody>'); return; }
-
-    // --- Build toolbar (search + count) ---
-    const toolbar = document.createElement('div');
-    toolbar.className = 'mb-2';
-    toolbar.innerHTML = `
-      <div class="input-group input-group-sm" style="max-width:420px;">
-        <div class="input-group-prepend">
-          <span class="input-group-text"><i class="fas fa-search"></i></span>
-        </div>
-        <input type="search" id="topProductsSearch" class="form-control" placeholder="Search top products (title or qty)">
-        <div class="input-group-append">
-          <span class="input-group-text" id="topProductsCount"></span>
-        </div>
-      </div>`;
-    // Insert toolbar just above the two tables
-    flex.parentNode.insertBefore(toolbar, flex);
-
-    const $input = toolbar.querySelector('#topProductsSearch');
-    const $count = toolbar.querySelector('#topProductsCount');
-
-    // --- Capture a master list of the actual <tr> nodes (detach from DOM when rendering) ---
-    const masterRows = [...leftBody.rows, ...rightBody.rows];
-
-    // Helper to normalize text (case-insensitive search)
-    const norm = s => (s || '').toString().toLowerCase();
-
-    // Precompute searchable keys to speed up filtering
-    const keys = new Map(masterRows.map(row => {
-      const title = row.cells[1] ? row.cells[1].textContent : '';
-      const qty   = row.cells[2] ? row.cells[2].textContent : '';
-      return [row, norm(`${title} ${qty}`)];
-    }));
-
-    // Remove all rows now; render() will place them back
-    masterRows.forEach(r => r.remove());
-
-    // Sorting comparator: Title (A→Z), tie-break by Qty (desc)
-    function compareRows(a, b) {
-      const A = (a.cells[1]?.textContent || '').trim();
-      const B = (b.cells[1]?.textContent || '').trim();
-      const byTitle = A.localeCompare(B, undefined, { numeric: true, sensitivity: 'base' });
-      if (byTitle !== 0) return byTitle;
-
-      const qa = parseInt((a.cells[2]?.textContent || '').trim(), 10) || 0;
-      const qb = parseInt((b.cells[2]?.textContent || '').trim(), 10) || 0;
-      return qb - qa; // higher qty first when same title
-    }
-
-    // Set false to use round-robin (L,R,L,R,...) instead of split-in-halves
-    const splitHalves = true;
-
-    function render(filterText = '') {
-        const f = norm(filterText);
-
-        // Get the current date filter value
-        const datetimeInput = document.getElementById('datetime-filter');
-        const filterValue = datetimeInput.value;
-
-        // Filter by both search text and date
-        let rows = masterRows.filter(r => {
-            const rowSearchableText = keys.get(r);
-            const searchMatch = !f || rowSearchableText.includes(f);
-
-            // This is the corrected logic:
-            // The date matches if EITHER no filter is set, OR the item's date passes the filter.
-            const orderDateStr = r.getAttribute('data-order-date');
-            const orderDate = orderDateStr ? parseFlexibleDate(orderDateStr) : null;
-            const dateMatch = !filterValue || (orderDate && orderDate >= new Date(filterValue));
-
-            return searchMatch && dateMatch;
-        });
-
-        // Sort
-        rows.sort(compareRows);
-
-      // Detach any existing rows from both bodies
-      while (leftBody.firstChild) leftBody.removeChild(leftBody.firstChild);
-      while (rightBody.firstChild) rightBody.removeChild(rightBody.firstChild);
-
-      // Distribute
-      if (splitHalves) {
-        const mid = Math.ceil(rows.length / 2);
-        const leftFrag  = document.createDocumentFragment();
-        const rightFrag = document.createDocumentFragment();
-        rows.slice(0, mid).forEach(r => leftFrag.appendChild(r));
-        rows.slice(mid).forEach(r => rightFrag.appendChild(r));
-        leftBody.appendChild(leftFrag);
-        rightBody.appendChild(rightFrag);
-      } else {
-        rows.forEach((r, i) => (i % 2 === 0 ? leftBody : rightBody).appendChild(r));
-      }
-
-      // Update counter
-      $count.textContent = `${rows.length}/${masterRows.length}`;
-    }
-
-    // Debounce input to avoid excessive reflows
-    let timer;
-    $input.addEventListener('input', () => {
-      clearTimeout(timer);
-      timer = setTimeout(() => render($input.value), 120);
-    });
-
-    // We now render when the date filter changes as well
-    document.getElementById('datetime-filter').addEventListener('change', () => {
-        render($input.value);
-    });
-
-    // Initial render (no filter)
-    render('');
-  }
-})();
-</script>
-
-<script>
-  // Hide sidebar on load for mobile; keep SB Admin 2's normal toggle behavior
-  document.addEventListener('DOMContentLoaded', function () {
-    function applySidebarDefault() {
-      const sidebars = document.querySelectorAll('.sidebar');
-      if (window.innerWidth < 768) {
-        document.body.classList.add('sidebar-toggled');
-        sidebars.forEach(s => s.classList.add('toggled'));   // hidden on mobile in SB Admin 2
-      } else {
-        document.body.classList.remove('sidebar-toggled');
-        sidebars.forEach(s => s.classList.remove('toggled')); // normal on desktop/tablet
-      }
-    }
-    applySidebarDefault();
-
-    // Re-evaluate on resize/orientation change (debounced)
-    let t;
-    window.addEventListener('resize', () => {
-      clearTimeout(t);
-      t = setTimeout(applySidebarDefault, 150);
-    });
-  });
-</script>
-
-<script>
-    document.addEventListener('DOMContentLoaded', function() {
-        // Event listener for all "mark as done" buttons
-        document.querySelectorAll('.mark-done').forEach(button => {
-            button.addEventListener('click', function() {
-                // Find the closest parent row (<tr>) and remove it
-                this.closest('tr').remove();
-            });
-        });
-    });
-</script>
-
-<script>
-(function () {
-  document.addEventListener('DOMContentLoaded', initFilteringLogic);
-
-  function initFilteringLogic() {
-    // --- Setup for Top Product Tables ---
-    const flex = document.querySelector('.card .card-header + div[style*="display: flex"]');
-    if (!flex) return;
-    const [leftTable, rightTable] = flex.querySelectorAll('table.table');
-    const leftBody  = leftTable.tBodies[0];
-    const rightBody = rightTable.tBodies[0];
-    if (!leftBody || !rightBody) return;
-
-    const toolbar = document.createElement('div');
-    toolbar.className = 'mb-2';
-    toolbar.innerHTML = `
-      <div class="input-group input-group-sm" style="max-width:420px;">
-        <div class="input-group-prepend"><span class="input-group-text"><i class="fas fa-search"></i></span></div>
-        <input type="search" id="topProductsSearch" class="form-control" placeholder="Search top products...">
-        <div class="input-group-append"><span class="input-group-text" id="topProductsCount"></span></div>
-      </div>`;
-    flex.parentNode.insertBefore(toolbar, flex);
-
-    const $input = toolbar.querySelector('#topProductsSearch');
-    const $count = toolbar.querySelector('#topProductsCount');
-    const masterRows = [...leftBody.rows, ...rightBody.rows];
-    masterRows.forEach(r => r.remove());
-
-    const norm = s => (s || '').toString().toLowerCase();
-    const keys = new Map(masterRows.map(row => {
-      const title = row.cells[1]?.textContent || '';
-      const qty   = row.cells[2]?.textContent || '';
-      return [row, norm(`${title} ${qty}`)];
-    }));
-
-    function compareRows(a, b) {
-      const byTitle = (a.cells[1]?.textContent || '').localeCompare(b.cells[1]?.textContent || '', undefined, { numeric: true, sensitivity: 'base' });
-      if (byTitle !== 0) return byTitle;
-      return (parseInt(b.cells[2]?.textContent || 0, 10)) - (parseInt(a.cells[2]?.textContent || 0, 10));
-    }
-
-    function renderTopTables(searchText = '') {
-      const f = norm(searchText);
-      const filterValue = document.getElementById('datetime-filter').value;
-
-      let rows = masterRows.filter(r => {
-        const searchMatch = !f || keys.get(r).includes(f);
-        const orderDateStr = r.getAttribute('data-order-date');
-        const orderDate = orderDateStr ? parseFlexibleDate(orderDateStr) : null;
-        const dateMatch = !filterValue || (orderDate && orderDate >= new Date(filterValue));
-        return searchMatch && dateMatch;
-      });
-
-      rows.sort(compareRows);
-
-      while (leftBody.firstChild) leftBody.removeChild(leftBody.firstChild);
-      while (rightBody.firstChild) rightBody.removeChild(rightBody.firstChild);
-
-      const mid = Math.ceil(rows.length / 2);
-      rows.slice(0, mid).forEach(r => leftBody.appendChild(r));
-      rows.slice(mid).forEach(r => rightBody.appendChild(r));
-
-      $count.textContent = `${rows.length}/${masterRows.length}`;
-    }
-
-    // --- Setup for Main DataTable ---
-    const mainDataTable = $('#dataTable').DataTable();
-
-    // Add a persistent custom filter that reads the date input value
-    $.fn.dataTable.ext.search.push(
-        function(settings, data, dataIndex) {
-            if (settings.nTable.id !== 'dataTable') return true;
-
-            const filterValue = document.getElementById('datetime-filter').value;
-            if (!filterValue) return true;
-
-            const filterDate = new Date(filterValue);
-            if (isNaN(filterDate.getTime())) return true;
-
-            const rowNode = settings.aoData[dataIndex].nTr;
-            const orderDateStr = $(rowNode).find('.pending-since').attr('data-order-date');
-            const orderDate = parseFlexibleDate(orderDateStr);
-            if (!orderDate) return true;
-
-            return orderDate >= filterDate;
+        let visibleQty = 0;
+        for (const [status, qty] of Object.entries(statusData)) {
+            if (status !== 'CONSIGNMENT BOOKED') {
+                visibleQty += qty;
+            }
         }
-    );
 
-    // --- Unified Event Listeners ---
-    let timer;
-    $input.addEventListener('input', () => {
-      clearTimeout(timer);
-      timer = setTimeout(() => renderTopTables($input.value), 120);
+        const qtyCell = row.querySelector('.qty-cell');
+        if (qtyCell) qtyCell.textContent = visibleQty;
+
+        row.style.display = visibleQty === 0 ? 'none' : '';
     });
+}
 
-    document.getElementById('datetime-filter').addEventListener('change', () => {
-        renderTopTables($input.value); // Redraw top tables
-        mainDataTable.draw();        // Redraw main table
+function filterBooked() {
+    document.querySelectorAll('tr[data-statuses]').forEach(row => {
+        const statusData = JSON.parse(row.getAttribute('data-statuses'));
+
+        // Calculate the quantity that IS 'CONSIGNMENT BOOKED'
+        const bookedQty = statusData['CONSIGNMENT BOOKED'] || 0;
+
+        const qtyCell = row.querySelector('.qty-cell');
+
+        // Update the quantity display to show ONLY booked items
+        if (qtyCell) qtyCell.textContent = bookedQty;
+
+        // Hide the row if the booked quantity is zero
+        row.style.display = bookedQty === 0 ? 'none' : '';
     });
+}
 
-    // Initial render
-    renderTopTables('');
-  }
-})();
+function resetView() {
+    document.querySelectorAll('tr[data-statuses]').forEach(row => {
+        const statusData = JSON.parse(row.getAttribute('data-statuses'));
+
+        let totalQty = 0;
+        // The total quantity should already be available in the item.quantity field,
+        // but we'll calculate it from the statuses for completeness in this function.
+        for (const qty of Object.values(statusData)) {
+            totalQty += qty;
+        }
+
+        const qtyCell = row.querySelector('.qty-cell');
+        // Note: Resetting the cell here requires saving the original quantity,
+        // but since we are running resetView, we just display the stored totalQty.
+        if (qtyCell) qtyCell.textContent = totalQty;
+
+        row.style.display = '';
+    });
+}
+
 </script>
+
+
+
+
+
+
 
 </body>
 
