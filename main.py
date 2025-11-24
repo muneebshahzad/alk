@@ -233,6 +233,19 @@ def submit_booking():
         if not original_order:
             return {'order_id': order_id, 'success': False, 'message': 'Original data not found'}
 
+        # --- NEW: Generate Item Details String ---
+        # Format: "Item 1 Name x Quantity , Item 2 Name x Quantity"
+        item_strings = []
+        if original_order.get('line_items'):
+            for item in original_order['line_items']:
+                title = item.get('product_title', 'Unknown Item')
+                qty = item.get('quantity', 1)
+                item_strings.append(f"{title} x {qty}")
+
+        # Join with comma
+        order_detail_str = " , ".join(item_strings)
+        # -----------------------------------------
+
         payload = {
             "orderRefNumber": str(original_order['order_num']),
             "invoicePayment": str(cod_amount),
@@ -241,10 +254,11 @@ def submit_booking():
             "deliveryAddress": original_order['customer_details']['address'],
             "cityName": postex_city,
             "invoiceDivision": 1,
-            "items": 1,
+            "items": 1,  # Pieces kept as 1 per your requirement
             "orderType": "Normal",
             "transactionNotes": "Urgent Delivery",
-            "pickupAddressCode": POSTEX_ADDRESS_CODE
+            "pickupAddressCode": POSTEX_ADDRESS_CODE,
+            "orderDetail": order_detail_str  # <--- ADDED THIS FIELD
         }
 
         url = f"{POSTEX_BASE_URL}/order/v3/create-order"
@@ -283,7 +297,6 @@ def submit_booking():
 
     return jsonify({'results': results})
 
-
 @app.route('/print_labels')
 def print_labels():
     tracking_numbers = request.args.get('tracking_numbers')
@@ -310,6 +323,69 @@ def print_labels():
     else:
         return "Failed to fetch PDF from PostEx", 500
 
+
+@app.route('/book')
+def book_orders():
+    global order_details
+
+    # 1. Calculate Customer History Stats
+    customer_stats = {}
+
+    for order in order_details:
+        phone = order['customer_details'].get('phone', '').strip()
+        if not phone:
+            continue
+
+        if phone not in customer_stats:
+            customer_stats[phone] = {'total': 0, 'delivered': 0}
+
+        customer_stats[phone]['total'] += 1
+
+        status = str(order.get('status', '')).lower()
+        if 'delivered' in status or 'completed' in status:
+            customer_stats[phone]['delivered'] += 1
+
+    # 2. Filter and Prepare List for Display
+    orders_with_stats = []
+    for order in order_details:
+        # Filter: Only show 'Un-Booked' orders
+        if order.get('status') != 'Un-Booked':
+            continue
+
+        o_copy = order.copy()
+
+        # Prepare items_list
+        items_formatted = []
+        if 'line_items' in order:
+            for item in order['line_items']:
+                items_formatted.append({
+                    'item_image': item.get('image_src', ''),
+                    'item_title': item.get('product_title', ''),
+                    'quantity': item.get('quantity', 0),
+                    'tracking_number': item.get('tracking_number', 'N/A'),
+                    'status': item.get('status', 'Un-Booked')
+                })
+        o_copy['items_list'] = items_formatted
+
+        # History Stats Logic
+        phone = order['customer_details'].get('phone', '').strip()
+        stats = customer_stats.get(phone, {'total': 0, 'delivered': 0})
+
+        # --- MODIFIED LOGIC: Check for First Order ---
+        if stats['total'] == 1 and stats['delivered'] == 0:
+            o_copy['history_str'] = "First Order"
+        else:
+            o_copy['history_str'] = f"{stats['delivered']} Delivered / {stats['total']} Orders"
+        # ---------------------------------------------
+
+        if stats['total'] > 0:
+            o_copy['success_rate'] = (stats['delivered'] / stats['total']) * 100
+        else:
+            o_copy['success_rate'] = 0
+
+        orders_with_stats.append(o_copy)
+
+    return render_template('book.html', all_orders=orders_with_stats)
 
 @retry(stop=stop_after_attempt(5), wait=wait_exponential(min=1, max=10))
 async def fetch_with_retry(session, url, method="GET", **kwargs):
@@ -456,6 +532,7 @@ async def process_order(session, order):
             'financial_status': order.financial_status.title(),
             'fulfillment_status': order.fulfillment_status or "Unfulfilled",
             'customer_details': {
+                "id": getattr(order.customer, "id", "") if hasattr(order, 'customer') else "", # <--- NEW LINE
                 "name": getattr(order.shipping_address, "name", " "),
                 "address": getattr(order.shipping_address, "address1", " "),
                 "city": getattr(order.shipping_address, "city", " "),
@@ -511,6 +588,7 @@ async def process_order(session, order):
     except Exception as e:
         print(f"Error processing order {order.order_number}: {e}")
         return None
+
 
 
 @app.route('/pending')
