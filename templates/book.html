@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    <meta name="description" content="">
+    <meta name="author" content="">
+
+    <title>Daily Tasker - Book Orders</title>
+
+    <link href="static/assets/vendor/fontawesome-free/css/all.min.css" rel="stylesheet" type="text/css">
+    <link
+        href="https://fonts.googleapis.com/css?family=Nunito:200,200i,300,300i,400,400i,600,600i,700,700i,800,800i,900,900i"
+        rel="stylesheet">
+
+    <link href="static/assets/css/sb-admin-2.min.css" rel="stylesheet">
+    <link href="static/assets/vendor/datatables/dataTables.bootstrap4.min.css" rel="stylesheet">
+
+    <style>
+        .badge-tag {
+            background-color: #36b9cc;
+            color: white;
+            padding: 5px 8px;
+            border-radius: 4px;
+            font-size: 0.85em;
+            display: inline-block;
+            margin: 2px;
+        }
+        .customer-link {
+            font-weight: bold;
+            color: #4e73df;
+            text-decoration: underline;
+        }
+        .addr-text { font-size: 0.85rem; color: #555; }
+
+        /* Inner Table Styling to match screenshot */
+        .inner-table th {
+            background-color: #f8f9fc;
+            color: #858796;
+            font-size: 0.75rem;
+            font-weight: bold;
+            padding: 8px;
+        }
+        .inner-table td {
+            font-size: 0.85rem;
+            vertical-align: middle !important;
+            padding: 8px;
+        }
+    </style>
+</head>
+
+<body id="page-top">
+
+    <div id="wrapper">
+
+        {% include 'header.html' %}
+        <div id="content-wrapper" class="d-flex flex-column">
+
+            <div id="content">
+
+                <nav class="navbar navbar-expand navbar-light bg-white topbar mb-4 static-top shadow">
+                    <button id="sidebarToggleTop" class="btn btn-link d-md-none rounded-circle mr-3">
+                        <i class="fa fa-bars"></i>
+                    </button>
+                    <ul class="navbar-nav ml-auto">
+                        <div class="topbar-divider d-none d-sm-block"></div>
+                        <li class="nav-item dropdown no-arrow">
+                            <a class="nav-link dropdown-toggle" href="#" id="userDropdown" role="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+                                <span class="mr-2 d-none d-lg-inline text-gray-600 small">User</span>
+                                <img class="img-profile rounded-circle" src="static/img/undraw_profile.svg">
+                            </a>
+                        </li>
+                    </ul>
+                </nav>
+
+                <div class="container-fluid">
+
+                    <div class="d-sm-flex align-items-center justify-content-between mb-4">
+                        <h1 class="h3 mb-0 text-gray-800">Booking Management</h1>
+                        <div>
+                            <button class="btn btn-dark mr-2" onclick="bulkPrintLabels()">Bulk Print Labels</button>
+                            <button class="btn btn-success" onclick="bookSelectedWithPostEx()">Book via PostEx</button>
+                        </div>
+                    </div>
+
+                    <div class="card shadow mb-4">
+                        <div class="card-header py-3">
+                            <h6 class="m-0 font-weight-bold text-primary">Orders List (Un-Booked)</h6>
+                        </div>
+                        <div class="card-body">
+                            <div class="table-responsive">
+                                <table class="table table-bordered" id="dataTable" width="100%" cellspacing="0">
+                                    <thead>
+                                        <tr>
+                                            <th style="width: 20px;"><input type="checkbox" id="selectAll"></th>
+                                            <th>Order Info</th>
+                                            <th style="width: 20%;">Customer Details</th>
+                                            <th>History</th>
+                                            <th style="width: 10%;">Tags</th>
+                                            <th style="width: 40%;">Items Details</th>
+                                            <th>Total</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for order in all_orders %}
+                                        <tr>
+                                            <td style="text-align: center; vertical-align: middle;">
+                                                {% set tracking_num = 'N/A' %}
+                                                {% if order.tracking_number and order.tracking_number != 'N/A' %}
+                                                    {% set tracking_num = order.tracking_number %}
+                                                {% endif %}
+                                                <input type="checkbox" class="order-checkbox" value="{{ order.order_id }}" data-tracking="{{ tracking_num }}">
+                                            </td>
+
+                                            <td>
+                                                <a href="{{order.order_link}}" target="_blank"><strong>{{ order.order_num }}</strong></a>
+                                                <br>
+                                                <span style="font-size: 0.8rem;">{{ order.date }}</span>
+                                                <br>
+                                                <span class="badge badge-secondary">{{ order.status }}</span>
+                                            </td>
+
+                                            <td>
+                                                {% if order.customer_details.id %}
+                                                    <a href="https://admin.shopify.com/store/alkaramat/customers/{{ order.customer_details.id }}" target="_blank" class="customer-link">
+                                                        {{ order.customer_details.name }} <i class="fas fa-external-link-alt fa-xs"></i>
+                                                    </a>
+                                                {% else %}
+                                                    <strong>{{ order.customer_details.name }}</strong>
+                                                {% endif %}
+                                                <br>
+                                                {{ order.customer_details.phone }}
+                                                <br>
+                                                <div class="addr-text">
+                                                    {{ order.customer_details.address }}, {{ order.customer_details.city }}
+                                                </div>
+                                            </td>
+
+                                            <td>
+                                                {{ order.history_str }}
+                                            </td>
+
+                                            <td>
+                                                {% for tag in order.tags %}
+                                                    <span class="badge-tag">{{ tag }}</span>
+                                                {% endfor %}
+                                            </td>
+
+                                            <td style="padding: 0;">
+                                                <table class="table table-bordered inner-table mb-0" width="100%">
+                                                    <thead>
+                                                        <tr>
+                                                            <th width="60">Image</th>
+                                                            <th>Title</th>
+                                                            <th width="70">Quantity</th>
+                                                            <th width="100">Tracking</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        {% for item in order.items_list %}
+                                                            <tr>
+                                                                <td class="text-center">
+                                                                    <img src="{{ item.item_image }}" width="50" height="50" style="object-fit: cover; border: 1px solid #ddd; border-radius: 4px;">
+                                                                </td>
+                                                                <td>{{ item.item_title }}</td>
+                                                                <td>{{ item.quantity }}</td>
+                                                                <td>
+                                                                    {{ item.tracking_number }}
+                                                                    <br>
+                                                                    <span class="text-gray-500" style="font-size: 0.75rem;">{{ item.status }}</span>
+                                                                </td>
+                                                            </tr>
+                                                        {% endfor %}
+                                                    </tbody>
+                                                </table>
+                                            </td>
+
+                                            <td style="vertical-align: middle;"><strong>{{ order.total_price }}</strong></td>
+                                        </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                     <div class="totals">
+                        <p>Total Items: <span id="totalItems">0</span></p>
+                        <p>Total Value: <span id="totalValue">0.00</span></p>
+                    </div>
+                </div>
+            </div>
+
+            <footer class="sticky-footer bg-white">
+                <div class="container my-auto">
+                    <div class="copyright text-center my-auto">
+                        <span>Copyright &copy; Al Karamat 2024</span>
+                    </div>
+                </div>
+            </footer>
+        </div>
+    </div>
+
+    <a class="scroll-to-top rounded" href="#page-top">
+        <i class="fas fa-angle-up"></i>
+    </a>
+
+    <script src="static/assets/vendor/jquery/jquery.min.js"></script>
+    <script src="static/assets/vendor/bootstrap/js/bootstrap.bundle.min.js"></script>
+    <script src="static/assets/vendor/jquery-easing/jquery.easing.min.js"></script>
+    <script src="static/assets/js/sb-admin-2.min.js"></script>
+    <script src="static/assets/vendor/datatables/jquery.dataTables.min.js"></script>
+    <script src="static/assets/vendor/datatables/dataTables.bootstrap4.min.js"></script>
+
+    <script>
+        $(document).ready(function() {
+            var table = $('#dataTable').DataTable({
+                "columnDefs": [
+                    { "orderable": false, "targets": [0, 5] }
+                ],
+                "pageLength": 50
+            });
+
+            $('#selectAll').click(function() {
+                var checked = this.checked;
+                $('.order-checkbox').each(function() {
+                    this.checked = checked;
+                });
+            });
+
+            table.on('draw', function () {
+                updateTotals();
+            });
+            updateTotals();
+        });
+
+        function updateTotals() {
+            var totalItems = 0;
+            var totalValue = 0.0;
+
+            $('#dataTable').DataTable().rows({ filter: 'applied' }).every(function () {
+                var rowNode = this.node();
+
+                // Get Total Value (Column 6 - Index 6)
+                var valStr = $(rowNode).find('td').eq(6).text();
+                var val = parseFloat(valStr.replace(/[^0-9.-]+/g,"")) || 0;
+                totalValue += val;
+
+                // Get Total Items (Inside nested table in Column 5 - Index 5)
+                // Use .inner-table to target strictly the item rows
+                $(rowNode).find('.inner-table tbody tr').each(function() {
+                    // Quantity is in the 3rd column (index 2) of the inner table
+                    var qtyText = $(this).find('td').eq(2).text();
+                    totalItems += parseInt(qtyText) || 0;
+                });
+            });
+
+            $('#totalItems').text(totalItems);
+            $('#totalValue').text(totalValue.toFixed(2));
+        }
+
+        function bookSelectedWithPostEx() {
+            var selectedIds = [];
+            $('.order-checkbox:checked').each(function() {
+                selectedIds.push($(this).val());
+            });
+
+            if (selectedIds.length === 0) {
+                alert('Please select at least one order to book.');
+                return;
+            }
+
+            var form = document.createElement('form');
+            form.method = 'POST';
+            form.action = '/prepare_postex_booking';
+            var input = document.createElement('input');
+            input.type = 'hidden';
+            input.name = 'order_ids';
+            input.value = JSON.stringify(selectedIds);
+            form.appendChild(input);
+            document.body.appendChild(form);
+            form.submit();
+        }
+
+        function bulkPrintLabels() {
+            var trackingNumbers = [];
+            $('.order-checkbox:checked').each(function() {
+                var tracking = $(this).data('tracking');
+                if (tracking && tracking !== 'N/A' && tracking !== 'None') {
+                    trackingNumbers.push(tracking);
+                }
+            });
+
+            if (trackingNumbers.length === 0) {
+                alert('No booked orders selected. Please select orders that have a Tracking Number.');
+                return;
+            }
+
+            var chunkSize = 10;
+            for (var i = 0; i < trackingNumbers.length; i += chunkSize) {
+                var chunk = trackingNumbers.slice(i, i + chunkSize);
+                var trackingStr = chunk.join(',');
+                window.open('/print_labels?tracking_numbers=' + trackingStr, '_blank');
+            }
+        }
+    </script>
+
+</body>
+</html>
