@@ -4,6 +4,7 @@ import hashlib
 import hmac
 import os
 import smtplib
+import threading
 import time
 import json
 import random
@@ -897,45 +898,102 @@ def verify_shopify_webhook(request):
     return hmac.compare_digest(computed_hmac, shopify_hmac)
 
 
-@app.route('/shopify/webhook/order_updated', methods=['POST'])
-def shopify_order_updated():
+# ----------------------------------------------------------------------
+# === FIX: BACKGROUND WEBHOOK PROCESSING ===
+# Prevents Gunicorn Timeouts by processing data in a separate thread
+# ----------------------------------------------------------------------
+
+def background_webhook_processor(order_shopify_id):
+    """
+    Runs in a background thread to process the updated order
+    without blocking the webhook response.
+    """
     global order_details
+    print(f"🔄 Webhook: Starting background update for order {order_shopify_id}")
+
     try:
-        if not verify_shopify_webhook(request):
-            return jsonify({'error': 'Invalid webhook signature'}), 401
-
-        order_data = request.get_json()
-        order_shopify_id = order_data.get('id')
-        if not order_shopify_id: return jsonify({'error': 'No order id'}), 400
-
-        if order_data.get('closed_at'):
-            order_details[:] = [o for o in order_details if o.get('order_id') != order_shopify_id]
-            return jsonify({'success': True}), 200
-
+        # 1. Fetch the fresh order object inside the thread
+        # Note: We use the synchronous shopify library here which is fine in a thread
         order = shopify.Order.find(order_shopify_id)
-        if not order: return jsonify({'error': 'Not found'}), 404
+        if not order:
+            print(f"❌ Webhook: Order {order_shopify_id} not found in Shopify.")
+            return
 
-        async def update_order():
+        # 2. Set up a new Async Event Loop for this thread
+        # (asyncio.run works, but explicit loop handling is safer in threads)
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+        async def run_update():
             async with aiohttp.ClientSession() as session:
                 return await process_order(session, order)
 
-        updated_order_info = asyncio.run(update_order())
-        order_num_to_match = updated_order_info.get('order_num')
+        # Run the heavy processing
+        updated_order_info = loop.run_until_complete(run_update())
+        loop.close()
 
+        if not updated_order_info:
+            print(f"❌ Webhook: Failed to process data for {order_shopify_id}")
+            return
+
+        # 3. Update the Global List safely
+        order_num_to_match = updated_order_info.get('order_num')
         updated = False
+
+        # Find and replace
         for idx, existing_order in enumerate(order_details):
             if existing_order.get('order_num') == order_num_to_match:
                 order_details[idx] = updated_order_info
                 updated = True
                 break
-        if not updated:
-            order_details.append(updated_order_info)
 
-        return jsonify({'success': True}), 200
+        # If not found (new order), append it
+        if not updated:
+            order_details.insert(0, updated_order_info)  # Add to top
+
+        print(f"✅ Webhook: Successfully updated order {order_num_to_match}")
 
     except Exception as e:
-        print(f"Webhook error: {e}")
-        return jsonify({'success': False}), 500
+        print(f"❌ Webhook Background Error: {e}")
+
+
+@app.route('/shopify/webhook/order_updated', methods=['POST'])
+def shopify_order_updated():
+    global order_details
+    try:
+        # 1. Verify HMAC (Fast, keep synchronous)
+        if not verify_shopify_webhook(request):
+            print("Webhook verification failed.")
+            return jsonify({'error': 'Invalid webhook signature'}), 401
+
+        order_data = request.get_json()
+        order_shopify_id = order_data.get('id')
+
+        if not order_shopify_id:
+            return jsonify({'error': 'No order id found'}), 400
+
+        print(f"Received webhook trigger for order ID: {order_shopify_id}")
+
+        # 2. Handle closed/archived orders (Fast)
+        if order_data.get('closed_at'):
+            print(f"Order {order_shopify_id} is closed. Removing from list.")
+            order_details[:] = [o for o in order_details if o.get('order_id') != order_shopify_id]
+            return jsonify({'success': True, 'message': 'Order removed'}), 200
+
+        # 3. Offload Processing to Background Thread
+        # This returns 200 OK to Shopify immediately, preventing the timeout.
+        thread = threading.Thread(target=background_webhook_processor, args=(order_shopify_id,))
+        thread.daemon = True  # Ensures thread cleans up if app restarts
+        thread.start()
+
+        return jsonify({
+            'success': True,
+            'message': 'Webhook received. Processing in background.'
+        }), 200
+
+    except Exception as e:
+        print(f"Webhook processing error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 
 @app.route('/scanner')
