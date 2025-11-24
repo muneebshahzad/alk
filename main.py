@@ -40,7 +40,7 @@ POSTEX_ADDRESS_CODE = None
 # --- RATE LIMIT DEFENDER (Sync) ---
 def shopify_api_retry(func):
     """
-    Decorator to handle Shopify 429 Too Many Requests errors 
+    Decorator to handle Shopify 429 Too Many Requests errors
     for SYNCHRONOUS library calls.
     """
 
@@ -423,9 +423,15 @@ async def process_line_item(session, line_item, fulfillments):
             for item in fulfillment.line_items:
                 if item.id == line_item.id:
                     tracking_number = fulfillment.tracking_number
+                    data = await fetch_tracking_data(session, tracking_number)
+                    if data and isinstance(data, list) and data[-1].get('ProcessDescForPortal'):
+                        # Assumes the last item in the list holds the current status
+                        tracking_details = data[-1]['ProcessDescForPortal']
+                    else:
+                        tracking_details = "DELIVERED"  # Default or fallback
                     tracking_info.append({
                         'tracking_number': tracking_number,
-                        'status': "Booked / Fulfilled",
+                        'status': tracking_details,
                         'quantity': item.quantity
                     })
     return tracking_info if tracking_info else [
