@@ -11,16 +11,13 @@
 
     <title>Daily Tasker - Pending Orders</title>
 
-    <!-- Custom fonts for this template -->
     <link href="static/assets/vendor/fontawesome-free/css/all.min.css" rel="stylesheet" type="text/css">
     <link
         href="https://fonts.googleapis.com/css?family=Nunito:200,200i,300,300i,400,400i,600,600i,700,700i,800,800i,900,900i"
         rel="stylesheet">
 
-    <!-- Custom styles for this template -->
     <link href="static/assets/css/sb-admin-2.min.css" rel="stylesheet">
 
-    <!-- Custom styles for this page -->
     <link href="static/assets/vendor/datatables/dataTables.bootstrap4.min.css" rel="stylesheet">
  <style>
         .status-buttons {
@@ -36,97 +33,37 @@
 
 <body id="page-top">
 
-    <!-- Page Wrapper -->
     <div id="wrapper">
 
-        <!-- Sidebar -->
         {% include 'header.html' %}
-        <!-- End of Sidebar -->
-
-        <!-- Content Wrapper -->
         <div id="content-wrapper" class="d-flex flex-column">
 
-            <!-- Main Content -->
             <div id="content">
 
-                <!-- Topbar -->
                 <nav class="navbar navbar-expand navbar-light bg-white topbar mb-4 static-top shadow">
 
-                    <!-- Sidebar Toggle (Topbar) -->
                     <form class="form-inline">
                         <button id="sidebarToggleTop" class="btn btn-link d-md-none rounded-circle mr-3">
                             <i class="fa fa-bars"></i>
                         </button>
                     </form>
 
-                    <!-- Topbar Search -->
-
-
-                    <!-- Topbar Navbar -->
                     <ul class="navbar-nav ml-auto">
-
-                        <!-- Nav Item - Search Dropdown (Visible Only XS) -->
-                        <li class="nav-item dropdown no-arrow d-sm-none">
-                            <a class="nav-link dropdown-toggle" href="#" id="searchDropdown" role="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
-                                <i class="fas fa-search fa-fw"></i>
-                            </a>
-                            <!-- Dropdown - Messages -->
-                            <div class="dropdown-menu dropdown-menu-right p-3 shadow animated--grow-in" aria-labelledby="searchDropdown">
-                                <form class="form-inline mr-auto w-100 navbar-search">
-                                    <div class="input-group">
-                                        <input type="text" class="form-control bg-light border-0 small" placeholder="Search for..." aria-label="Search" aria-describedby="basic-addon2">
-                                        <div class="input-group-append">
-                                            <button class="btn btn-primary" type="button">
-                                                <i class="fas fa-search fa-sm"></i>
-                                            </button>
-
-                                        </div>
-                                    </div>
-                                </form>
-                            </div>
-                        </li>
-
-
                          <div class="topbar-divider d-none d-sm-block"></div>
 
-                        <!-- Nav Item - User Information -->
                         <li class="nav-item dropdown no-arrow">
                             <a class="nav-link dropdown-toggle" href="#" id="userDropdown" role="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
                                 <span class="mr-2 d-none d-lg-inline text-gray-600 small">User</span>
                                 <img class="img-profile rounded-circle" src="static/img/undraw_profile.svg">
                             </a>
-                            <!-- Dropdown - User Information -->
-                            <div class="dropdown-menu dropdown-menu-right shadow animated--grow-in" aria-labelledby="userDropdown">
-                                <a class="dropdown-item" href="#">
-                                    <i class="fas fa-user fa-sm fa-fw mr-2 text-gray-400"></i>
-                                    Profile
-                                </a>
-                                <a class="dropdown-item" href="#">
-                                    <i class="fas fa-cogs fa-sm fa-fw mr-2 text-gray-400"></i>
-                                    Settings
-                                </a>
-                                <a class="dropdown-item" href="#">
-                                    <i class="fas fa-list fa-sm fa-fw mr-2 text-gray-400"></i>
-                                    Activity Log
-                                </a>
-                                <div class="dropdown-divider"></div>
-                                <a class="dropdown-item" href="#" data-toggle="modal" data-target="#logoutModal">
-                                    <i class="fas fa-sign-out-alt fa-sm fa-fw mr-2 text-gray-400"></i>
-                                    Logout
-                                </a>
-                            </div>
                         </li>
 
                     </ul>
 
                 </nav>
-                <!-- End of Topbar -->
-
-                <!-- Begin Page Content -->
                 <div class="container-fluid">
 
 
-                    <!-- DataTales Example -->
                     <div class="card shadow mb-4">
                         <div class="card-header py-3">
                             <h6 class="m-0 font-weight-bold text-primary">Pending Orders </h6>
@@ -144,7 +81,6 @@
             </thead>
             <tbody>
                 {% for item in pending_items[:half] %}
-<!-- FIX: Use | default({}) to provide an empty dictionary if 'statuses' is missing, preventing TypeError -->
 <tr data-statuses='{{ item.statuses | default({}) | tojson | safe }}'>
 
     <td>
@@ -182,7 +118,6 @@
             </thead>
             <tbody>
                 {% for item in pending_items[half:] %}
-<!-- FIX: Use | default({}) to provide an empty dictionary if 'statuses' is missing, preventing TypeError -->
 <tr data-statuses='{{ item.statuses | default({}) | tojson | safe }}'>
 
     <td>
@@ -212,10 +147,16 @@
 
 
 </div>
-<div class="mb-3">
-    <button class="btn btn-warning" onclick="hideBooked()">Hide BOOKED</button>
-    <button class="btn btn-info" onclick="filterBooked()">Filter BOOKED</button> <!-- NEW BUTTON ADDED -->
-    <button class="btn btn-secondary" onclick="resetView()">Reset</button>
+<div class="mb-3 d-flex justify-content-between">
+    <div>
+        <button class="btn btn-warning" onclick="hideBooked()">Hide BOOKED</button>
+        <button class="btn btn-info" onclick="filterBooked()">Filter BOOKED</button>
+        <button class="btn btn-secondary" onclick="resetView()">Reset</button>
+    </div>
+    <div>
+        <button class="btn btn-dark mr-2" onclick="bulkPrintLabels()">Bulk Print Labels</button>
+        <button class="btn btn-success" onclick="bookSelectedWithPostEx()">Book via PostEx</button>
+    </div>
 </div>
 
 
@@ -226,6 +167,7 @@
                                 <table class="table table-bordered" id="dataTable" width="100%" cellspacing="0">
     <thead>
         <tr>
+            <th><input type="checkbox" id="selectAll"></th>
             <th>Order#</th>
             <th>Total</th>
             <th>Total Items</th>
@@ -235,6 +177,7 @@
     </thead>
     <tfoot>
         <tr>
+            <th></th>
             <th>Order#</th>
             <th>Total</th>
             <th>Total Items</th>
@@ -245,7 +188,17 @@
     <tbody>
         {% for order in all_orders %}
             <tr>
-                <td>{{ order.order_via }} <br> <a href="{{order.order_link}}"><p>{{ order.order_id }}</p></a> <br>{{ order.date }}</td>
+                <td style="text-align: center; vertical-align: middle;">
+    {% set tracking_num = 'N/A' %}
+    {% if order.tracking_number and order.tracking_number != 'N/A' %}
+        {% set tracking_num = order.tracking_number %}
+    {% elif order.items_list and order.items_list[0].tracking_number != 'N/A' %}
+        {% set tracking_num = order.items_list[0].tracking_number %}
+    {% endif %}
+
+    <input type="checkbox" class="order-checkbox" value="{{ order.order_id }}" data-tracking="{{ tracking_num }}">
+</td>
+                <td>{{ order.order_via }} <br> <a href="{{order.order_link}}"><p>{{ order.order_num }}</p></a> <br>{{ order.date }}</td>
                 <td>{{ order.total_price }}</td>
                 <td>
                     <table class="table table-sm nested-table">
@@ -293,12 +246,7 @@
     <p>Total Value: <span id="totalValue">0.00</span></p>
 </div>
                 </div>
-                <!-- /.container-fluid -->
-
-            </div>
-            <!-- End of Main Content -->
-
-            <!-- Footer -->
+                </div>
             <footer class="sticky-footer bg-white">
                 <div class="container my-auto">
                     <div class="copyright text-center my-auto">
@@ -306,84 +254,77 @@
                     </div>
                 </div>
             </footer>
-            <!-- End of Footer -->
-
+            </div>
         </div>
-        <!-- End of Content Wrapper -->
-
-    </div>
-    <!-- End of Page Wrapper -->
-
-    <!-- Scroll to Top Button-->
     <a class="scroll-to-top rounded" href="#page-top">
         <i class="fas fa-angle-up"></i>
     </a>
 
-    <!-- Logout Modal-->
-    <div class="modal fade" id="logoutModal" tabindex="-1" role="dialog" aria-labelledby="exampleModalLabel"
-        aria-hidden="true">
-        <div class="modal-dialog" role="document">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title" id="exampleModalLabel">Ready to Leave?</h5>
-                    <button class="close" type="button" data-dismiss="modal" aria-label="Close">
-                        <span aria-hidden="true">×</span>
-                    </button>
-                </div>
-                <div class="modal-body">Select "Logout" below if you are ready to end your current session.</div>
-                <div class="modal-footer">
-                    <button class="btn btn-secondary" type="button" data-dismiss="modal">Cancel</button>
-                    <a class="btn btn-primary" href="login.html">Logout</a>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Bootstrap core JavaScript-->
     <script src="static/assets/vendor/jquery/jquery.min.js"></script>
     <script src="static/assets/vendor/bootstrap/js/bootstrap.bundle.min.js"></script>
 
-    <!-- Core plugin JavaScript-->
     <script src="static/assets/vendor/jquery-easing/jquery.easing.min.js"></script>
 
-    <!-- Custom scripts for all pages-->
     <script src="static/assets/js/sb-admin-2.min.js"></script>
 
-    <!-- Page level plugins -->
     <script src="static/assets/vendor/datatables/jquery.dataTables.min.js"></script>
     <script src="static/assets/vendor/datatables/dataTables.bootstrap4.min.js"></script>
 
-    <!-- Page level custom scripts -->
     <script src="static/assets/js/demo/datatables-demo.js"></script>
-        <script src="static/assets/js/demo/datatables-demo.js"></script>
     <script src="static/assets/js/track.js"></script>
 
 <script>
     $(document).ready(function() {
-        // Check if the table is already a DataTable and destroy it if necessary
         if ($.fn.DataTable.isDataTable('#dataTable')) {
             $('#dataTable').DataTable().destroy();
         }
 
-        // Initialize the DataTable with desired settings
+        // Initialize the DataTable
         $('#dataTable').DataTable({
             "columnDefs": [
-                { "searchable": false, "targets": [-1, 4] }  // Make the last column and the 5th column non-searchable
+                { "searchable": false, "targets": [-1, 4] },
+                { "orderable": false, "targets": 0 } // Disable sorting on checkbox column
             ]
         });
-    });
-</script>
-<script>
-        $(document).ready(function() {
-            var currentUrl = window.location.pathname;
-            $('.nav-item a').each(function() {
-                var linkUrl = $(this).attr('href');
-                if (currentUrl === '/' + linkUrl) {
-                    $(this).parent().addClass('active');
-                }
+
+        // Select All functionality
+        $('#selectAll').click(function() {
+            var checked = this.checked;
+            $('.order-checkbox').each(function() {
+                this.checked = checked;
             });
         });
+    });
 
+    // Function to handle Booking
+    function bookSelectedWithPostEx() {
+        var selectedIds = [];
+        $('.order-checkbox:checked').each(function() {
+            selectedIds.push($(this).val());
+        });
+
+        if (selectedIds.length === 0) {
+            alert('Please select at least one order to book.');
+            return;
+        }
+
+        // Redirect to the prep page with IDs as query params or via a hidden form
+        // Using a hidden form is safer for large lists
+        var form = document.createElement('form');
+        form.method = 'POST';
+        form.action = '/prepare_postex_booking'; // New Route
+
+        var input = document.createElement('input');
+        input.type = 'hidden';
+        input.name = 'order_ids';
+        input.value = JSON.stringify(selectedIds);
+        form.appendChild(input);
+
+        document.body.appendChild(form);
+        form.submit();
+    }
+</script>
+<script>
      var table = $('#dataTable').DataTable();
 
 function updateTotals() {
@@ -392,13 +333,13 @@ function updateTotals() {
     var totalValue = 0;
 
     filteredData.each(function (row) {
-        // Get the total column value (e.g. Rs 13498.00)
-        var amount = parseFloat($(row).find('td:eq(1)').text().replace(/,/g, '')) || 0;
+        // Get the total column value (index 2)
+        var amount = parseFloat($(row).find('td:eq(2)').text().replace(/,/g, '')) || 0;
         totalValue += amount;
 
-        // Now count quantities from the nested "Total Items" cell (3rd column, index 2)
-        $(row).find('td:eq(2) table tbody tr').each(function () {
-            var qtyText = $(this).find('td').eq(2).text().trim(); // Quantity is in 3rd column inside nested table
+        // Count quantities
+        $(row).find('td:eq(3) table tbody tr').each(function () {
+            var qtyText = $(this).find('td').eq(2).text().trim();
             var qty = parseInt(qtyText) || 0;
             totalItems += qty;
         });
@@ -408,25 +349,20 @@ function updateTotals() {
     $('#totalValue').text(totalValue.toFixed(2));
 }
 
-    // Initial call
     updateTotals();
-
 
 function hideBooked() {
     document.querySelectorAll('tr[data-statuses]').forEach(row => {
-        // FIX: Ensure statusData is parsed correctly, it should now exist as a dictionary
         const statusData = JSON.parse(row.getAttribute('data-statuses'));
-
         let visibleQty = 0;
         for (const [status, qty] of Object.entries(statusData)) {
-            if (status !== 'CONSIGNMENT BOOKED') {
+            // Updated to handle PostEx 'Booked' status as well
+            if (status !== 'CONSIGNMENT BOOKED' && status !== 'Booked') {
                 visibleQty += qty;
             }
         }
-
         const qtyCell = row.querySelector('.qty-cell');
         if (qtyCell) qtyCell.textContent = visibleQty;
-
         row.style.display = visibleQty === 0 ? 'none' : '';
     });
 }
@@ -434,16 +370,10 @@ function hideBooked() {
 function filterBooked() {
     document.querySelectorAll('tr[data-statuses]').forEach(row => {
         const statusData = JSON.parse(row.getAttribute('data-statuses'));
-
-        // Calculate the quantity that IS 'CONSIGNMENT BOOKED'
-        const bookedQty = statusData['CONSIGNMENT BOOKED'] || 0;
-
+        // Updated to handle PostEx 'Booked' status as well
+        const bookedQty = (statusData['CONSIGNMENT BOOKED'] || 0) + (statusData['Booked'] || 0);
         const qtyCell = row.querySelector('.qty-cell');
-
-        // Update the quantity display to show ONLY booked items
         if (qtyCell) qtyCell.textContent = bookedQty;
-
-        // Hide the row if the booked quantity is zero
         row.style.display = bookedQty === 0 ? 'none' : '';
     });
 }
@@ -451,31 +381,45 @@ function filterBooked() {
 function resetView() {
     document.querySelectorAll('tr[data-statuses]').forEach(row => {
         const statusData = JSON.parse(row.getAttribute('data-statuses'));
-
         let totalQty = 0;
-        // The total quantity should already be available in the item.quantity field,
-        // but we'll calculate it from the statuses for completeness in this function.
         for (const qty of Object.values(statusData)) {
             totalQty += qty;
         }
-
         const qtyCell = row.querySelector('.qty-cell');
-        // Note: Resetting the cell here requires saving the original quantity,
-        // but since we are running resetView, we just display the stored totalQty.
         if (qtyCell) qtyCell.textContent = totalQty;
-
         row.style.display = '';
     });
 }
 
+    // --- Bulk Print Function ---
+    function bulkPrintLabels() {
+        var trackingNumbers = [];
+
+        // 1. Gather tracking numbers from checked boxes
+        $('.order-checkbox:checked').each(function() {
+            var tracking = $(this).data('tracking');
+            // Ensure tracking is valid (not N/A, not empty)
+            if (tracking && tracking !== 'N/A' && tracking !== 'None') {
+                trackingNumbers.push(tracking);
+            }
+        });
+
+        if (trackingNumbers.length === 0) {
+            alert('No booked orders selected. Please select orders that have a Tracking Number.');
+            return;
+        }
+
+        // 2. Process in chunks of 10 (PostEx API Limit)
+        var chunkSize = 10;
+        for (var i = 0; i < trackingNumbers.length; i += chunkSize) {
+            var chunk = trackingNumbers.slice(i, i + chunkSize);
+            var trackingStr = chunk.join(',');
+
+            // 3. Open Print Route in new window/tab
+            window.open('/print_labels?tracking_numbers=' + trackingStr, '_blank');
+        }
+    }
 </script>
 
-
-
-
-
-
-
 </body>
-
 </html>
