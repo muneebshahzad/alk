@@ -858,59 +858,31 @@ def shopify_order_updated():
 def scanner_page():
     return render_template('scanner.html')
 
+
 @app.route('/api/scan/order', methods=['POST'])
 def scan_single_order():
     scanned_value = request.json.get('scan_input')
     if not scanned_value: return jsonify({'error': 'No input'}), 400
     scan_term = str(scanned_value).strip().replace("#", "")
-    
+
     found_order = next((o for o in order_details if o.get('order_num') == scan_term), None)
     if not found_order:
         for order in order_details:
             if order.get('line_items'):
                 for item in order['line_items']:
                     if item.get('tracking_number') == scan_term:
-                        found_order = order; break
+                        found_order = order;
+                        break
                 if found_order: break
-    
+
     if found_order:
-        items_list = [{'title': item['product_title'], 'quantity': item['quantity'], 'image_src': item['image_src']} for item in found_order['line_items']]
+        items_list = [{'title': item['product_title'], 'quantity': item['quantity'], 'image_src': item['image_src']} for
+                      item in found_order['line_items']]
         return jsonify({'success': True, 'order_num': found_order['order_num'], 'items': items_list}), 200
     else:
         return jsonify({'success': False, 'error': 'Not found'}), 404
 
-# ----------------------------------------------------------------------
-# === FIX: USE BACKGROUND THREAD FOR INITIAL LOAD ===
-# This prevents the deployment from timing out while data loads.
-# ----------------------------------------------------------------------
-import threading
 
-def run_initial_load():
-    """Background task to load orders without blocking server startup"""
-    global order_details
-    print("🚀 Starting background initial order fetch...")
-    try:
-        # Create a new event loop for this thread since it's separate from main
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        
-        # Run the fetch
-        data = loop.run_until_complete(getShopifyOrders())
-        
-        # Update global variable
-        order_details = data
-        print(f"✅ Initial order fetch completed. Loaded {len(order_details)} orders.")
-        loop.close()
-    except Exception as e:
-        print(f"❌ Initial order loading failed: {e}")
-
-# Start the background thread immediately upon import
-# This allows Gunicorn to finish importing 'app' and bind the port instantly
-loader_thread = threading.Thread(target=run_initial_load)
-loader_thread.daemon = True # Ensures thread dies when app exits
-loader_thread.start()
-
-# Initialize Shopify Resource
 shop_url = os.getenv('SHOP_URL')
 api_key = os.getenv('API_KEY')
 password = os.getenv('PASSWORD')
@@ -918,8 +890,13 @@ shopify.ShopifyResource.set_site(shop_url)
 shopify.ShopifyResource.set_user(api_key)
 shopify.ShopifyResource.set_password(password)
 
+try:
+    print("Starting initial fetch...")
+    order_details = asyncio.run(getShopifyOrders())
+    print(f"Loaded {len(order_details)} orders.")
+except Exception as e:
+    print(f"Init load failed: {e}")
+    order_details = []
+
 if __name__ == "__main__":
-    # Get PORT from environment for Render (default to 5000 if missing)
-    port = int(os.environ.get("PORT", 5000))
-    # Bind to 0.0.0.0 to expose externally
-    app.run(host="0.0.0.0", port=port)
+    app.run(port=5001)
