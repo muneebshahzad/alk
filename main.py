@@ -799,9 +799,10 @@ def apply_tag():
 def apply_bulk_tag():
     data = request.json
     order_ids_to_tag = data.get('order_ids', [])
+    # Add 'DELIVERED' to the allowed list
     tag_type = data.get('tag_type')
 
-    if not order_ids_to_tag or tag_type not in ['RETURNED', 'DISPATCHED']:
+    if not order_ids_to_tag or tag_type not in ['RETURNED', 'DISPATCHED', 'DELIVERED']:
         return jsonify({"success": False, "error": "Invalid input."}), 400
 
     today_date = datetime.now().strftime('%Y-%m-%d')
@@ -809,21 +810,38 @@ def apply_bulk_tag():
 
     for order_shopify_id in order_ids_to_tag:
         try:
-            time.sleep(0.6)
+            # 1. FIX FOR BUG #2: Sleep to prevent 429 (Shopify Limit)
+            time.sleep(1.0) # Increased to 1.0s to be safe
 
-            if tag_type == 'RETURNED':
-                base_tag = "Return Received"
-            elif tag_type == 'DISPATCHED':
-                base_tag = "DISPATCHED"
-
-            final_tag = f"{base_tag} ({today_date})"
-
+            base_tag = ""
             order = shopify.Order.find(order_shopify_id)
+            
             if not order:
                 results.append({'id': order_shopify_id, 'status': 'failed', 'message': 'Order not found.'})
                 continue
 
+            # Handle Tag Logic
+            if tag_type == 'RETURNED':
+                base_tag = "Return Received"
+                # Optional: Cancel order if returned
+                # order.cancel() 
+            elif tag_type == 'DISPATCHED':
+                base_tag = "DISPATCHED"
+            elif tag_type == 'DELIVERED':
+                base_tag = "Delivered"
+                # Archive/Close the order in Shopify
+                try:
+                    order.close()
+                except:
+                    pass
+
+            final_tag = f"{base_tag} ({today_date})"
+
             tags = [t.strip() for t in order.tags.split(", ")] if order.tags else []
+            
+            # Remove conflicting tags if necessary
+            if "Leopards Courier" in tags: tags.remove("Leopards Courier")
+            
             if final_tag not in tags:
                 tags.append(final_tag)
 
@@ -835,6 +853,7 @@ def apply_bulk_tag():
                 results.append({'id': order_shopify_id, 'status': 'failed', 'message': 'Failed to save.'})
 
         except Exception as e:
+            # Retry logic or error logging
             if "429" in str(e):
                 time.sleep(2)
                 results.append({'id': order_shopify_id, 'status': 'error', 'message': 'Rate Limit Hit'})
@@ -843,7 +862,7 @@ def apply_bulk_tag():
 
     return jsonify({
         'success': True,
-        'tag_applied': final_tag,
+        'tag_applied': tag_type,
         'total_orders': len(order_ids_to_tag),
         'results': results
     }), 200
@@ -1042,3 +1061,4 @@ except Exception as e:
 
 if __name__ == "__main__":
     app.run(port=5001)
+
