@@ -473,91 +473,235 @@
 
 </script>
 </body>
-<script>
-    // Function to calculate and update values for the cards
-function updateOrderStats(orderDetails) {
-    let allValue = 0, allQuantity = 0, allOrders = 0;
-    let dispatchValue = 0, dispatchQuantity = 0, dispatchOrders = 0;
-    let bookedValue = 0, bookedQuantity = 0, bookedOrders = 0;
-    let deliveredValue = 0, deliveredQuantity = 0, deliveredOrders = 0;
-    let returnsValue = 0, returnsQuantity = 0, returnsOrders = 0;
-    let unbookedValue = 0, unbookedQuantity = 0 , unbookedOrders=0;
+<script src="static/assets/vendor/jquery/jquery.min.js"></script>
+    <script src="static/assets/vendor/bootstrap/js/bootstrap.bundle.min.js"></script>
 
-    orderDetails.forEach(order => {
-        let orderValue = parseFloat(order.total_price) || 0;
-        let orderQuantity = order.line_items.reduce((sum, item) => sum + item.quantity, 0);
+    <script src="static/assets/vendor/jquery-easing/jquery.easing.min.js"></script>
 
-        allValue += orderValue;
-        allQuantity += orderQuantity;
-        allOrders += 1; // Increment total orders
+    <script src="static/assets/js/sb-admin-2.min.js"></script>
 
-        switch (order.status) {
-            case 'PICKED FROM SHIPPER':
-                dispatchValue += orderValue;
-                dispatchQuantity += orderQuantity;
-                dispatchOrders += 1; // Increment dispatch orders
-                break;
-            case 'CONSIGNMENT BOOKED':
-                bookedValue += orderValue;
-                bookedQuantity += orderQuantity;
-                bookedOrders += 1; // Increment booked orders
-                break;
-            case 'DELIVERED':
-                deliveredValue += orderValue;
-                deliveredQuantity += orderQuantity;
-                deliveredOrders += 1; // Increment delivered orders
-                break;
-            case 'Un-Booked':
-                unbookedValue += orderValue;
-                unbookedQuantity += orderQuantity;
-                unbookedOrders += 1;
-                break;
-            default:
-                if (order.status.includes('RETURN')) {
-                    returnsValue += orderValue;
-                    returnsQuantity += orderQuantity;
-                    returnsOrders += 1; // Increment return orders
-                }
+    <script src="static/assets/vendor/datatables/jquery.dataTables.min.js"></script>
+    <script src="static/assets/vendor/datatables/dataTables.bootstrap4.min.js"></script>
+
+    <script>
+    function applyTag(orderId, tag) {
+        console.log("Order ID:", orderId);
+        if (!orderId) {
+            alert("Order ID is missing");
+            return;
         }
+        // Toggle button to loading state if needed
+        fetch('/apply_tag', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ order_id: orderId, tag: tag })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                alert("Tag applied successfully.");
+                location.reload(); // Optional: Reload to see changes
+            } else {
+                alert("Error: " + data.error);
+            }
+        })
+        .catch(error => console.error('Error:', error));
+    }
+
+    // Toggle the visibility of the "Mark As" buttons
+    function toggleStatusButtons(button) {
+        var container = button.nextElementSibling;
+        if (container.style.display === "none" || container.style.display === "") {
+            container.style.display = "block";
+        } else {
+            container.style.display = "none";
+        }
+    }
+    </script>
+
+    <script>
+    $(document).ready(function() {
+        // Destroy existing DataTable instance if present
+        if ($.fn.DataTable.isDataTable('#dataTable')) {
+            $('#dataTable').DataTable().destroy();
+        }
+
+        // Initialize the DataTable
+        $('#dataTable').DataTable({
+            "order": [[0, 'desc']], 
+            "columnDefs": [
+                { "searchable": false, "targets": [-1, 4] } 
+            ],
+            "initComplete": function(settings, json) {
+                console.log('DataTable initialized');
+            }
+        });
+
+        // Navbar active state logic
+        var currentUrl = window.location.pathname;
+        $('.nav-item a').each(function() {
+            var linkUrl = $(this).attr('href');
+            if (currentUrl === '/' + linkUrl) {
+                $(this).parent().addClass('active');
+            }
+        });
     });
 
-    let shippedValue = allValue - (dispatchValue + bookedValue + deliveredValue + returnsValue + unbookedValue);
-    let shippedQuantity = allQuantity - (dispatchQuantity + bookedQuantity + deliveredQuantity + returnsQuantity + unbookedQuantity);
-    let shippedOrders = allOrders - (dispatchOrders + bookedOrders + deliveredOrders + returnsOrders + unbookedOrders);
+    // --- REWRITTEN BULK FUNCTION ---
+    function applyDeliveredToAll() {
+        // 1. Get raw data from Jinja
+        const orders = {{ order_details|tojson }};
+        const orderIdsToUpdate = [];
 
-    // Update card values in the DOM
-    document.getElementById('all-value').innerText = allValue.toFixed(2);
-    document.getElementById('all-quantity').innerText = allQuantity;
-    document.getElementById('all-orders').innerText = allOrders;
+        // 2. Strict Filtering (Fixes "Partial Delivery" Bug)
+        orders.forEach(order => {
+            // Ensure order has items
+            if (order.line_items && order.line_items.length > 0) {
+                // Check if EVERY item in the order is Delivered or Completed
+                const allItemsDelivered = order.line_items.every(item => {
+                    const status = item.status ? item.status.toUpperCase() : "";
+                    return status.includes('DELIVERED') || status.includes('COMPLETED');
+                });
 
-    document.getElementById('dispatch-value').innerText = dispatchValue.toFixed(2);
-    document.getElementById('dispatch-quantity').innerText = dispatchQuantity;
-    document.getElementById('dispatch-orders').innerText = dispatchOrders;
+                // Only add to list if ALL items are delivered
+                if (allItemsDelivered) {
+                    orderIdsToUpdate.push(order.order_id);
+                }
+            }
+        });
 
-    document.getElementById('booked-value').innerText = bookedValue.toFixed(2);
-    document.getElementById('booked-quantity').innerText = bookedQuantity;
-    document.getElementById('booked-orders').innerText = bookedOrders;
+        // 3. Validation
+        if (orderIdsToUpdate.length === 0) {
+            alert("No fully delivered orders found to update.");
+            return;
+        }
 
-<!--    document.getElementById('delivered-value').innerText = deliveredValue.toFixed(2);-->
-<!--    document.getElementById('delivered-quantity').innerText = deliveredQuantity;-->
-<!--    document.getElementById('delivered-orders').innerText = deliveredOrders;-->
+        if (!confirm(`Found ${orderIdsToUpdate.length} orders where ALL items are delivered. Mark them as Delivered in Shopify?`)) {
+            return;
+        }
 
-    document.getElementById('returns-value').innerText = returnsValue.toFixed(2);
-    document.getElementById('returns-quantity').innerText = returnsQuantity;
-    document.getElementById('returns-orders').innerText = returnsOrders;
+        // 4. Send SINGLE Bulk Request (Fixes "Popup Loop" & "429 Error")
+        // Update button text to show processing
+        const btn = document.querySelector('button[onclick="applyDeliveredToAll()"]');
+        if(btn) {
+            btn.innerText = "Processing... Please Wait...";
+            btn.disabled = true;
+        }
 
-    document.getElementById('shipped-value').innerText = shippedValue.toFixed(2);
-    document.getElementById('shipped-quantity').innerText = shippedQuantity;
-    document.getElementById('shipped-orders').innerText = shippedOrders;
+        fetch('/api/apply_bulk_tag', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+                order_ids: orderIdsToUpdate, 
+                tag_type: 'DELIVERED' 
+            })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                alert(`Success! Processed ${data.total_orders} orders.\nCheck console for details.`);
+                console.log(data.results);
+                location.reload(); 
+            } else {
+                alert("Error: " + data.error);
+                if(btn) {
+                    btn.innerText = "Apply 'Delivered' to All Delivered Orders";
+                    btn.disabled = false;
+                }
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert("An error occurred while communicating with the server.");
+            if(btn) {
+                btn.innerText = "Apply 'Delivered' to All Delivered Orders";
+                btn.disabled = false;
+            }
+        });
+    }
+    </script>
 
-    document.getElementById('unbooked-value').innerText = unbookedValue.toFixed(2);
-    document.getElementById('unbooked-quantity').innerText = unbookedQuantity;
-    document.getElementById('unbooked-orders').innerText = unbookedOrders;
+    <script>
+    function updateOrderStats(orderDetails) {
+        let allValue = 0, allQuantity = 0, allOrders = 0;
+        let dispatchValue = 0, dispatchQuantity = 0, dispatchOrders = 0;
+        let bookedValue = 0, bookedQuantity = 0, bookedOrders = 0;
+        let deliveredValue = 0, deliveredQuantity = 0, deliveredOrders = 0;
+        let returnsValue = 0, returnsQuantity = 0, returnsOrders = 0;
+        let unbookedValue = 0, unbookedQuantity = 0, unbookedOrders = 0;
 
-}
+        orderDetails.forEach(order => {
+            let orderValue = parseFloat(order.total_price) || 0;
+            let orderQuantity = order.line_items.reduce((sum, item) => sum + item.quantity, 0);
 
-// Call the function with order details fetched from the server
-updateOrderStats({{ order_details|tojson }});
+            allValue += orderValue;
+            allQuantity += orderQuantity;
+            allOrders += 1;
 
-</script>
+            switch (order.status) {
+                case 'PICKED FROM SHIPPER':
+                    dispatchValue += orderValue;
+                    dispatchQuantity += orderQuantity;
+                    dispatchOrders += 1;
+                    break;
+                case 'CONSIGNMENT BOOKED':
+                    bookedValue += orderValue;
+                    bookedQuantity += orderQuantity;
+                    bookedOrders += 1;
+                    break;
+                case 'DELIVERED':
+                    deliveredValue += orderValue;
+                    deliveredQuantity += orderQuantity;
+                    deliveredOrders += 1;
+                    break;
+                case 'Un-Booked':
+                    unbookedValue += orderValue;
+                    unbookedQuantity += orderQuantity;
+                    unbookedOrders += 1;
+                    break;
+                default:
+                    if (order.status && order.status.includes('RETURN')) {
+                        returnsValue += orderValue;
+                        returnsQuantity += orderQuantity;
+                        returnsOrders += 1;
+                    }
+            }
+        });
+
+        let shippedValue = allValue - (dispatchValue + bookedValue + deliveredValue + returnsValue + unbookedValue);
+        let shippedQuantity = allQuantity - (dispatchQuantity + bookedQuantity + deliveredQuantity + returnsQuantity + unbookedQuantity);
+        let shippedOrders = allOrders - (dispatchOrders + bookedOrders + deliveredOrders + returnsOrders + unbookedOrders);
+
+        // Update DOM
+        document.getElementById('all-value').innerText = allValue.toFixed(2);
+        document.getElementById('all-quantity').innerText = allQuantity;
+        document.getElementById('all-orders').innerText = allOrders;
+
+        document.getElementById('dispatch-value').innerText = dispatchValue.toFixed(2);
+        document.getElementById('dispatch-quantity').innerText = dispatchQuantity;
+        document.getElementById('dispatch-orders').innerText = dispatchOrders;
+
+        document.getElementById('booked-value').innerText = bookedValue.toFixed(2);
+        document.getElementById('booked-quantity').innerText = bookedQuantity;
+        document.getElementById('booked-orders').innerText = bookedOrders;
+
+        document.getElementById('returns-value').innerText = returnsValue.toFixed(2);
+        document.getElementById('returns-quantity').innerText = returnsQuantity;
+        document.getElementById('returns-orders').innerText = returnsOrders;
+
+        document.getElementById('shipped-value').innerText = shippedValue.toFixed(2);
+        document.getElementById('shipped-quantity').innerText = shippedQuantity;
+        document.getElementById('shipped-orders').innerText = shippedOrders;
+
+        document.getElementById('unbooked-value').innerText = unbookedValue.toFixed(2);
+        document.getElementById('unbooked-quantity').innerText = unbookedQuantity;
+        document.getElementById('unbooked-orders').innerText = unbookedOrders;
+    }
+
+    // Call the function
+    updateOrderStats({{ order_details|tojson }});
+    </script>
+
+</body>
+</html>
 </html>
