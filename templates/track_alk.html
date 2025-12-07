@@ -170,7 +170,7 @@
     <tbody>
         {% for order in order_details %}
             <tr>
-                <td>{{ order.order_id }}</td>
+                 <td><a href="{{ order.order_link }}" target="_blank">{{ order.order_num }}</a></td>
                 <td>
                     {{ order.customer_details.name }}<br>
                     {{ order.customer_details.address }}<br>
@@ -373,3 +373,4 @@
 </body>
 
 </html>
+
