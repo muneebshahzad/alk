@@ -40,7 +40,7 @@
     <div id="wrapper">
 
         <!-- Sidebar -->
-        {% include 'header_alk_track.html' %}
+        {% include 'header.html' %}
         <!-- End of Sidebar -->
 
         <!-- Content Wrapper -->
@@ -127,71 +127,6 @@
                     <!-- Page Heading -->
                     <h1 class="h3 mb-2 text-gray-800">Order Tracking</h1>
 
-                   <div class="row mb-4">
-    <div class="col-md-2">
-        <div class="card text-white bg-primary">
-            <div class="card-body">
-                <h5 class="card-title">All</h5>
-                <p>Total Value: Rs <span id="all-value">0</span></p>
-                <p>Total Quantity: <span id="all-quantity">0</span></p>
-                <p>Total Orders: <span id="all-orders">0</span></p>
-            </div>
-        </div>
-    </div>
-    <div class="col-md-2">
-        <div class="card text-white bg-success">
-            <div class="card-body">
-                <h5 class="card-title">Dispatch</h5>
-                <p>Value: Rs <span id="dispatch-value">0</span></p>
-                <p>Quantity: <span id="dispatch-quantity">0</span></p>
-                <p>Orders: <span id="dispatch-orders">0</span></p>
-            </div>
-        </div>
-    </div>
-    <div class="col-md-2">
-        <div class="card text-white bg-warning">
-            <div class="card-body">
-                <h5 class="card-title">Booked</h5>
-                <p>Value: Rs <span id="booked-value">0</span></p>
-                <p>Quantity: <span id="booked-quantity">0</span></p>
-                <p>Orders: <span id="booked-orders">0</span></p>
-            </div>
-        </div>
-    </div>
-    <div class="col-md-2">
-        <div class="card text-white bg-danger">
-            <div class="card-body">
-                <h5 class="card-title">Un-Booked</h5>
-                <p>Value: Rs <span id="unbooked-value">0</span></p>
-                <p>Quantity: <span id="unbooked-quantity">0</span></p>
-                <p>Orders: <span id="unbooked-orders">0</span></p>
-            </div>
-        </div>
-    </div>
-    <div class="col-md-2">
-        <div class="card text-white bg-info">
-            <div class="card-body">
-                <h5 class="card-title">Returns</h5>
-                <p>Value: Rs <span id="returns-value">0</span></p>
-                <p>Quantity: <span id="returns-quantity">0</span></p>
-                <p>Orders: <span id="returns-orders">0</span></p>
-            </div>
-        </div>
-    </div>
-    <div class="col-md-2">
-        <div class="card text-white bg-secondary">
-            <div class="card-body">
-                <h5 class="card-title">Shipped</h5>
-                <p>Value: Rs <span id="shipped-value">0</span></p>
-                <p>Quantity: <span id="shipped-quantity">0</span></p>
-                <p>Orders: <span id="shipped-orders">0</span></p>
-            </div>
-        </div>
-    </div>
-</div>
-
-
-
                     <!-- DataTales Example -->
                     <div class="card shadow mb-4">
                         <div class="card-header py-3">
@@ -235,37 +170,28 @@
     <tbody>
         {% for order in order_details %}
             <tr>
-                                                                        <td><a href="{{ order.order_link }}" target="_blank">{{ order.order_num }}</a></td>
-
-        <td>
-            {% if order.customer_details %}
-                {{ order.customer_details.name or "Unknown" }}<br>
-                {{ order.customer_details.address or "Not provided" }}<br>
-                {{ order.customer_details.city or "Unknown" }}<br>
-                {{ order.customer_details.phone or "Not provided" }}<br>
-                {% if order.customer_details.phone %}
+                <td>{{ order.order_id }}</td>
+                <td>
+                    {{ order.customer_details.name }}<br>
+                    {{ order.customer_details.address }}<br>
+                    {{ order.customer_details.city }}<br>
+                    {{ order.customer_details.phone }}<br>
                     <a href="tel:{{ order.customer_details.phone }}" class="btn btn-primary btn-sm">Call</a>
                     <div class="btn-group">
                         <button type="button" class="btn btn-success btn-sm dropdown-toggle" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
                             WhatsApp
                         </button>
                         <div class="dropdown-menu">
-                            <a class="dropdown-item" href="https://wa.me/{{ order.customer_details.phone }}?text=Hello%20{{ order.customer_details.name }},%20Your%20order%23{{ order.order_id }}%20from%20AlchemyOfDecor.com%20has%20been%20dispatched%20and%20is%20expected%20to%20be%20delivered%20in%203-7%20working%20days.%20Your%20patience%20is%20highly%20appreciated." target="_blank">Send Dispatch Message</a>
-                            <a class="dropdown-item" href="https://wa.me/{{ order.customer_details.phone }}?text=Hello%20{{ order.customer_details.name }},%20Your%20order%23{{ order.order_id }}%20from%20AlchemyOfDecor.com%20has%20been%20delayed,%20please%20be%20assured%20that%20we%20are%20trying%20our%20best%20to%20deliver%20it%20at%20earliest.%20Your%20patience%20is%20highly%20appreciated." target="_blank">Send Delay Message</a>
-                            <a class="dropdown-item" href="https://wa.me/{{ order.customer_details.phone }}?text=Hello%20{{ order.customer_details.name }},%20Logistics%20company%20made%20an%20attempt%20to%20deliver%20your%20order%23{{ order.order_id }}%20from%20AlchemyOfDecor.com%20but%20as%20per%20them,%20you%20weren't%20available%20at%20address%20or%20the%20address%20was%20closed.%20Please%20let%20us%20know%20when%20should%20we%20re-arrange%20the%20delivery.%20Thank%20You" target="_blank">Send Address Closed Message</a>
-                            <a class="dropdown-item" href="https://wa.me/{{ order.customer_details.phone }}?text=Hello%20{{ order.customer_details.name }},%20Logistics%20company%20made%20an%20attempt%20to%20deliver%20your%20order%23{{ order.order_id }}%20from%20AlchemyOfDecor.com%20and%20according%20to%20them,%20you%20refused%20to%20accept%20the%20delivery.%20Please%20let%20us%20know%20if%20you're%20still%20interested%20in%20receiving%20the%20product." target="_blank">Send Refused Message</a>
-                            <a class="dropdown-item" href="https://wa.me/{{ order.customer_details.phone }}?text=Hello%20{{ order.customer_details.name }},%20Your%20order%23{{ order.order_id }}%20from%20AlchemyOfDecor.com%20was%20delivered%20recently.%20Please%20let%20us%20know%20about%20your%20experience%20with%20us.%20Your%20feedback%20will%20surely%20help%20us%20improve.%20Thank%20You!" target="_blank">Send Feedback Message</a>
-                        </div>
-                    </div>
-                {% else %}
-                    <p>Phone number not available</p>
-                {% endif %}
-            {% else %}
-                <p>Customer details not available</p>
-            {% endif %}
-        </td>
-        <td>{{ order.customer_details.city or "Unknown" if order.customer_details else "Unknown" }}</td>
+    <a class="dropdown-item" href="https://wa.me/{{ order.customer_details.phone }}?text=Hello%20{{ order.customer_details.name }},%20Your%20order%23{{ order.order_id }}%20from%20AlchemyOfDecor.com%20has%20been%20dispatched%20and%20is%20expected%20to%20be%20delivered%20in%203-7%20working%20days.%20Your%20patience%20is%20highly%20appreciated." target="_blank">Send Dispatch Message</a>
+    <a class="dropdown-item" href="https://wa.me/{{ order.customer_details.phone }}?text=Hello%20{{ order.customer_details.name }},%20Your%20order%23{{ order.order_id }}%20from%20AlchemyOfDecor.com%20has%20been%20delayed,%20please%20be%20assured%20that%20we%20are%20trying%20our%20best%20to%20deliver%20it%20at%20earliest.%20Your%20patience%20is%20highly%20appreciated." target="_blank">Send Delay Message</a>
+    <a class="dropdown-item" href="https://wa.me/{{ order.customer_details.phone }}?text=Hello%20{{ order.customer_details.name }},%20Logistics%20company%20made%20an%20attempt%20to%20deliver%20your%20order%23{{ order.order_id }}%20from%20AlchemyOfDecor.com%20but%20as%20per%20them,%20you%20weren't%20available%20at%20address%20or%20the%20address%20was%20closed.%20Please%20let%20us%20know%20when%20should%20we%20re-arrange%20the%20delivery.%20Thank%20You" target="_blank">Send Address Closed Message</a>
+    <a class="dropdown-item" href="https://wa.me/{{ order.customer_details.phone }}?text=Hello%20{{ order.customer_details.name }},%20Logistics%20company%20made%20an%20attempt%20to%20deliver%20your%20order%23{{ order.order_id }}%20from%20AlchemyOfDecor.com%20and%20according%20to%20them,%20you%20refused%20to%20accept%20the%20delivery.%20Please%20let%20us%20know%20if%20you're%20still%20interested%20in%20receiving%20the%20product." target="_blank">Send Refused Message</a>
+    <a class="dropdown-item" href="https://wa.me/{{ order.customer_details.phone }}?text=Hello%20{{ order.customer_details.name }},%20Your%20order%23{{ order.order_id }}%20from%20AlchemyOfDecor.com%20was%20delivered%20recently.%20Please%20let%20us%20know%20about%20your%20experience%20with%20us.%20Your%20feedback%20will%20surely%20help%20us%20improve.%20Thank%20You!" target="_blank">Send Feedback Message</a>
+</div>
 
+                    </div>
+                </td>
+                <td>{{ order.customer_details.city }}</td>
 
                 <td>{% for tag in order.tags %}
                      <span class="badge badge-secondary">{{ tag }}</span><br>
@@ -318,13 +244,11 @@
                  <td>
                         <button class="btn btn-primary btn-sm" onclick="toggleStatusButtons(this)">Mark As</button>
                         <div class="status-buttons">
-                             <button class="btn btn-outline-success btn-sm" onclick="applyTag('{{ order.order_id }}', 'Delivered')">Delivered</button>
-                            <button class="btn btn-outline-secondary btn-sm" onclick="applyTag('{{ order.order_id }}', 'Re-Dispatch')">Re-Dispatch</button>
-                            <button class="btn btn-outline-secondary btn-sm" onclick="applyTag('{{ order.order_id }}', 'Wants to Open Parcel')">Wants to Open Parcel</button>
-                            <button class="btn btn-outline-danger btn-sm" onclick="applyTag('{{ order.order_id }}', 'Returned')">Returned</button>
-                            <button class="btn btn-outline-warning btn-sm" onclick="applyTag('{{ order.order_id }}', 'Cancelled')">Cancelled</button>
-                            <button class="btn btn-outline-info btn-sm" onclick="applyTag('{{ order.order_id }}', 'Confirmed')">Confirmed</button>
-                            <button class="btn btn-outline-secondary btn-sm" onclick="applyTag('{{ order.order_id }}', 'Call Not Attended')">Call Not Attended</button>
+                             <button class="btn btn-outline-success btn-sm" onclick="applyTag('{{ order.id }}', 'Delivered')">Delivered</button>
+                            <button class="btn btn-outline-danger btn-sm" onclick="applyTag('{{ order.id }}', 'Returned')">Returned</button>
+                            <button class="btn btn-outline-warning btn-sm" onclick="applyTag('{{ order.id }}', 'Cancelled')">Cancelled</button>
+                            <button class="btn btn-outline-info btn-sm" onclick="applyTag('{{ order.id }}', 'Confirmed')">Confirmed</button>
+                            <button class="btn btn-outline-secondary btn-sm" onclick="applyTag('{{ order.id }}', 'Call Not Attended')">Call Not Attended</button>
                         </div>
                     </td>
             </tr>
@@ -401,31 +325,7 @@
     <script src="static/assets/js/demo/datatables-demo.js"></script>
         <script src="static/assets/js/demo/datatables-demo.js"></script>
     <script src="static/assets/js/track.js"></script>
-<script>
-    function applyTag(orderId, tag) {
-    console.log("Order ID:", orderId);
-    if (!orderId) {
-        alert("Order ID is missing");
-        return;
-    }
-    fetch('/apply_tag', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ order_id: orderId, tag: tag })
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            alert("Tag applied successfully.");
-        } else {
-            alert("Error: " + data.error);
-        }
-    })
-    .catch(error => console.error('Error:', error));
-}
-</script>
+
 <script>
    $(document).ready(function() {
     // Destroy existing DataTable instance if present
@@ -453,7 +353,7 @@
 
     orders.forEach(order => {
         if (order.status === 'DELIVERED') {
-            applyTag(order.order_id, 'Delivered');
+            applyTag(order.id, 'Delivered');
         }
     });
 }
@@ -469,239 +369,7 @@
             });
         });
     </script>
-<script>
-
-</script>
-</body>
-<script src="static/assets/vendor/jquery/jquery.min.js"></script>
-    <script src="static/assets/vendor/bootstrap/js/bootstrap.bundle.min.js"></script>
-
-    <script src="static/assets/vendor/jquery-easing/jquery.easing.min.js"></script>
-
-    <script src="static/assets/js/sb-admin-2.min.js"></script>
-
-    <script src="static/assets/vendor/datatables/jquery.dataTables.min.js"></script>
-    <script src="static/assets/vendor/datatables/dataTables.bootstrap4.min.js"></script>
-
-    <script>
-    function applyTag(orderId, tag) {
-        console.log("Order ID:", orderId);
-        if (!orderId) {
-            alert("Order ID is missing");
-            return;
-        }
-        // Toggle button to loading state if needed
-        fetch('/apply_tag', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ order_id: orderId, tag: tag })
-        })
-        .then(response => response.json())
-        .then(data => {
-            if (data.success) {
-                alert("Tag applied successfully.");
-                location.reload(); // Optional: Reload to see changes
-            } else {
-                alert("Error: " + data.error);
-            }
-        })
-        .catch(error => console.error('Error:', error));
-    }
-
-    // Toggle the visibility of the "Mark As" buttons
-    function toggleStatusButtons(button) {
-        var container = button.nextElementSibling;
-        if (container.style.display === "none" || container.style.display === "") {
-            container.style.display = "block";
-        } else {
-            container.style.display = "none";
-        }
-    }
-    </script>
-
-    <script>
-    $(document).ready(function() {
-        // Destroy existing DataTable instance if present
-        if ($.fn.DataTable.isDataTable('#dataTable')) {
-            $('#dataTable').DataTable().destroy();
-        }
-
-        // Initialize the DataTable
-        $('#dataTable').DataTable({
-            "order": [[0, 'desc']], 
-            "columnDefs": [
-                { "searchable": false, "targets": [-1, 4] } 
-            ],
-            "initComplete": function(settings, json) {
-                console.log('DataTable initialized');
-            }
-        });
-
-        // Navbar active state logic
-        var currentUrl = window.location.pathname;
-        $('.nav-item a').each(function() {
-            var linkUrl = $(this).attr('href');
-            if (currentUrl === '/' + linkUrl) {
-                $(this).parent().addClass('active');
-            }
-        });
-    });
-
-    // --- REWRITTEN BULK FUNCTION ---
-    function applyDeliveredToAll() {
-        // 1. Get raw data from Jinja
-        const orders = {{ order_details|tojson }};
-        const orderIdsToUpdate = [];
-
-        // 2. Strict Filtering (Fixes "Partial Delivery" Bug)
-        orders.forEach(order => {
-            // Ensure order has items
-            if (order.line_items && order.line_items.length > 0) {
-                // Check if EVERY item in the order is Delivered or Completed
-                const allItemsDelivered = order.line_items.every(item => {
-                    const status = item.status ? item.status.toUpperCase() : "";
-                    return status.includes('DELIVERED') || status.includes('COMPLETED');
-                });
-
-                // Only add to list if ALL items are delivered
-                if (allItemsDelivered) {
-                    orderIdsToUpdate.push(order.order_id);
-                }
-            }
-        });
-
-        // 3. Validation
-        if (orderIdsToUpdate.length === 0) {
-            alert("No fully delivered orders found to update.");
-            return;
-        }
-
-        if (!confirm(`Found ${orderIdsToUpdate.length} orders where ALL items are delivered. Mark them as Delivered in Shopify?`)) {
-            return;
-        }
-
-        // 4. Send SINGLE Bulk Request (Fixes "Popup Loop" & "429 Error")
-        // Update button text to show processing
-        const btn = document.querySelector('button[onclick="applyDeliveredToAll()"]');
-        if(btn) {
-            btn.innerText = "Processing... Please Wait...";
-            btn.disabled = true;
-        }
-
-        fetch('/api/apply_bulk_tag', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 
-                order_ids: orderIdsToUpdate, 
-                tag_type: 'DELIVERED' 
-            })
-        })
-        .then(response => response.json())
-        .then(data => {
-            if (data.success) {
-                alert(`Success! Processed ${data.total_orders} orders.\nCheck console for details.`);
-                console.log(data.results);
-                location.reload(); 
-            } else {
-                alert("Error: " + data.error);
-                if(btn) {
-                    btn.innerText = "Apply 'Delivered' to All Delivered Orders";
-                    btn.disabled = false;
-                }
-            }
-        })
-        .catch(error => {
-            console.error('Error:', error);
-            alert("An error occurred while communicating with the server.");
-            if(btn) {
-                btn.innerText = "Apply 'Delivered' to All Delivered Orders";
-                btn.disabled = false;
-            }
-        });
-    }
-    </script>
-
-    <script>
-    function updateOrderStats(orderDetails) {
-        let allValue = 0, allQuantity = 0, allOrders = 0;
-        let dispatchValue = 0, dispatchQuantity = 0, dispatchOrders = 0;
-        let bookedValue = 0, bookedQuantity = 0, bookedOrders = 0;
-        let deliveredValue = 0, deliveredQuantity = 0, deliveredOrders = 0;
-        let returnsValue = 0, returnsQuantity = 0, returnsOrders = 0;
-        let unbookedValue = 0, unbookedQuantity = 0, unbookedOrders = 0;
-
-        orderDetails.forEach(order => {
-            let orderValue = parseFloat(order.total_price) || 0;
-            let orderQuantity = order.line_items.reduce((sum, item) => sum + item.quantity, 0);
-
-            allValue += orderValue;
-            allQuantity += orderQuantity;
-            allOrders += 1;
-
-            switch (order.status) {
-                case 'PICKED FROM SHIPPER':
-                    dispatchValue += orderValue;
-                    dispatchQuantity += orderQuantity;
-                    dispatchOrders += 1;
-                    break;
-                case 'CONSIGNMENT BOOKED':
-                    bookedValue += orderValue;
-                    bookedQuantity += orderQuantity;
-                    bookedOrders += 1;
-                    break;
-                case 'DELIVERED':
-                    deliveredValue += orderValue;
-                    deliveredQuantity += orderQuantity;
-                    deliveredOrders += 1;
-                    break;
-                case 'Un-Booked':
-                    unbookedValue += orderValue;
-                    unbookedQuantity += orderQuantity;
-                    unbookedOrders += 1;
-                    break;
-                default:
-                    if (order.status && order.status.includes('RETURN')) {
-                        returnsValue += orderValue;
-                        returnsQuantity += orderQuantity;
-                        returnsOrders += 1;
-                    }
-            }
-        });
-
-        let shippedValue = allValue - (dispatchValue + bookedValue + deliveredValue + returnsValue + unbookedValue);
-        let shippedQuantity = allQuantity - (dispatchQuantity + bookedQuantity + deliveredQuantity + returnsQuantity + unbookedQuantity);
-        let shippedOrders = allOrders - (dispatchOrders + bookedOrders + deliveredOrders + returnsOrders + unbookedOrders);
-
-        // Update DOM
-        document.getElementById('all-value').innerText = allValue.toFixed(2);
-        document.getElementById('all-quantity').innerText = allQuantity;
-        document.getElementById('all-orders').innerText = allOrders;
-
-        document.getElementById('dispatch-value').innerText = dispatchValue.toFixed(2);
-        document.getElementById('dispatch-quantity').innerText = dispatchQuantity;
-        document.getElementById('dispatch-orders').innerText = dispatchOrders;
-
-        document.getElementById('booked-value').innerText = bookedValue.toFixed(2);
-        document.getElementById('booked-quantity').innerText = bookedQuantity;
-        document.getElementById('booked-orders').innerText = bookedOrders;
-
-        document.getElementById('returns-value').innerText = returnsValue.toFixed(2);
-        document.getElementById('returns-quantity').innerText = returnsQuantity;
-        document.getElementById('returns-orders').innerText = returnsOrders;
-
-        document.getElementById('shipped-value').innerText = shippedValue.toFixed(2);
-        document.getElementById('shipped-quantity').innerText = shippedQuantity;
-        document.getElementById('shipped-orders').innerText = shippedOrders;
-
-        document.getElementById('unbooked-value').innerText = unbookedValue.toFixed(2);
-        document.getElementById('unbooked-quantity').innerText = unbookedQuantity;
-        document.getElementById('unbooked-orders').innerText = unbookedOrders;
-    }
-
-    // Call the function
-    updateOrderStats({{ order_details|tojson }});
-    </script>
 
 </body>
-</html>
+
 </html>
