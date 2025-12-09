@@ -256,6 +256,7 @@
     </tbody>
 </table>
                                     <button class="btn btn-primary btn-sm" onclick="applyDeliveredToAll()">Apply 'Delivered' to All Delivered Orders</button>
+                                <button class="btn btn-primary btn-sm" onclick="applyReturnedToAll()">Apply 'Returned' to All Returned Orders</button>
                             </div>
                         </div>
                     </div>
@@ -348,12 +349,22 @@
     });
 });
 
-    function applyDeliveredToAll() {
+     function applyDeliveredToAll() {
     const orders = {{ order_details|tojson }};
 
     orders.forEach(order => {
         if (order.status === 'DELIVERED') {
-            applyTag(order.id, 'Delivered');
+            applyTag(order.order_id, 'Delivered');
+        }
+    });
+}
+
+    function applyReturnedToAll() {
+    const orders = {{ order_details|tojson }};
+
+    orders.forEach(order => {
+        if (order.status === 'RETURN SUBMITTED') {
+            applyTag(order.order_id, 'Returned');
         }
     });
 }
@@ -373,4 +384,5 @@
 </body>
 
 </html>
+
 
