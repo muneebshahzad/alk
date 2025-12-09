@@ -761,30 +761,50 @@ def fetch_orders():
 
 
 @app.route('/apply_tag', methods=['POST'])
-@shopify_api_retry
 def apply_tag():
     data = request.json
     order_id = data.get('order_id')
     tag = data.get('tag')
 
+    # Get today's date in YYYY-MM-DD format
     today_date = datetime.now().strftime('%Y-%m-%d')
     tag_with_date = f"{tag.strip()} ({today_date})"
+
     try:
+        # Fetch the order
         order = shopify.Order.find(order_id)
-        if not hasattr(order, 'tags'):
-            raise ValueError("Could not fetch a valid order.")
 
+        # If the tag is "Returned", cancel the order
         if tag.strip().lower() == "returned":
-            order.cancel()
+            # Attempt to cancel the order
+            if order.cancel():
+                print("Order Cancelled")
+            else:
+                print("Order Cancellation Failed")
         if tag.strip().lower() == "delivered":
-            order.close()
+            if order.close():
+                print("Order Cloed")
+            else:
+                print("Order Closing Failed")
 
-        tags = [t.strip() for t in order.tags.split(", ")] if order.tags else []
-        if "Leopards Courier" in tags: tags.remove("Leopards Courier")
-        if tag_with_date not in tags: tags.append(tag_with_date)
+        # Process existing tags
+        if order.tags:
+            tags = [t.strip() for t in order.tags.split(", ")]  # Remove excess spaces
+        else:
+            tags = []
 
+        # Remove a specific tag if needed (e.g., "Leopards Courier")
+        if "Leopards Courier" in tags:
+            tags.remove("Leopards Courier")
+
+        # Add new tag if it doesn't already exist
+        if tag_with_date not in tags:
+            tags.append(tag_with_date)
+
+        # Update the order with the new tags
         order.tags = ", ".join(tags)
 
+        # Save the order
         if order.save():
             return jsonify({"success": True, "message": "Tag applied successfully."})
         else:
@@ -1061,4 +1081,5 @@ except Exception as e:
 
 if __name__ == "__main__":
     app.run(port=5001)
+
 
