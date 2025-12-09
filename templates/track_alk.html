@@ -349,24 +349,30 @@
     });
 });
 
-     function applyDeliveredToAll() {
-    const orders = {{ order_details|tojson }};
-
-    orders.forEach(order => {
-        if (order.status === 'DELIVERED') {
-            applyTag(order.order_id, 'Delivered');
-        }
-    });
+function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-    function applyReturnedToAll() {
+async function applyDeliveredToAll() {
     const orders = {{ order_details|tojson }};
 
-    orders.forEach(order => {
+    for (const order of orders) {
+        if (order.status === 'DELIVERED') {
+            applyTag(order.order_id, 'Delivered');
+            await sleep(1000); // ✅ 1 second delay
+        }
+    }
+}
+
+async function applyReturnedToAll() {
+    const orders = {{ order_details|tojson }};
+
+    for (const order of orders) {
         if (order.status === 'RETURN SUBMITTED') {
             applyTag(order.order_id, 'Returned');
+            await sleep(1000); // ✅ 1 second delay
         }
-    });
+    }
 }
 </script>
 <script>
@@ -384,5 +390,6 @@
 </body>
 
 </html>
+
 
 
