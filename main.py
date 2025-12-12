@@ -773,7 +773,6 @@ def apply_tag():
     try:
         # Fetch the order
         order = shopify.Order.find(order_id)
-        print(f"Applying tax to {order_id}")
 
         # If the tag is "Returned", cancel the order
         if tag.strip().lower() == "returned":
@@ -1000,14 +999,12 @@ def background_webhook_processor(order_shopify_id):
 @app.route('/shopify/webhook/order_updated', methods=['POST'])
 def shopify_order_updated():
     global order_details
+    time.sleep(1)
     try:
-        # 1. Verify HMAC (Fast, required)
+        # 1. Verify HMAC (Fast, keep synchronous)
         if not verify_shopify_webhook(request):
             print("Webhook verification failed.")
             return jsonify({'error': 'Invalid webhook signature'}), 401
-
-        # ⭐ Add 1 second delay here
-        time.sleep(1)
 
         order_data = request.get_json()
         order_shopify_id = order_data.get('id')
@@ -1024,11 +1021,9 @@ def shopify_order_updated():
             return jsonify({'success': True, 'message': 'Order removed'}), 200
 
         # 3. Offload Processing to Background Thread
-        thread = threading.Thread(
-            target=background_webhook_processor,
-            args=(order_shopify_id,)
-        )
-        thread.daemon = True
+        # This returns 200 OK to Shopify immediately, preventing the timeout.
+        thread = threading.Thread(target=background_webhook_processor, args=(order_shopify_id,))
+        thread.daemon = True  # Ensures thread cleans up if app restarts
         thread.start()
 
         return jsonify({
@@ -1039,7 +1034,6 @@ def shopify_order_updated():
     except Exception as e:
         print(f"Webhook processing error: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
-
 
 
 @app.route('/scanner')
@@ -1088,8 +1082,4 @@ except Exception as e:
 
 if __name__ == "__main__":
     app.run(port=5001)
-
-
-
-
 
