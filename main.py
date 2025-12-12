@@ -773,6 +773,7 @@ def apply_tag():
     try:
         # Fetch the order
         order = shopify.Order.find(order_id)
+        print("Applying order id to %f"order_id"")
 
         # If the tag is "Returned", cancel the order
         if tag.strip().lower() == "returned":
@@ -1087,6 +1088,7 @@ except Exception as e:
 
 if __name__ == "__main__":
     app.run(port=5001)
+
 
 
 
