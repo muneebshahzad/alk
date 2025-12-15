@@ -515,6 +515,12 @@ async def process_line_item(session, line_item, fulfillments):
         {"tracking_number": "N/A", "status": "Un-Booked", "quantity": line_item.quantity}
     ]
 
+ORDER_PROCESS_SEM = asyncio.Semaphore(5)
+
+async def safe_process_order(session, order):
+    async with ORDER_PROCESS_SEM:
+        return await process_order(session, order)
+
 
 async def process_order(session, order):
     try:
@@ -666,7 +672,7 @@ async def getShopifyOrders():
 
     async with aiohttp.ClientSession() as session:
         while True:
-            tasks = [process_order(session, order) for order in orders]
+            tasks = [safe_process_order(session, order) for order in orders]
             results = await asyncio.gather(*tasks, return_exceptions=True)
 
             for result in results:
@@ -1082,4 +1088,5 @@ except Exception as e:
 
 if __name__ == "__main__":
     app.run(port=5001)
+
 
