@@ -4,8 +4,6 @@ pymssql
 aiohttp
 tenacity
 pytz
-gunicorn  # <-- ADD THIS
 ShopifyAPI
 gunicorn 
-pytz
-tenacity
+psycopg2-binary

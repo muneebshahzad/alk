@@ -10,7 +10,7 @@ import json
 import random
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from flask import Flask, render_template, jsonify, request, flash, redirect, url_for, abort
+from flask import Flask, render_template, jsonify, request, flash, redirect, url_for, abort, session, send_from_directory
 from datetime import datetime
 import pymssql, shopify
 import aiohttp
@@ -21,12 +21,152 @@ import pytz
 from flask import send_file, make_response
 import io
 import functools
+from db import (
+    delete_order_status,
+    get_app_setting,
+    init_db,
+    load_order_statuses,
+    set_app_setting,
+    upsert_order_status,
+)
 
 app = Flask(__name__)
 app.debug = True
 app.secret_key = os.getenv('APP_SECRET_KEY', 'default_secret_key')
 pre_loaded = 0
 order_details = []
+EMPLOYEE_PORTAL_SESSION_KEY = "employee_portal_authenticated"
+ADMIN_PORTAL_SESSION_KEY = "admin_portal_authenticated"
+EMPLOYEE_PORTAL_PASSWORD = os.getenv("EMPLOYEE_PORTAL_PASSWORD", "@@@t")
+ADMIN_PORTAL_PASSWORD = os.getenv("ADMIN_PORTAL_PASSWORD", "security")
+PRODUCT_COSTS_SETTING_KEY = "product_cost_overrides_v1"
+PAID_FINANCIAL_STATUSES = {"paid", "partially_paid", "partially refunded", "partially_refunded"}
+
+
+def normalize_scan_term(term):
+    return (term or "").strip().lower().replace("#", "")
+
+
+def parse_money(value, default=0.0):
+    try:
+        return round(float(value or default), 2)
+    except (TypeError, ValueError):
+        return round(float(default), 2)
+
+
+def parse_date_for_sort(value):
+    if not value:
+        return datetime.min
+    raw = str(value).replace("Z", "+00:00")
+    try:
+        return datetime.fromisoformat(raw)
+    except ValueError:
+        pass
+    for fmt in ("%Y-%m-%d %H:%M:%S %z", "%b %d, %Y", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(raw, fmt)
+        except ValueError:
+            continue
+    return datetime.min
+
+
+def is_lahore_city(city):
+    normalized = (city or "").strip().lower()
+    return "lahore" in normalized or "lhr" in normalized
+
+
+def is_delivered_status(status):
+    normalized = (status or "").strip().upper()
+    return normalized == "DELIVERED" or normalized.startswith("DELIVERED ")
+
+
+def normalize_status_bucket(status):
+    raw = (status or "Un-Booked").strip()
+    upper = raw.upper()
+    if "PARTIALLY DELIVERED" in upper:
+        return "Partially Delivered"
+    if "RETURNED TO SHIPPER" in upper:
+        return "RETURNED TO SHIPPER"
+    if "BEING RETURN" in upper or "OUT FOR RETURN" in upper or "RETURN SUBMISSION" in upper:
+        return "Being Return"
+    if "UNDELIVERED" in upper:
+        return "Undelivered"
+    if "OUT FOR DELIVERY" in upper:
+        return "Out For Delivery"
+    if is_delivered_status(raw):
+        return "Delivered"
+    if "PICKED FROM SHIPPER" in upper:
+        return "Picked From Shipper"
+    if upper == "BOOKED" or "CONSIGNMENT BOOKED" in upper:
+        return "Booked"
+    if upper in {"UN-BOOKED", "UNBOOKED"}:
+        return "Un-Booked"
+    return raw
+
+
+def is_pending_line_item_status(status):
+    normalized = normalize_status_bucket(status)
+    return normalized in {"Booked", "Un-Booked", "Out For Delivery", "Undelivered", "Being Return", "RETURNED TO SHIPPER"}
+
+
+def employee_portal_is_authenticated():
+    return bool(session.get(EMPLOYEE_PORTAL_SESSION_KEY) or session.get(ADMIN_PORTAL_SESSION_KEY))
+
+
+def admin_portal_is_authenticated():
+    return bool(session.get(ADMIN_PORTAL_SESSION_KEY))
+
+
+def employee_portal_safe_next_url(candidate):
+    if candidate and str(candidate).startswith("/employee_portal"):
+        return candidate
+    return url_for("employee_portal")
+
+
+def product_cost_key(product_id=None, variant_id=None, title=""):
+    if variant_id:
+        return f"variant:{variant_id}"
+    if product_id:
+        return f"product:{product_id}"
+    return f"title:{str(title or '').strip().lower()}"
+
+
+def load_product_cost_overrides():
+    raw = get_app_setting(PRODUCT_COSTS_SETTING_KEY, "{}")
+    try:
+        data = json.loads(raw or "{}")
+        return data if isinstance(data, dict) else {}
+    except (TypeError, ValueError):
+        return {}
+
+
+def save_product_cost_overrides(overrides):
+    return set_app_setting(PRODUCT_COSTS_SETTING_KEY, json.dumps(overrides or {}))
+
+
+def get_cost_override_for_item(overrides, product_id=None, variant_id=None, title=""):
+    for key in (
+        product_cost_key(product_id=product_id, variant_id=variant_id, title=title),
+        product_cost_key(product_id=product_id, title=title),
+        product_cost_key(title=title),
+    ):
+        entry = overrides.get(key)
+        if isinstance(entry, dict):
+            return parse_money(entry.get("cost", 0))
+    return 0.0
+
+
+def set_cost_override(overrides, product_id=None, variant_id=None, title="", price=0, cost=0):
+    key = product_cost_key(product_id=product_id, variant_id=variant_id, title=title)
+    overrides[key] = {
+        "product_id": str(product_id or ""),
+        "variant_id": str(variant_id or ""),
+        "title": title,
+        "price": parse_money(price),
+        "cost": parse_money(cost),
+        "updated_at": datetime.now().isoformat(timespec="seconds"),
+    }
+    return overrides
 
 # NOTE: Global semaphore removed to fix "different event loop" error.
 # It is now handled dynamically inside 'limited_request'.
@@ -583,6 +723,9 @@ async def process_order(session, order):
                 order_info['line_items'].append({
                     'fulfillment_status': line_item.fulfillment_status,
                     'image_src': image_src,
+                    'product_id': line_item.product_id,
+                    'variant_id': line_item.variant_id,
+                    'unit_price': parse_money(getattr(line_item, 'price', 0)),
                     'product_title': line_item.title + (f" - {variant_name}" if variant_name else ""),
                     'quantity': info['quantity'],
                     'tracking_number': info['tracking_number'],
@@ -1042,6 +1185,668 @@ def shopify_order_updated():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+def serialize_shopify_order_for_employee(order):
+    customer = order.get("customer_details") or {}
+    return {
+        "source": "shopify",
+        "source_label": "Alkaramat",
+        "shopify_id": order.get("order_id"),
+        "order_id": str(order.get("order_num", "")),
+        "status": order.get("status", ""),
+        "customer_name": customer.get("name", ""),
+        "customer_phone": customer.get("phone", ""),
+        "customer_city": customer.get("city", ""),
+        "total_price": order.get("total_price", 0),
+        "created_at": order.get("created_at", ""),
+        "items": [
+            {
+                "title": item.get("product_title", ""),
+                "quantity": item.get("quantity", 0),
+                "image": item.get("image_src", ""),
+                "tracking_number": item.get("tracking_number", "N/A"),
+                "status": item.get("status", ""),
+            }
+            for item in order.get("line_items", [])
+        ],
+    }
+
+
+def build_employee_portal_orders():
+    try:
+        employee_orders = [serialize_shopify_order_for_employee(order) for order in order_details]
+        return sorted(employee_orders, key=lambda order: parse_date_for_sort(order.get("created_at")), reverse=True)
+    except Exception as error:
+        print(f"Could not load employee portal orders: {error}")
+        return []
+
+
+def find_employee_portal_order(term):
+    normalized = normalize_scan_term(term)
+    if not normalized:
+        return None
+    for order in build_employee_portal_orders():
+        if normalize_scan_term(order.get("order_id")) == normalized:
+            return order
+        for item in order.get("items", []):
+            if normalize_scan_term(item.get("tracking_number")) == normalized:
+                return order
+    return None
+
+
+def apply_shopify_order_tag(order_id, tag, include_date=False):
+    order = shopify.Order.find(order_id)
+    tags = [item.strip() for item in str(getattr(order, "tags", "") or "").split(",") if item.strip()]
+    clean_tag = tag.strip()
+    if include_date:
+        clean_tag = f"{clean_tag} ({datetime.now().strftime('%Y-%m-%d')})"
+    if clean_tag not in tags:
+        tags.append(clean_tag)
+    order.tags = ", ".join(tags)
+    return order.save()
+
+
+def build_pending_orders_mobile_data():
+    all_orders = []
+    statuses = load_order_statuses()
+    overrides = load_product_cost_overrides()
+    for shopify_order in order_details:
+        if any(str(tag).startswith("Dispatched") for tag in shopify_order.get("tags", [])):
+            continue
+        customer = shopify_order.get("customer_details") or {}
+        customer_city = (customer.get("city") or "").strip()
+        items = []
+        for item in shopify_order.get("line_items", []):
+            item_status = normalize_status_bucket(item.get("status", ""))
+            if not is_pending_line_item_status(item_status):
+                continue
+            tracking_number = item.get("tracking_number", "N/A")
+            key = f"{shopify_order.get('order_num')}:{tracking_number}"
+            quantity = int(item.get("quantity") or 0)
+            unit_price = parse_money(item.get("unit_price", 0))
+            unit_cost = get_cost_override_for_item(overrides, title=item.get("product_title", ""))
+            items.append(
+                {
+                    "item_image": item.get("image_src", ""),
+                    "item_title": item.get("product_title", ""),
+                    "product_id": item.get("product_id"),
+                    "variant_id": item.get("variant_id"),
+                    "quantity": quantity,
+                    "unit_price": unit_price,
+                    "unit_cost": unit_cost,
+                    "line_total": round(unit_price * quantity, 2),
+                    "line_cost_total": round(unit_cost * quantity, 2),
+                    "tracking_number": tracking_number,
+                    "status": item_status,
+                    "applied_status": statuses.get(key, ""),
+                }
+            )
+        if not items:
+            continue
+        financial_status = str(shopify_order.get("financial_status", "") or "").strip().lower()
+        payment_label = "Pending"
+        payment_class = "pending"
+        if financial_status in PAID_FINANCIAL_STATUSES:
+            payment_label = "Partially Paid" if "partially" in financial_status else "Paid"
+            payment_class = "partial" if "partially" in financial_status else "paid"
+        all_orders.append(
+            {
+                "order_via": "Shopify",
+                "shopify_id": shopify_order.get("order_id"),
+                "order_link": shopify_order.get("order_link"),
+                "order_id": shopify_order.get("order_num"),
+                "status": normalize_status_bucket(shopify_order.get("status", "")),
+                "tags": [tag for tag in shopify_order.get("tags", []) if tag != "Leopards Courier"],
+                "customer_name": customer.get("name", ""),
+                "customer_phone": customer.get("phone", ""),
+                "customer_address": customer.get("address", ""),
+                "customer_city": customer_city,
+                "is_lahore": is_lahore_city(customer_city),
+                "date": shopify_order.get("created_at", ""),
+                "items_list": items,
+                "financial_status": shopify_order.get("financial_status", ""),
+                "payment_status_label": payment_label,
+                "payment_status_class": payment_class,
+                "subtotal_price": parse_money(shopify_order.get("total_price", 0)),
+                "current_subtotal_price": parse_money(shopify_order.get("total_price", 0)),
+                "shipping_charges": 0,
+                "total_discounts": 0,
+                "total_price": parse_money(shopify_order.get("total_price", 0)),
+                "current_total_price": parse_money(shopify_order.get("total_price", 0)),
+                "display_total_price": parse_money(shopify_order.get("total_price", 0)),
+                "pending_total_price": round(sum(parse_money(item.get("line_total", 0)) for item in items), 2),
+                "pending_total_cost": round(sum(parse_money(item.get("line_cost_total", 0)) for item in items), 2),
+            }
+        )
+    return sorted(all_orders, key=lambda order: parse_date_for_sort(order.get("date")), reverse=True)
+
+
+def build_pending_items_table_data():
+    pending_items = {}
+    all_orders = build_pending_orders_mobile_data()
+    paid_pending_value = 0.0
+    unpaid_pending_value = 0.0
+    total_items_cost = 0.0
+    for order in all_orders:
+        financial_status = str(order.get("financial_status", "") or "").strip().lower()
+        pending_value = parse_money(order.get("pending_total_price", 0))
+        pending_cost = parse_money(order.get("pending_total_cost", 0))
+        total_items_cost += pending_cost
+        if financial_status in PAID_FINANCIAL_STATUSES:
+            paid_pending_value += pending_value
+        else:
+            unpaid_pending_value += pending_value
+        for item in order.get("items_list", []):
+            product_title = item["item_title"]
+            quantity = int(item.get("quantity") or 0)
+            if product_title not in pending_items:
+                pending_items[product_title] = {
+                    "item_image": item.get("item_image", ""),
+                    "item_title": product_title,
+                    "quantity": 0,
+                    "total_price": 0.0,
+                    "total_cost": 0.0,
+                    "statuses": {},
+                }
+            pending_items[product_title]["quantity"] += quantity
+            pending_items[product_title]["total_price"] += parse_money(item.get("line_total", 0))
+            pending_items[product_title]["total_cost"] += parse_money(item.get("line_cost_total", 0))
+            status = item.get("status", "")
+            pending_items[product_title]["statuses"][status] = pending_items[product_title]["statuses"].get(status, 0) + quantity
+    pending_items_sorted = sorted(pending_items.values(), key=lambda item: item["quantity"], reverse=True)
+    summary = {
+        "paid_pending_value": round(paid_pending_value, 2),
+        "unpaid_pending_value": round(unpaid_pending_value, 2),
+        "total_items_cost": round(total_items_cost, 2),
+    }
+    return all_orders, pending_items_sorted, summary
+
+
+def build_employee_approval_items():
+    approvals = []
+    statuses = load_order_statuses()
+    approval_statuses = {"Delivered in Lahore", "Cancelled by Employee"}
+    for shopify_order in order_details:
+        customer = shopify_order.get("customer_details") or {}
+        for item in shopify_order.get("line_items", []):
+            tracking_number = item.get("tracking_number", "N/A")
+            key = f"{shopify_order.get('order_num')}:{tracking_number}"
+            applied_status = statuses.get(key, "")
+            if applied_status not in approval_statuses:
+                continue
+            approvals.append(
+                {
+                    "shopify_id": shopify_order.get("order_id"),
+                    "order_id": shopify_order.get("order_num"),
+                    "tracking_number": tracking_number,
+                    "requested_status": applied_status,
+                    "item_title": item.get("product_title", ""),
+                    "item_image": item.get("image_src", ""),
+                    "quantity": item.get("quantity", 0),
+                    "customer_name": customer.get("name") or "",
+                    "customer_city": customer.get("city") or "",
+                    "customer_phone": customer.get("phone") or "",
+                    "total_price": shopify_order.get("total_price", 0),
+                    "date": shopify_order.get("created_at", ""),
+                    "tags": shopify_order.get("tags", []),
+                }
+            )
+    return sorted(approvals, key=lambda item: parse_date_for_sort(item.get("date")), reverse=True)
+
+
+def get_active_shopify_products(limit=250):
+    overrides = load_product_cost_overrides()
+    try:
+        products = shopify.Product.find(limit=limit, published_status="published")
+    except Exception as error:
+        print(f"Could not fetch Shopify products: {error}")
+        return []
+
+    results = []
+    while True:
+        for product in products:
+            if getattr(product, "status", "active") != "active":
+                continue
+            base_image = product.image.src if getattr(product, "image", None) else ""
+            for variant in getattr(product, "variants", []) or []:
+                variant_title = getattr(variant, "title", "") or ""
+                display_title = product.title if variant_title in {"Default Title", ""} else f"{product.title} - {variant_title}"
+                results.append(
+                    {
+                        "product_id": getattr(product, "id", None),
+                        "variant_id": getattr(variant, "id", None),
+                        "inventory_item_id": getattr(variant, "inventory_item_id", None),
+                        "title": display_title,
+                        "product_title": getattr(product, "title", ""),
+                        "variant_title": variant_title,
+                        "price": parse_money(getattr(variant, "price", 0)),
+                        "cost": get_cost_override_for_item(overrides, product_id=getattr(product, "id", None), variant_id=getattr(variant, "id", None), title=display_title),
+                        "image": base_image,
+                        "sku": getattr(variant, "sku", "") or "",
+                    }
+                )
+        try:
+            if not products.has_next_page():
+                break
+            products = products.next_page()
+        except Exception as error:
+            print(f"Could not load next Shopify product page: {error}")
+            break
+    return results
+
+
+def build_product_cost_rows(limit=250):
+    return sorted(get_active_shopify_products(limit=limit), key=lambda row: str(row.get("title", "")).lower())
+
+
+def build_admin_mobile_sections():
+    return [
+        {"id": "dashboard", "label": "Dashboard", "icon": "Home", "src": "/?embedded=1"},
+        {"id": "scanner", "label": "Scanner", "icon": "Scan", "src": "/employee_portal"},
+        {"id": "employee-orders", "label": "Orders", "icon": "List", "src": "/employee_portal/orders"},
+        {"id": "pending", "label": "Pending", "icon": "Board", "src": "/pending?embedded=1"},
+        {"id": "undelivered", "label": "Undelivered", "icon": "Truck", "src": "/undelivered?embedded=1"},
+        {"id": "product-costs", "label": "Product Costs", "icon": "Cost", "src": "/product-costs?embedded=1"},
+    ]
+
+
+def split_customer_name(name):
+    parts = [part for part in str(name or "").strip().split() if part]
+    if not parts:
+        return "", "Customer"
+    if len(parts) == 1:
+        return parts[0], "Customer"
+    return parts[0], " ".join(parts[1:])
+
+
+def build_employee_invoice_payload(order_name, customer_name, phone, city, address, payment_method, delivery_method, catalog_items, custom_items, discount_amount, delivery_charges, advance_amount):
+    items = []
+    subtotal = 0.0
+    for item in catalog_items:
+        quantity = int(item.get("quantity") or 1)
+        unit_price = parse_money(item.get("price"))
+        line_total = round(unit_price * quantity, 2)
+        subtotal += line_total
+        items.append({"title": item.get("title") or "Product", "quantity": quantity, "image": item.get("image") or "", "unit_price": unit_price, "line_total": line_total})
+    for item in custom_items:
+        quantity = int(item.get("quantity") or 1)
+        unit_price = parse_money(item.get("price"))
+        line_total = round(unit_price * quantity, 2)
+        subtotal += line_total
+        items.append({"title": item.get("title") or "Custom product", "quantity": quantity, "image": item.get("image") or "", "unit_price": unit_price, "line_total": line_total})
+    total = round(subtotal - discount_amount + delivery_charges, 2)
+    balance_due = round(max(total - advance_amount, 0), 2)
+    return {
+        "order_id": order_name,
+        "customer_name": customer_name,
+        "customer_phone": phone,
+        "customer_city": city,
+        "customer_address": address,
+        "status": "Created",
+        "items": items,
+        "totals": {
+            "subtotal": round(subtotal, 2),
+            "discount": round(discount_amount, 2),
+            "delivery_charges": round(delivery_charges, 2),
+            "total": round(total, 2),
+            "advance_paid": round(advance_amount, 2),
+            "balance_due": round(balance_due, 2),
+        },
+    }
+
+
+def create_shopify_employee_order(payload):
+    customer_name = (payload.get("customer_name") or "").strip()
+    phone = (payload.get("phone") or "").strip()
+    city = (payload.get("city") or "").strip()
+    address = (payload.get("address") or "").strip()
+    payment_method = (payload.get("payment_method") or "").strip()
+    delivery_method = (payload.get("delivery_method") or "").strip()
+    discount_amount = parse_money(payload.get("discount_amount"))
+    delivery_charges = parse_money(payload.get("delivery_charges"))
+    advance_amount = parse_money(payload.get("advance_amount"))
+    catalog_items = payload.get("catalog_items") or []
+    custom_items = payload.get("custom_items") or []
+    extra_notes = (payload.get("notes") or "").strip()
+    if not customer_name:
+        raise ValueError("Customer name is required.")
+    if not phone:
+        raise ValueError("Phone number is required.")
+    if payment_method.lower() == "partial" and advance_amount <= 0:
+        raise ValueError("Enter the advance paid amount for partial payment.")
+
+    line_items = []
+    normalized_custom_items = []
+    for item in catalog_items:
+        variant_id = item.get("variant_id")
+        quantity = int(item.get("quantity") or 1)
+        if not variant_id or quantity < 1:
+            continue
+        line_item = {"variant_id": int(variant_id), "quantity": quantity}
+        override_price = parse_money(item.get("price"))
+        if override_price > 0:
+            line_item["original_unit_price"] = override_price
+        line_items.append(line_item)
+    for item in custom_items:
+        title = (item.get("title") or "").strip()
+        if not title:
+            continue
+        custom_item = {"title": title, "price": parse_money(item.get("price")), "quantity": int(item.get("quantity") or 1), "image": (item.get("image") or "").strip()}
+        normalized_custom_items.append(custom_item)
+        line_items.append({"title": title, "original_unit_price": custom_item["price"], "quantity": custom_item["quantity"]})
+    if not line_items:
+        raise ValueError("At least one product is required.")
+
+    first_name, last_name = split_customer_name(customer_name)
+    note_lines = [
+        "Created from Alkaramat employee portal.",
+        f"Payment method: {payment_method or 'Not specified'}",
+        f"Delivery method: {delivery_method or 'Not specified'}",
+        f"Phone: {phone or 'Not provided'}",
+    ]
+    if extra_notes:
+        note_lines.append(f"Notes: {extra_notes}")
+    draft_order = shopify.DraftOrder()
+    draft_order.line_items = line_items
+    draft_order.note = "\n".join(note_lines)
+    draft_order.tags = "Employee Portal"
+    draft_order.shipping_address = {"first_name": first_name, "last_name": last_name or "Customer", "phone": phone, "address1": address, "city": city, "country": "Pakistan"}
+    draft_order.billing_address = draft_order.shipping_address
+    draft_order.customer = {"first_name": first_name, "last_name": last_name or "Customer", "phone": phone}
+    if discount_amount > 0:
+        draft_order.applied_discount = {"description": "Employee portal discount", "value_type": "fixed_amount", "value": discount_amount, "amount": discount_amount, "title": "Employee portal discount"}
+    if delivery_charges > 0:
+        draft_order.shipping_line = {"title": "Delivery Charges", "price": delivery_charges, "custom": True}
+    if not draft_order.save():
+        raise RuntimeError(json.dumps(getattr(draft_order, "errors", {}) or {"error": "Could not save draft order"}))
+    draft_order.complete({"payment_pending": True})
+    refreshed = shopify.DraftOrder.find(draft_order.id)
+    order_id = getattr(refreshed, "order_id", None) or getattr(draft_order, "order_id", None)
+    order_name = getattr(refreshed, "name", "") or getattr(draft_order, "name", "") or ""
+    if not order_id:
+        raise RuntimeError("Shopify created the draft, but the completed order ID did not come back.")
+    return {
+        "draft_order_id": getattr(draft_order, "id", None),
+        "order_id": order_id,
+        "order_name": order_name,
+        "invoice": build_employee_invoice_payload(order_name, customer_name, phone, city, address, payment_method, delivery_method, catalog_items, normalized_custom_items, discount_amount, delivery_charges, advance_amount),
+    }
+
+
+@app.route("/orders")
+def mobile_orders():
+    return render_template("orders.html", all_orders=build_pending_orders_mobile_data(), employee_portal_mode=False)
+
+
+@app.route("/employee_portal", methods=["GET", "POST"])
+def employee_portal():
+    next_url = employee_portal_safe_next_url(request.values.get("next"))
+    if request.method == "POST":
+        submitted_password = (request.form.get("password") or "").strip()
+        if submitted_password == EMPLOYEE_PORTAL_PASSWORD:
+            session[EMPLOYEE_PORTAL_SESSION_KEY] = True
+            return redirect(next_url)
+        return render_template("employee_portal.html", view="login", login_error="Wrong password. Try again.", next_url=next_url), 401
+    if not employee_portal_is_authenticated():
+        return render_template("employee_portal.html", view="login", login_error="", next_url=next_url)
+    return render_template("employee_portal.html", view="portal", employee_orders=build_employee_portal_orders())
+
+
+@app.route("/employee_portal/orders")
+def employee_portal_orders():
+    if not employee_portal_is_authenticated():
+        return redirect(url_for("employee_portal", next="/employee_portal/orders"))
+    return render_template("orders.html", all_orders=build_pending_orders_mobile_data(), employee_portal_mode=True)
+
+
+@app.route("/employee_portal/products")
+def employee_portal_products():
+    if not employee_portal_is_authenticated():
+        return jsonify({"success": False, "error": "Unauthorized"}), 401
+    return jsonify({"success": True, "products": get_active_shopify_products()})
+
+
+@app.route("/employee_portal/create-order", methods=["POST"])
+def employee_portal_create_order():
+    if not employee_portal_is_authenticated():
+        return jsonify({"success": False, "error": "Unauthorized"}), 401
+    data = request.get_json() or {}
+    try:
+        result = create_shopify_employee_order(data)
+        try:
+            order_details[:] = asyncio.run(getShopifyOrders())
+        except Exception as refresh_error:
+            print(f"Employee order created, but refresh failed: {refresh_error}")
+        return jsonify(
+            {
+                "success": True,
+                "draft_order_id": result.get("draft_order_id"),
+                "order_id": result.get("order_id"),
+                "order_name": result.get("order_name"),
+                "invoice": result.get("invoice"),
+            }
+        )
+    except Exception as error:
+        print(f"Employee order create failed: {error}")
+        return jsonify({"success": False, "error": str(error)}), 400
+
+
+@app.route("/employee_portal/logout", methods=["POST"])
+def employee_portal_logout():
+    session.pop(EMPLOYEE_PORTAL_SESSION_KEY, None)
+    return redirect(url_for("employee_portal"))
+
+
+@app.route("/employee_portal/updates")
+def employee_portal_updates():
+    if not employee_portal_is_authenticated():
+        return jsonify({"success": False, "error": "Unauthorized"}), 401
+    orders = build_employee_portal_orders()
+    summaries = [
+        {
+            "id": f"{order.get('source')}:{order.get('order_id')}",
+            "order_id": order.get("order_id"),
+            "source": order.get("source"),
+            "created_at": order.get("created_at"),
+        }
+        for order in orders
+    ]
+    summaries.sort(key=lambda item: parse_date_for_sort(item.get("created_at")), reverse=True)
+    return jsonify(
+        {
+            "success": True,
+            "count": len(summaries),
+            "order_ids": [item["id"] for item in summaries],
+            "latest": summaries[:6],
+            "generated_at": datetime.now().isoformat(timespec="seconds"),
+        }
+    )
+
+
+@app.route("/employee_portal/report", methods=["POST"])
+def employee_portal_report():
+    if not employee_portal_is_authenticated():
+        return jsonify({"success": False, "error": "Unauthorized"}), 401
+    data = request.get_json() or {}
+    mode = (data.get("mode") or "").strip().lower()
+    scanned_orders = data.get("orders") or []
+    if mode not in {"dispatch", "return"}:
+        return jsonify({"success": False, "error": "Invalid report mode."}), 400
+    if not scanned_orders:
+        return jsonify({"success": False, "error": "No scanned orders provided."}), 400
+    tag_name = "Dispatched" if mode == "dispatch" else "Return Received"
+    tagged_count = 0
+    skipped_count = 0
+    failed = []
+    seen_order_ids = set()
+    for entry in scanned_orders:
+        shopify_id = str(entry.get("shopify_id") or "").strip()
+        if not shopify_id or shopify_id in seen_order_ids:
+            skipped_count += 1
+            continue
+        seen_order_ids.add(shopify_id)
+        try:
+            if apply_shopify_order_tag(shopify_id, tag_name, include_date=True):
+                tagged_count += 1
+            else:
+                skipped_count += 1
+        except Exception as error:
+            failed.append({"order_id": entry.get("order_id") or shopify_id, "error": str(error)})
+    return jsonify(
+        {
+            "success": not failed,
+            "tagged_count": tagged_count,
+            "skipped_count": skipped_count,
+            "failed_count": len(failed),
+            "failed": failed[:5],
+            "tagged_by_source": {"Alkaramat": tagged_count} if tagged_count else {},
+            "tag_name": tag_name,
+        }
+    ), 207 if failed else 200
+
+
+@app.route("/dispatch", methods=["GET"])
+def dispatch_orders():
+    return jsonify(build_employee_portal_orders())
+
+
+@app.route("/return", methods=["GET"])
+def return_orders():
+    return jsonify(build_employee_portal_orders())
+
+
+@app.route("/scan", methods=["GET", "POST"])
+def employee_scan_lookup():
+    search_term = (request.args.get("term") or request.form.get("search_term") or "").split(",")[0].strip()
+    if not search_term:
+        return render_template("scan.html")
+    order_found = find_employee_portal_order(search_term)
+    if request.method == "POST":
+        if order_found:
+            order_found = {
+                "line_items": [
+                    {"product_title": item.get("title"), "quantity": item.get("quantity"), "image_src": item.get("image")}
+                    for item in order_found.get("items", [])
+                ]
+            }
+        return render_template("scan.html", search_term=search_term, order_found=order_found)
+    return jsonify(order_found if order_found else {"error": "Order not found"}), 200 if order_found else 404
+
+
+@app.route("/update_status", methods=["POST"])
+def update_status():
+    data = request.get_json() or {}
+    order_id = str(data.get("order_id") or "")
+    tracking_number = str(data.get("tracking_number") or "N/A")
+    status = str(data.get("status") or "")
+    key = f"{order_id}:{tracking_number}"
+    upsert_order_status(key, status)
+    response_message = f"Status updated to {status} for {order_id} ({tracking_number})"
+
+    if status == "Delivered in Lahore":
+        matching_order = next((order for order in order_details if normalize_scan_term(order.get("order_num")) == normalize_scan_term(order_id)), None)
+        if matching_order and matching_order.get("order_id"):
+            try:
+                if apply_shopify_order_tag(matching_order["order_id"], "Delivered in Lahore"):
+                    response_message = f"{response_message}. Shopify tag applied: Delivered in Lahore."
+            except Exception as error:
+                print(f"Could not apply Lahore tag: {error}")
+    return jsonify({"message": response_message})
+
+
+@app.route("/employee_status/approve", methods=["POST"])
+def approve_employee_status():
+    data = request.get_json() or {}
+    order_id = str(data.get("order_id") or "")
+    tracking_number = str(data.get("tracking_number") or "N/A")
+    requested_status = str(data.get("requested_status") or "").strip()
+    key = f"{order_id}:{tracking_number}"
+    if requested_status not in {"Delivered in Lahore", "Cancelled by Employee"}:
+        return jsonify({"success": False, "error": "Unsupported employee approval status."}), 400
+    matching_order = next((order for order in order_details if normalize_scan_term(order.get("order_num")) == normalize_scan_term(order_id)), None)
+    if not matching_order or not matching_order.get("order_id"):
+        return jsonify({"success": False, "error": "Shopify order not found."}), 404
+    try:
+        tag_name = "Delivered in Lahore" if requested_status == "Delivered in Lahore" else "Cancelled by Employee"
+        apply_shopify_order_tag(matching_order["order_id"], tag_name, include_date=True)
+        delete_order_status(key)
+        return jsonify({"success": True, "message": f"Approved {requested_status} for {order_id}.", "warnings": []})
+    except Exception as error:
+        return jsonify({"success": False, "error": str(error)}), 500
+
+
+@app.route("/product-costs")
+def product_costs():
+    return render_template("product_costs.html", products=build_product_cost_rows())
+
+
+@app.route("/product-costs/update", methods=["POST"])
+def update_product_costs():
+    data = request.get_json() or {}
+    product_id = data.get("product_id")
+    variant_id = data.get("variant_id")
+    title = (data.get("title") or "").strip()
+    submitted_price = parse_money(data.get("price", 0))
+    submitted_cost = parse_money(data.get("cost", 0))
+    if not variant_id and not product_id and not title:
+        return jsonify({"success": False, "error": "Product identity is required."}), 400
+    try:
+        if variant_id:
+            variant = shopify.Variant.find(int(variant_id))
+            variant.price = submitted_price
+            if not variant.save():
+                raise RuntimeError("Shopify price update failed.")
+        overrides = load_product_cost_overrides()
+        set_cost_override(overrides, product_id=product_id, variant_id=variant_id, title=title, price=submitted_price, cost=submitted_cost)
+        if not save_product_cost_overrides(overrides):
+            raise RuntimeError("Could not save cost override.")
+        return jsonify({"success": True, "price": submitted_price, "cost": submitted_cost})
+    except Exception as error:
+        return jsonify({"success": False, "error": str(error)}), 500
+
+
+@app.route("/admin_portal", methods=["GET", "POST"])
+def admin_portal():
+    selected = (request.values.get("section") or "dashboard").strip().lower()
+    sections = build_admin_mobile_sections()
+    if selected not in {section["id"] for section in sections}:
+        selected = "dashboard"
+    if request.method == "POST":
+        submitted_password = (request.form.get("password") or "").strip()
+        if submitted_password == ADMIN_PORTAL_PASSWORD:
+            session[ADMIN_PORTAL_SESSION_KEY] = True
+            return redirect(url_for("admin_portal", section=selected))
+        return render_template("admin_portal.html", view="login", login_error="Wrong password. Try again.", sections=sections, selected_section=selected), 401
+    if not admin_portal_is_authenticated():
+        return render_template("admin_portal.html", view="login", login_error="", sections=sections, selected_section=selected)
+    return render_template("admin_portal.html", view="portal", sections=sections, selected_section=selected, employee_approvals=build_employee_approval_items())
+
+
+@app.route("/admin_portal/logout", methods=["POST"])
+def admin_portal_logout():
+    session.pop(ADMIN_PORTAL_SESSION_KEY, None)
+    return redirect(url_for("admin_portal"))
+
+
+@app.route("/employee_portal-manifest.webmanifest")
+def employee_portal_manifest():
+    return send_from_directory("static", "employee-portal.webmanifest", mimetype="application/manifest+json")
+
+
+@app.route("/employee_portal-sw.js")
+def employee_portal_service_worker():
+    return send_from_directory("static", "employee-portal-sw.js", mimetype="application/javascript")
+
+
+@app.route("/admin_portal-manifest.webmanifest")
+def admin_portal_manifest():
+    return send_from_directory("static", "admin-portal.webmanifest", mimetype="application/manifest+json")
+
+
+@app.route("/admin_portal-sw.js")
+def admin_portal_service_worker():
+    return send_from_directory("static", "admin-portal-sw.js", mimetype="application/javascript")
+
+
 @app.route('/scanner')
 def scanner_page():
     return render_template('scanner.html')
@@ -1077,6 +1882,7 @@ password = os.getenv('PASSWORD')
 shopify.ShopifyResource.set_site(shop_url)
 shopify.ShopifyResource.set_user(api_key)
 shopify.ShopifyResource.set_password(password)
+init_db()
 
 try:
     print("Starting initial fetch...")
