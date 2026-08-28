@@ -1,425 +1,175 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
-
-    <meta charset="utf-8">
-    <meta http-equiv="X-UA-Compatible" content="IE=edge">
-    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
-    <meta name="description" content="">
-    <meta name="author" content="">
-
-    <title>Daily Tasker - Pending Orders</title>
-
-    <link href="static/assets/vendor/fontawesome-free/css/all.min.css" rel="stylesheet" type="text/css">
-    <link
-        href="https://fonts.googleapis.com/css?family=Nunito:200,200i,300,300i,400,400i,600,600i,700,700i,800,800i,900,900i"
-        rel="stylesheet">
-
-    <link href="static/assets/css/sb-admin-2.min.css" rel="stylesheet">
-
-    <link href="static/assets/vendor/datatables/dataTables.bootstrap4.min.css" rel="stylesheet">
- <style>
-        .status-buttons {
-            display: none;
-            margin-top: 10px;
-        }
-        .status-buttons .btn {
-            margin-right: 5px;
-            margin-bottom: 5px;
-        }
-    </style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Alkaramat - Pending Orders</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=Space+Mono:wght@500;700&display=swap" rel="stylesheet">
+  <style>
+    :root { --bg:#f6f7fb; --panel:#fff; --ink:#162033; --muted:#858b9c; --line:#e2e7f2; --blue:#4e73df; --green:#16b981; --red:#e74a3b; --gold:#e4a900; --shadow:0 14px 34px rgba(22,32,51,.08); }
+    * { box-sizing:border-box; }
+    body { margin:0; min-height:100vh; background:var(--bg); color:var(--ink); font-family:'DM Sans',sans-serif; }
+    .layout { display:grid; grid-template-columns:250px minmax(0,1fr); min-height:100vh; }
+    .side { background:#234c9f; color:#fff; padding:24px 18px; display:flex; flex-direction:column; gap:22px; position:sticky; top:0; height:100vh; }
+    .brand { font-family:'Space Mono',monospace; font-size:22px; font-weight:800; line-height:1.05; }
+    .nav { display:flex; flex-direction:column; gap:8px; }
+    .nav a, .refresh-link { color:rgba(255,255,255,.86); text-decoration:none; padding:12px 14px; border-radius:10px; display:flex; align-items:center; gap:10px; font-weight:700; border:0; background:transparent; font:inherit; cursor:pointer; text-align:left; }
+    .nav a:hover, .refresh-link:hover, .nav a.active { background:rgba(255,255,255,.13); color:#fff; }
+    .main { min-width:0; padding:24px; }
+    .topbar { display:flex; align-items:center; justify-content:space-between; gap:18px; margin-bottom:18px; }
+    .title h1 { margin:0; font-size:28px; }
+    .title p { margin:4px 0 0; color:var(--muted); font-size:13px; }
+    .stats { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; margin-bottom:18px; }
+    .stat { background:var(--panel); border:1px solid var(--line); border-radius:16px; box-shadow:var(--shadow); padding:16px; }
+    .stat span { display:block; color:var(--muted); font-size:11px; font-weight:800; text-transform:uppercase; letter-spacing:.06em; }
+    .stat strong { display:block; margin-top:6px; font-size:24px; font-family:'Space Mono',monospace; }
+    .grid { display:grid; grid-template-columns:minmax(360px,.9fr) minmax(0,1.1fr); gap:18px; align-items:start; }
+    .panel { background:var(--panel); border:1px solid var(--line); border-radius:18px; box-shadow:var(--shadow); overflow:hidden; }
+    .panel-head { padding:16px 18px; border-bottom:1px solid var(--line); display:flex; align-items:center; justify-content:space-between; gap:12px; }
+    .panel-head h2 { margin:0; font-size:18px; }
+    .muted { color:var(--muted); font-size:12px; }
+    .items-list, .orders-list { padding:14px; display:flex; flex-direction:column; gap:10px; }
+    .summary-row { display:grid; grid-template-columns:64px 1fr auto; gap:12px; align-items:center; padding:12px; border:1px solid var(--line); border-radius:14px; background:#fbfcff; }
+    .thumb { width:64px; height:64px; border-radius:12px; object-fit:cover; background:#edf1f7; }
+    .summary-title { font-weight:800; line-height:1.25; }
+    .status-line { margin-top:5px; display:flex; gap:5px; flex-wrap:wrap; }
+    .pill { display:inline-flex; align-items:center; padding:4px 9px; border-radius:999px; font-size:11px; font-weight:800; background:#edf2ff; color:#3153b7; }
+    .qty { font-family:'Space Mono',monospace; font-size:26px; font-weight:800; color:var(--blue); }
+    .order-card { border:1px solid var(--line); border-radius:16px; background:#fff; overflow:hidden; }
+    .order-head { padding:14px; display:flex; gap:12px; align-items:flex-start; justify-content:space-between; border-bottom:1px solid #eef2f8; }
+    .order-id { color:var(--blue); font-weight:900; text-decoration:none; font-family:'Space Mono',monospace; }
+    .order-body { padding:14px; display:grid; grid-template-columns:1fr 260px; gap:14px; }
+    .product-grid { display:flex; flex-wrap:wrap; gap:10px; }
+    .product { width:92px; }
+    .product img { width:72px; height:72px; border-radius:10px; object-fit:cover; background:#edf1f7; display:block; }
+    .product-title { margin-top:6px; font-size:11px; font-weight:700; line-height:1.25; }
+    .track { display:block; max-width:82px; margin-top:4px; font-family:'Space Mono',monospace; font-size:9px; color:var(--blue); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .customer { border:1px solid var(--line); border-radius:14px; padding:12px; background:#f8faff; }
+    .actions { margin-top:10px; display:flex; gap:8px; flex-wrap:wrap; }
+    button, .btn { border:1px solid var(--line); background:#fff; border-radius:10px; padding:9px 12px; font-weight:800; font-family:inherit; cursor:pointer; text-decoration:none; color:var(--ink); }
+    .btn-primary { background:var(--blue); color:#fff; border-color:var(--blue); }
+    @media (max-width:1000px) { .grid, .order-body { grid-template-columns:1fr; } .stats { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+    @media (max-width:800px) { .layout { grid-template-columns:1fr; } .side { position:relative; height:auto; } .nav { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); } .main { padding:16px; } .topbar { flex-direction:column; align-items:stretch; } }
+  </style>
 </head>
-
-<body id="page-top">
-
-    <div id="wrapper">
-
-        {% include 'header.html' %}
-        <div id="content-wrapper" class="d-flex flex-column">
-
-            <div id="content">
-
-                <nav class="navbar navbar-expand navbar-light bg-white topbar mb-4 static-top shadow">
-
-                    <form class="form-inline">
-                        <button id="sidebarToggleTop" class="btn btn-link d-md-none rounded-circle mr-3">
-                            <i class="fa fa-bars"></i>
-                        </button>
-                    </form>
-
-                    <ul class="navbar-nav ml-auto">
-                         <div class="topbar-divider d-none d-sm-block"></div>
-
-                        <li class="nav-item dropdown no-arrow">
-                            <a class="nav-link dropdown-toggle" href="#" id="userDropdown" role="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
-                                <span class="mr-2 d-none d-lg-inline text-gray-600 small">User</span>
-                                <img class="img-profile rounded-circle" src="static/img/undraw_profile.svg">
-                            </a>
-                        </li>
-
-                    </ul>
-
-                </nav>
-                <div class="container-fluid">
-
-
-                    <div class="card shadow mb-4">
-                        <div class="card-header py-3">
-                            <h6 class="m-0 font-weight-bold text-primary">Pending Orders </h6>
-                        </div>
-                      <div style="display: flex; justify-content: center; gap: 20px;">
-    <div class="table-responsive" style="flex: 1;">
-        <table class="table table-bordered" width="100%" cellspacing="0">
-            <thead>
-                <tr>
-                    <th>Image</th>
-                    <th style="width: 30%;">Title</th>
-                    <th>Quantity</th>
-                    <th> </th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for item in pending_items[:half] %}
-<tr data-statuses='{{ item.statuses | default({}) | tojson | safe }}'>
-
-    <td>
-        <img src="{{ item.item_image }}" width="75" height="75">
-    </td>
-    <td contenteditable="true" style="cursor:text;">
-        {{ item.item_title }}
-    </td>
-    <td class="qty-cell" contenteditable="true" style="cursor:text; text-align: center;">
-            {{ item.quantity }}
-
-    </td>
-    <td style="text-align:center;">
-        <button onclick="this.closest('tr').style.display='none'" class="btn btn-sm btn-primary">
-    &#10003;
-</button>
-
-    </td>
-</tr>
-
-                {% endfor %}
-            </tbody>
-        </table>
-    </div>
-
-    <div class="table-responsive" style="flex: 1;">
-        <table class="table table-bordered" width="100%" cellspacing="0">
-            <thead>
-                <tr>
-                    <th>Image</th>
-                    <th style="width: 30%;">Title</th>
-                    <th>Quantity</th>
-                    <th> </th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for item in pending_items[half:] %}
-<tr data-statuses='{{ item.statuses | default({}) | tojson | safe }}'>
-
-    <td>
-        <img src="{{ item.item_image }}" width="75" height="75">
-    </td>
-    <td contenteditable="true" style="cursor:text;">
-        {{ item.item_title }}
-    </td>
-        <td class="qty-cell" contenteditable="true" style="cursor:text; text-align: center;">
-            {{ item.quantity }}
-
-    </td>
-
-    <td style="text-align:center;">
-        <button onclick="this.closest('tr').style.display='none'" class="btn btn-sm btn-primary">
-    &#10003;
-</button>
-
-    </td>
-</tr>
-
-                {% endfor %}
-            </tbody>
-        </table>
-
-    </div>
-
-
-</div>
-<div class="mb-3 d-flex justify-content-between">
-    <div>
-        <button class="btn btn-warning" onclick="hideBooked()">Hide BOOKED</button>
-        <button class="btn btn-info" onclick="filterBooked()">Filter BOOKED</button>
-        <button class="btn btn-secondary" onclick="resetView()">Reset</button>
-    </div>
-    <div>
-        <button class="btn btn-dark mr-2" onclick="bulkPrintLabels()">Bulk Print Labels</button>
-        <button class="btn btn-success" onclick="bookSelectedWithPostEx()">Book via PostEx</button>
-    </div>
-</div>
-
-
-
-                        <div style="overflow-x:auto;" class="card-body">
-                            <div class="table-responsive">
-
-                                <table class="table table-bordered" id="dataTable" width="100%" cellspacing="0">
-    <thead>
-        <tr>
-            <th><input type="checkbox" id="selectAll"></th>
-            <th>Order#</th>
-            <th>Total</th>
-            <th>Total Items</th>
-            <th style="display: none;">Hidden</th>
-            <th style="display: none;">Hidden</th>
-        </tr>
-    </thead>
-    <tfoot>
-        <tr>
-            <th></th>
-            <th>Order#</th>
-            <th>Total</th>
-            <th>Total Items</th>
-            <th style="display: none;">Hidden</th>
-            <th style="display: none;">Hidden</th>
-        </tr>
-    </tfoot>
-    <tbody>
-        {% for order in all_orders %}
-            <tr>
-                <td style="text-align: center; vertical-align: middle;">
-    {% set tracking_num = 'N/A' %}
-    {% if order.tracking_number and order.tracking_number != 'N/A' %}
-        {% set tracking_num = order.tracking_number %}
-    {% elif order.items_list and order.items_list[0].tracking_number != 'N/A' %}
-        {% set tracking_num = order.items_list[0].tracking_number %}
-    {% endif %}
-
-    <input type="checkbox" class="order-checkbox" value="{{ order.order_id }}" data-tracking="{{ tracking_num }}">
-</td>
-                <td>{{ order.order_via }} <br> <a href="{{order.order_link}}"><p>{{ order.order_num }}</p></a> <br>{{ order.date }}</td>
-                <td>{{ order.total_price }}</td>
-                <td>
-                    <table class="table table-sm nested-table">
-                        <thead>
-                            <tr>
-                                <th>Image</th>
-                                <th style="width: 30%;">Title</th>
-                                <th style="width: 5%;">Quantity</th>
-                                <th style="width: 20%;" >Tracking</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {% for item in order.items_list %}
-                                <tr>
-                                    <td><img src="{{ item.item_image }}" width="100" height="100"></td>
-                                    <td>{{ item.item_title }}</td>
-                                    <td>{{ item.quantity }}</td>
-                                    <td>
-                                        {% if item.tracking_number != 'N/A' %}
-                                            <a href="track/{{ item.tracking_number }}" target="_blank">{{ item.tracking_number }}</a>
-                                        {% else %}
-                                            N/A
-                                        {% endif %}
-                                        <br>
-                                        {{ item.status }}
-                                    </td>
-                                </tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
-                </td>
-                <td></td>
-                <td></td>
-            </tr>
-        {% endfor %}
-    </tbody>
-</table>
-
-
-                            </div>
-                        </div>
-                    </div>
- <div class="totals">
-    <p>Total Items: <span id="totalItems">0.00</span></p>
-    <p>Total Value: <span id="totalValue">0.00</span></p>
-</div>
-                </div>
-                </div>
-            <footer class="sticky-footer bg-white">
-                <div class="container my-auto">
-                    <div class="copyright text-center my-auto">
-                        <span>Copyright &copy; Your Website 2020</span>
-                    </div>
-                </div>
-            </footer>
-            </div>
+<body>
+  <div class="layout">
+    <aside class="side">
+      <div class="brand">Alkaramat<br>Ops</div>
+      <nav class="nav">
+        <a href="/">Dashboard</a>
+        <a class="active" href="/pending">Pending Orders</a>
+        <a href="/employee_portal">Employee Portal</a>
+        <a href="/admin_portal">Admin Portal</a>
+        <a href="/orders">Mobile Orders</a>
+        <a href="/product-costs">Product Costs</a>
+        <a href="/scanner">Classic Scanner</a>
+        <a href="/undelivered">Undelivered</a>
+        <button class="refresh-link" type="button" onclick="refreshData()">Refresh Data</button>
+      </nav>
+    </aside>
+    <main class="main">
+      <div class="topbar">
+        <div class="title">
+          <h1>Pending Orders</h1>
+          <p>{{ all_orders|length }} orders and {{ pending_items|length }} unique items waiting</p>
         </div>
-    <a class="scroll-to-top rounded" href="#page-top">
-        <i class="fas fa-angle-up"></i>
-    </a>
-
-    <script src="static/assets/vendor/jquery/jquery.min.js"></script>
-    <script src="static/assets/vendor/bootstrap/js/bootstrap.bundle.min.js"></script>
-
-    <script src="static/assets/vendor/jquery-easing/jquery.easing.min.js"></script>
-
-    <script src="static/assets/js/sb-admin-2.min.js"></script>
-
-    <script src="static/assets/vendor/datatables/jquery.dataTables.min.js"></script>
-    <script src="static/assets/vendor/datatables/dataTables.bootstrap4.min.js"></script>
-
-    <script src="static/assets/js/demo/datatables-demo.js"></script>
-    <script src="static/assets/js/track.js"></script>
-
-<script>
-    $(document).ready(function() {
-        if ($.fn.DataTable.isDataTable('#dataTable')) {
-            $('#dataTable').DataTable().destroy();
-        }
-
-        // Initialize the DataTable
-        $('#dataTable').DataTable({
-            "columnDefs": [
-                { "searchable": false, "targets": [-1, 4] },
-                { "orderable": false, "targets": 0 } // Disable sorting on checkbox column
-            ]
-        });
-
-        // Select All functionality
-        $('#selectAll').click(function() {
-            var checked = this.checked;
-            $('.order-checkbox').each(function() {
-                this.checked = checked;
-            });
-        });
-    });
-
-    // Function to handle Booking
+        <div class="actions">
+          <button type="button" onclick="window.print()">Print</button>
+          <button class="btn-primary" type="button" onclick="bookSelectedWithPostEx()">Book selected</button>
+        </div>
+      </div>
+      <section class="stats">
+        <div class="stat"><span>Orders</span><strong>{{ all_orders|length }}</strong></div>
+        <div class="stat"><span>Unique Items</span><strong>{{ pending_items|length }}</strong></div>
+        <div class="stat"><span>Paid Value</span><strong>PKR {{ summary.paid_pending_value|format_number }}</strong></div>
+        <div class="stat"><span>Unpaid Value</span><strong>PKR {{ summary.unpaid_pending_value|format_number }}</strong></div>
+      </section>
+      <div class="grid">
+        <section class="panel">
+          <div class="panel-head"><h2>Item Summary</h2><span class="muted">Grouped by product</span></div>
+          <div class="items-list">
+            {% for item in pending_items %}
+            <div class="summary-row">
+              <img class="thumb" src="{{ item.item_image }}" alt="">
+              <div>
+                <div class="summary-title">{{ item.item_title }}</div>
+                <div class="status-line">
+                  {% for status, qty in item.statuses.items() %}
+                  <span class="pill">{{ status }}: {{ qty }}</span>
+                  {% endfor %}
+                </div>
+              </div>
+              <div class="qty">{{ item.quantity }}</div>
+            </div>
+            {% else %}
+            <div class="muted">No pending items right now.</div>
+            {% endfor %}
+          </div>
+        </section>
+        <section class="panel">
+          <div class="panel-head"><h2>Order Queue</h2><span class="muted">Pending Shopify orders</span></div>
+          <div class="orders-list">
+            {% for order in all_orders %}
+            <div class="order-card">
+              <div class="order-head">
+                <div>
+                  <label><input type="checkbox" class="order-checkbox" value="{{ order.shopify_id }}"> <a class="order-id" href="{{ order.order_link }}" target="_blank">#{{ order.order_id }}</a></label>
+                  <div class="muted">{{ order.date }}</div>
+                </div>
+                <span class="pill">{{ order.status }}</span>
+              </div>
+              <div class="order-body">
+                <div class="product-grid">
+                  {% for item in order.items_list %}
+                  <div class="product">
+                    <img src="{{ item.item_image }}" alt="">
+                    <div class="product-title">{{ item.item_title }}</div>
+                    <div class="muted">Qty {{ item.quantity }}</div>
+                    {% if item.tracking_number and item.tracking_number != 'N/A' %}<a class="track" href="/track/{{ item.tracking_number }}" target="_blank">{{ item.tracking_number }}</a>{% endif %}
+                  </div>
+                  {% endfor %}
+                </div>
+                <div class="customer">
+                  <strong>{{ order.customer_name }}</strong>
+                  <div class="muted">{{ order.customer_city }}</div>
+                  <div class="muted">{{ order.customer_phone }}</div>
+                  <div class="muted">PKR {{ order.total_price|format_number }}</div>
+                  <div class="actions"><a class="btn" href="tel:{{ order.customer_phone }}">Call</a></div>
+                </div>
+              </div>
+            </div>
+            {% else %}
+            <div class="muted">No pending orders right now.</div>
+            {% endfor %}
+          </div>
+        </section>
+      </div>
+    </main>
+  </div>
+  <script>
+    async function refreshData() {
+      const response = await fetch('/refresh', { method:'POST', headers:{'X-Requested-With':'XMLHttpRequest'} });
+      const result = await response.json().catch(() => ({}));
+      alert(result.message || (response.ok ? 'Refresh complete' : 'Refresh failed'));
+      if (response.ok) location.reload();
+    }
     function bookSelectedWithPostEx() {
-        var selectedIds = [];
-        $('.order-checkbox:checked').each(function() {
-            selectedIds.push($(this).val());
-        });
-
-        if (selectedIds.length === 0) {
-            alert('Please select at least one order to book.');
-            return;
-        }
-
-        // Redirect to the prep page with IDs as query params or via a hidden form
-        // Using a hidden form is safer for large lists
-        var form = document.createElement('form');
-        form.method = 'POST';
-        form.action = '/prepare_postex_booking'; // New Route
-
-        var input = document.createElement('input');
-        input.type = 'hidden';
-        input.name = 'order_ids';
-        input.value = JSON.stringify(selectedIds);
-        form.appendChild(input);
-
-        document.body.appendChild(form);
-        form.submit();
+      const orderIds = [...document.querySelectorAll('.order-checkbox:checked')].map((box) => box.value);
+      if (!orderIds.length) { alert('Select at least one order.'); return; }
+      const form = document.createElement('form');
+      form.method = 'POST';
+      form.action = '/prepare_postex_booking';
+      const input = document.createElement('input');
+      input.type = 'hidden';
+      input.name = 'order_ids';
+      input.value = JSON.stringify(orderIds);
+      form.appendChild(input);
+      document.body.appendChild(form);
+      form.submit();
     }
-</script>
-<script>
-     var table = $('#dataTable').DataTable();
-
-function updateTotals() {
-    var filteredData = table.rows({ filter: 'applied' }).nodes(); // get DOM nodes
-    var totalItems = 0;
-    var totalValue = 0;
-
-    filteredData.each(function (row) {
-        // Get the total column value (index 2)
-        var amount = parseFloat($(row).find('td:eq(2)').text().replace(/,/g, '')) || 0;
-        totalValue += amount;
-
-        // Count quantities
-        $(row).find('td:eq(3) table tbody tr').each(function () {
-            var qtyText = $(this).find('td').eq(2).text().trim();
-            var qty = parseInt(qtyText) || 0;
-            totalItems += qty;
-        });
-    });
-
-    $('#totalItems').text(totalItems);
-    $('#totalValue').text(totalValue.toFixed(2));
-}
-
-    updateTotals();
-
-function hideBooked() {
-    document.querySelectorAll('tr[data-statuses]').forEach(row => {
-        const statusData = JSON.parse(row.getAttribute('data-statuses'));
-        let visibleQty = 0;
-        for (const [status, qty] of Object.entries(statusData)) {
-            // Updated to handle PostEx 'Booked' status as well
-            if (status !== 'CONSIGNMENT BOOKED' && status !== 'Booked') {
-                visibleQty += qty;
-            }
-        }
-        const qtyCell = row.querySelector('.qty-cell');
-        if (qtyCell) qtyCell.textContent = visibleQty;
-        row.style.display = visibleQty === 0 ? 'none' : '';
-    });
-}
-
-function filterBooked() {
-    document.querySelectorAll('tr[data-statuses]').forEach(row => {
-        const statusData = JSON.parse(row.getAttribute('data-statuses'));
-        // Updated to handle PostEx 'Booked' status as well
-        const bookedQty = (statusData['CONSIGNMENT BOOKED'] || 0) + (statusData['Booked'] || 0);
-        const qtyCell = row.querySelector('.qty-cell');
-        if (qtyCell) qtyCell.textContent = bookedQty;
-        row.style.display = bookedQty === 0 ? 'none' : '';
-    });
-}
-
-function resetView() {
-    document.querySelectorAll('tr[data-statuses]').forEach(row => {
-        const statusData = JSON.parse(row.getAttribute('data-statuses'));
-        let totalQty = 0;
-        for (const qty of Object.values(statusData)) {
-            totalQty += qty;
-        }
-        const qtyCell = row.querySelector('.qty-cell');
-        if (qtyCell) qtyCell.textContent = totalQty;
-        row.style.display = '';
-    });
-}
-
-    // --- Bulk Print Function ---
-    function bulkPrintLabels() {
-        var trackingNumbers = [];
-
-        // 1. Gather tracking numbers from checked boxes
-        $('.order-checkbox:checked').each(function() {
-            var tracking = $(this).data('tracking');
-            // Ensure tracking is valid (not N/A, not empty)
-            if (tracking && tracking !== 'N/A' && tracking !== 'None') {
-                trackingNumbers.push(tracking);
-            }
-        });
-
-        if (trackingNumbers.length === 0) {
-            alert('No booked orders selected. Please select orders that have a Tracking Number.');
-            return;
-        }
-
-        // 2. Process in chunks of 10 (PostEx API Limit)
-        var chunkSize = 10;
-        for (var i = 0; i < trackingNumbers.length; i += chunkSize) {
-            var chunk = trackingNumbers.slice(i, i + chunkSize);
-            var trackingStr = chunk.join(',');
-
-            // 3. Open Print Route in new window/tab
-            window.open('/print_labels?tracking_numbers=' + trackingStr, '_blank');
-        }
-    }
-</script>
-
+  </script>
 </body>
 </html>

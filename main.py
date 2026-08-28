@@ -11,6 +11,7 @@ import random
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from flask import Flask, render_template, jsonify, request, flash, redirect, url_for, abort, session, send_from_directory
+from markupsafe import Markup
 from datetime import datetime
 import pymssql, shopify
 import aiohttp
@@ -52,6 +53,52 @@ def parse_money(value, default=0.0):
         return round(float(value or default), 2)
     except (TypeError, ValueError):
         return round(float(default), 2)
+
+
+def format_number(value):
+    try:
+        return f"{int(float(value)):,}"
+    except (TypeError, ValueError):
+        return str(value or 0)
+
+
+app.jinja_env.filters["format_number"] = format_number
+
+
+_TAG_STYLES = {
+    "Call Courier": "background:#ede7f6;color:#4527a0",
+    "Leopards": "background:#e6f6f8;color:#0a5c6e",
+    "Order Confirmed": "background:#e8f5e9;color:#1b5e20",
+    "Fulfilment Not Set": "background:#fff8e1;color:#e65100",
+    "No Throw": "background:#fce4ec;color:#880e4f",
+    "Lahore": "background:#fff3cd;color:#8b5a00",
+}
+
+
+def tag_style(label):
+    return _TAG_STYLES.get(label, "background:#e8eaf6;color:#283593")
+
+
+def status_badge(label):
+    normalized = normalize_status_bucket(label)
+    class_name = "sb-mixed"
+    if normalized == "Booked":
+        class_name = "sb-booked"
+    elif normalized == "Un-Booked":
+        class_name = "sb-unbooked"
+    elif normalized == "Delivered":
+        class_name = "sb-delivered"
+    elif normalized == "Out For Delivery":
+        class_name = "sb-ofd"
+    elif "Return" in normalized:
+        class_name = "sb-return"
+    elif normalized in {"Undelivered", "Being Return"}:
+        class_name = "sb-attention"
+    return Markup(f'<span class="sbadge {class_name}">{normalized}</span>')
+
+
+app.jinja_env.globals["tag_style"] = tag_style
+app.jinja_env.globals["status_badge"] = status_badge
 
 
 def parse_date_for_sort(value):
@@ -743,63 +790,8 @@ async def process_order(session, order):
 
 @app.route('/pending')
 def pending_orders():
-    all_orders = []
-    pending_items_dict = {}
-    global order_details
-
-    for shopify_order in order_details:
-        if not shopify_order: continue
-
-        if shopify_order.get('status') in ['CONSIGNMENT BOOKED', 'Un-Booked', 'Booked / Fulfilled']:
-            shopify_items_list = [
-                {
-                    'item_image': item['image_src'],
-                    'item_title': item['product_title'],
-                    'quantity': item['quantity'],
-                    'tracking_number': item['tracking_number'],
-                    'status': item['status']
-                }
-                for item in shopify_order['line_items']
-            ]
-
-            shopify_order_data = {
-                'order_link': shopify_order['order_link'],
-                'order_via': 'Shopify',
-                'order_id': shopify_order['order_id'],
-                'order_num': shopify_order['order_num'],
-                'status': shopify_order.get('status'),
-                'tracking_number': shopify_order.get('tracking_number', 'N/A'),
-                'date': shopify_order['created_at'],
-                'items_list': shopify_items_list,
-                'total_price': shopify_order['total_price']
-            }
-            all_orders.append(shopify_order_data)
-
-            for item in shopify_items_list:
-                product_title = item['item_title']
-                quantity = item['quantity']
-                item_image = item['item_image']
-                status = item['status']
-
-                if product_title not in pending_items_dict:
-                    pending_items_dict[product_title] = {
-                        'item_image': item_image,
-                        'item_title': product_title,
-                        'quantity': 0,
-                        'statuses': {}
-                    }
-                pending_items_dict[product_title]['quantity'] += quantity
-                current_statuses = pending_items_dict[product_title]['statuses']
-                current_statuses[status] = current_statuses.get(status, 0) + quantity
-
-    pending_items = list(pending_items_dict.values())
-    pending_items_sorted = sorted(
-        pending_items,
-        key=lambda x: x.get('item_title', '').lower() if x.get('item_title') else '',
-        reverse=True
-    )
-    half = len(pending_items_sorted) // 2
-    return render_template('pending.html', all_orders=all_orders, pending_items=pending_items_sorted, half=half)
+    all_orders, pending_items, summary = build_pending_items_table_data()
+    return render_template('pending.html', all_orders=all_orders, pending_items=pending_items, summary=summary)
 
 
 async def getShopifyOrders():
@@ -1040,7 +1032,8 @@ def apply_bulk_tag():
 @app.route("/")
 def tracking_home():
     global order_details
-    return render_template("track_alk.html", order_details=order_details)
+    total_order_value = sum(parse_money(order.get("total_price", 0)) for order in order_details)
+    return render_template("track_alk.html", order_details=order_details, total_order_value=total_order_value)
 
 
 @app.route('/refresh', methods=['POST'])
