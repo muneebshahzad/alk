@@ -364,7 +364,7 @@ def prepare_booking():
         except:
             continue
 
-        order_data = next((o for o in order_details if o['order_id'] == target_id), None)
+        order_data = next((o for o in order_details if int(o.get('id') or o.get('shopify_id') or 0) == target_id), None)
 
         if order_data:
             is_paid = order_data.get('financial_status', '').lower() in ['paid', 'partially_refunded']
@@ -385,7 +385,7 @@ def prepare_booking():
                         break
 
             orders_to_book.append({
-                'order_id': order_data['order_id'],
+                'order_id': order_data.get('id') or order_data.get('shopify_id'),
                 'order_num': order_data['order_num'],
                 'customer_name': order_data['customer_details']['name'],
                 'customer_phone': order_data['customer_details']['phone'],
@@ -417,7 +417,7 @@ def submit_booking():
         postex_city = booking_item['postex_city']
         cod_amount = booking_item['cod_amount']
 
-        original_order = next((o for o in order_details if o['order_id'] == order_id), None)
+        original_order = next((o for o in order_details if int(o.get('id') or o.get('shopify_id') or 0) == order_id), None)
         if not original_order:
             return {'order_id': order_id, 'success': False, 'message': 'Original data not found'}
 
@@ -718,8 +718,10 @@ async def process_order(session, order):
 
         order_info = {
             'order_link': "https://admin.shopify.com/store/alkaramat/orders/" + str(order.id),
+            'id': order.id,
+            'shopify_id': order.id,
             'order_num': order.name.replace("#", ""),
-            'order_id': order.id,
+            'order_id': order.name.replace("#", ""),
             'created_at': formatted_date,
             'total_price': order.current_subtotal_price,
             'line_items': [],
@@ -1033,7 +1035,7 @@ def apply_bulk_tag():
 def tracking_home():
     global order_details
     total_order_value = sum(parse_money(order.get("total_price", 0)) for order in order_details)
-    return render_template("track_alk.html", order_details=order_details, total_order_value=total_order_value)
+    return render_template("track.html", order_details=order_details, darazOrders=[], employee_approvals=build_employee_approval_items(), total_order_value=total_order_value)
 
 
 @app.route('/refresh', methods=['POST'])
@@ -1041,7 +1043,7 @@ def refresh_data():
     global order_details
     try:
         order_details = asyncio.run(getShopifyOrders())
-        return render_template("track_alk.html", order_details=order_details)
+        return render_template("track.html", order_details=order_details, darazOrders=[], employee_approvals=build_employee_approval_items())
     except Exception as e:
         print(f"Error refreshing data: {e}")
         return jsonify({'message': 'Failed to refresh data'}), 500
@@ -1159,7 +1161,7 @@ def shopify_order_updated():
         # 2. Handle closed/archived orders (Fast)
         if order_data.get('closed_at'):
             print(f"Order {order_shopify_id} is closed. Removing from list.")
-            order_details[:] = [o for o in order_details if o.get('order_id') != order_shopify_id]
+            order_details[:] = [o for o in order_details if str(o.get('id') or o.get('shopify_id') or '') != str(order_shopify_id)]
             return jsonify({'success': True, 'message': 'Order removed'}), 200
 
         # 3. Offload Processing to Background Thread
@@ -1183,8 +1185,8 @@ def serialize_shopify_order_for_employee(order):
     return {
         "source": "shopify",
         "source_label": "Alkaramat",
-        "shopify_id": order.get("order_id"),
-        "order_id": str(order.get("order_num", "")),
+        "shopify_id": order.get("id") or order.get("shopify_id"),
+        "order_id": str(order.get("order_id") or order.get("order_num") or ""),
         "status": order.get("status", ""),
         "customer_name": customer.get("name", ""),
         "customer_phone": customer.get("phone", ""),
@@ -1284,9 +1286,9 @@ def build_pending_orders_mobile_data():
         all_orders.append(
             {
                 "order_via": "Shopify",
-                "shopify_id": shopify_order.get("order_id"),
+                "shopify_id": shopify_order.get("id") or shopify_order.get("shopify_id"),
                 "order_link": shopify_order.get("order_link"),
-                "order_id": shopify_order.get("order_num"),
+                "order_id": shopify_order.get("order_id") or shopify_order.get("order_num"),
                 "status": normalize_status_bucket(shopify_order.get("status", "")),
                 "tags": [tag for tag in shopify_order.get("tags", []) if tag != "Leopards Courier"],
                 "customer_name": customer.get("name", ""),
@@ -1335,6 +1337,10 @@ def build_pending_items_table_data():
                 pending_items[product_title] = {
                     "item_image": item.get("item_image", ""),
                     "item_title": product_title,
+                    "product_id": item.get("product_id"),
+                    "variant_id": item.get("variant_id"),
+                    "unit_price": parse_money(item.get("unit_price", 0)),
+                    "unit_cost": parse_money(item.get("unit_cost", 0)),
                     "quantity": 0,
                     "total_price": 0.0,
                     "total_cost": 0.0,
@@ -1368,8 +1374,8 @@ def build_employee_approval_items():
                 continue
             approvals.append(
                 {
-                    "shopify_id": shopify_order.get("order_id"),
-                    "order_id": shopify_order.get("order_num"),
+                    "shopify_id": shopify_order.get("id") or shopify_order.get("shopify_id"),
+                    "order_id": shopify_order.get("order_id") or shopify_order.get("order_num"),
                     "tracking_number": tracking_number,
                     "requested_status": applied_status,
                     "item_title": item.get("product_title", ""),
