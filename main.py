@@ -153,7 +153,7 @@ def normalize_status_bucket(status):
 
 def is_pending_line_item_status(status):
     normalized = normalize_status_bucket(status)
-    return normalized in {"Booked", "Un-Booked", "Out For Delivery", "Undelivered", "Being Return", "RETURNED TO SHIPPER"}
+    return normalized in {"Booked", "Un-Booked"}
 
 
 def employee_portal_is_authenticated():
