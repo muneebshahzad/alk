@@ -1351,7 +1351,10 @@ def build_pending_items_table_data():
             pending_items[product_title]["total_cost"] += parse_money(item.get("line_cost_total", 0))
             status = item.get("status", "")
             pending_items[product_title]["statuses"][status] = pending_items[product_title]["statuses"].get(status, 0) + quantity
-    pending_items_sorted = sorted(pending_items.values(), key=lambda item: item["quantity"], reverse=True)
+    pending_items_sorted = sorted(
+        pending_items.values(),
+        key=lambda item: str(item.get("item_title", "")).casefold(),
+    )
     summary = {
         "paid_pending_value": round(paid_pending_value, 2),
         "unpaid_pending_value": round(unpaid_pending_value, 2),
