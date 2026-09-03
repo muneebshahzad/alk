@@ -42,27 +42,34 @@
   .orders-chip strong { font-family:'DM Mono',monospace; font-size:14px; color:#0f1835; }
   .empty-state { text-align:center; padding:44px 14px; color:#858796; font-size:13px; background:#fff; border:1px solid #e3e6f0; border-radius:12px; }
   .error-box { margin-bottom:12px; padding:10px 12px; border-radius:10px; background:#fef0ee; color:#a8281c; border:1px solid #f5c0b8; font-size:12px; font-weight:700; }
-  .preview-backdrop { position:fixed; inset:0; z-index:2000; display:none; align-items:center; justify-content:center; padding:24px; background:rgba(18,24,38,0.56); backdrop-filter:blur(4px); }
+  .preview-backdrop { position:fixed; inset:0; z-index:2000; display:none; align-items:center; justify-content:center; padding:24px; background:rgba(18,24,38,0.58); backdrop-filter:blur(5px); }
   .preview-backdrop.open { display:flex; }
-  .preview-modal { width:min(920px,96vw); max-height:92vh; overflow:auto; background:#fffdf8; color:#0f1835; border-radius:24px; box-shadow:0 24px 70px rgba(15,24,53,0.28); border:1px solid rgba(224,168,0,0.28); }
-  .preview-shot { padding:28px; background:linear-gradient(135deg,#fffaf0 0%,#ffffff 58%,#f4f7ff 100%); }
-  .preview-head { display:flex; gap:16px; align-items:flex-start; border-bottom:1px solid rgba(15,24,53,0.08); padding-bottom:18px; margin-bottom:18px; }
-  .preview-title { font-size:28px; font-weight:900; color:#0f1835; line-height:1.05; }
-  .preview-sub { color:#7d8190; font-size:13px; margin-top:6px; }
-  .preview-total { margin-left:auto; text-align:right; font-family:'DM Mono',monospace; font-size:26px; font-weight:900; color:#1f9b5f; white-space:nowrap; }
-  .preview-currency { display:block; font-size:11px; color:#8a8b96; margin-top:3px; }
-  .preview-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); gap:14px; margin:18px 0; }
-  .preview-product { background:#fff; border:1px solid rgba(15,24,53,0.08); border-radius:18px; overflow:hidden; box-shadow:0 8px 22px rgba(15,24,53,0.08); }
-  .preview-img { width:100%; aspect-ratio:1/1; background:#f1f3f8; display:flex; align-items:center; justify-content:center; color:#8a8b96; font-weight:800; overflow:hidden; }
-  .preview-img img { width:100%; height:100%; object-fit:cover; }
-  .preview-product-info { padding:12px 14px 14px; }
-  .preview-product-title { font-size:15px; font-weight:900; line-height:1.25; color:#0f1835; }
-  .preview-product-meta { display:flex; justify-content:space-between; gap:10px; margin-top:8px; color:#7d8190; font-size:12px; font-weight:700; }
-  .preview-customer { display:grid; grid-template-columns:repeat(2,minmax(180px,1fr)); gap:10px 18px; background:rgba(255,255,255,0.72); border:1px solid rgba(15,24,53,0.08); border-radius:18px; padding:16px; }
+  .preview-modal { width:min(860px,96vw); max-height:92vh; overflow:auto; background:#fff; color:#111827; border-radius:26px; box-shadow:0 28px 80px rgba(15,24,53,0.32); border:1px solid rgba(221,184,112,0.42); }
+  .preview-shot { padding:30px; background:#fffaf2; background-image:radial-gradient(circle at top left, rgba(239,213,159,0.45), transparent 34%), linear-gradient(180deg,#fffaf2 0%,#ffffff 54%,#f7f8fb 100%); }
+  .preview-brand { display:flex; align-items:center; justify-content:space-between; gap:14px; margin-bottom:18px; }
+  .preview-brand-name { color:#9b6a16; font-size:11px; font-weight:900; letter-spacing:0.16em; text-transform:uppercase; }
+  .preview-chip { display:inline-flex; align-items:center; padding:7px 12px; border-radius:999px; background:#fff; border:1px solid rgba(15,24,53,0.08); color:#7d8190; font-size:11px; font-weight:800; box-shadow:0 6px 18px rgba(15,24,53,0.05); }
+  .preview-head { display:grid; grid-template-columns:1fr auto; gap:18px; align-items:end; border-bottom:1px solid rgba(15,24,53,0.08); padding-bottom:20px; margin-bottom:18px; }
+  .preview-kicker { color:#b8872e; font-size:11px; font-weight:900; letter-spacing:0.12em; text-transform:uppercase; margin-bottom:7px; }
+  .preview-title { font-size:31px; font-weight:950; color:#101935; line-height:1.04; }
+  .preview-sub { color:#7d8190; font-size:13px; margin-top:7px; }
+  .preview-total { text-align:right; font-family:'DM Mono',monospace; font-size:30px; font-weight:950; color:#1f9b5f; white-space:nowrap; line-height:1; }
+  .preview-total-caption { color:#9a9dab; display:block; font-family:'DM Sans',sans-serif; font-size:10px; font-weight:900; letter-spacing:0.12em; text-transform:uppercase; margin-bottom:7px; }
+  .preview-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:16px; margin:18px 0; }
+  .preview-product { background:#fff; border:1px solid rgba(15,24,53,0.08); border-radius:20px; overflow:hidden; box-shadow:0 12px 28px rgba(15,24,53,0.09); }
+  .preview-img { width:100%; aspect-ratio:4/5; background:linear-gradient(135deg,#f7f2e8,#f5f7fb); display:flex; align-items:center; justify-content:center; color:#8a8b96; font-weight:800; overflow:hidden; }
+  .preview-img img { width:100%; height:100%; object-fit:contain; }
+  .preview-product-info { padding:13px 15px 15px; border-top:1px solid rgba(15,24,53,0.06); }
+  .preview-product-title { font-size:16px; font-weight:950; line-height:1.25; color:#101935; }
+  .preview-product-meta { display:flex; justify-content:space-between; gap:10px; margin-top:9px; color:#7d8190; font-size:12px; font-weight:800; }
+  .preview-customer { display:grid; grid-template-columns:repeat(2,minmax(180px,1fr)); gap:12px 18px; background:rgba(255,255,255,0.82); border:1px solid rgba(15,24,53,0.08); border-radius:18px; padding:16px; }
   .preview-totals { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin:0 0 16px; }
-  .preview-total-box { background:#fff; border:1px solid rgba(15,24,53,0.08); border-radius:14px; padding:12px; }
-  .preview-label { display:block; color:#9a9dab; font-size:10px; text-transform:uppercase; font-weight:900; letter-spacing:0.05em; margin-bottom:4px; }
-  .preview-value { font-size:14px; font-weight:800; color:#0f1835; overflow-wrap:anywhere; }
+  .preview-total-box { background:#fff; border:1px solid rgba(15,24,53,0.08); border-radius:16px; padding:13px; box-shadow:0 8px 20px rgba(15,24,53,0.05); }
+  .preview-total-box.strong { background:#102033; color:#fff; border-color:#102033; }
+  .preview-total-box.strong .preview-label { color:#b9c4d3; }
+  .preview-total-box.strong .preview-value { color:#fff; }
+  .preview-label { display:block; color:#9a9dab; font-size:10px; text-transform:uppercase; font-weight:900; letter-spacing:0.05em; margin-bottom:5px; }
+  .preview-value { font-size:14px; font-weight:900; color:#101935; overflow-wrap:anywhere; }
   .preview-actions { display:flex; justify-content:flex-end; gap:10px; padding:14px 18px; border-top:1px solid #eef0f6; background:#fff; position:sticky; bottom:0; }
   .preview-close { border:1.5px solid #d8dfef; background:#fff; border-radius:10px; padding:9px 14px; color:#2d2e36; font-weight:800; cursor:pointer; }
 
@@ -78,6 +85,9 @@
     .metric-row { grid-template-columns:1fr; }
     .checkout-head { flex-wrap:wrap; }
     .checkout-spacer { flex-basis:100%; height:0; }
+    .preview-shot { padding:20px; }
+    .preview-head { grid-template-columns:1fr; }
+    .preview-total { text-align:left; }
   }
 </style>
 
@@ -238,12 +248,20 @@
 <div class="preview-backdrop" id="checkoutPreview" onclick="closeCheckoutPreview(event)">
   <div class="preview-modal" role="dialog" aria-modal="true" aria-label="Abandoned checkout preview" onclick="event.stopPropagation()">
     <div class="preview-shot" id="checkoutPreviewShot">
+      <div class="preview-brand">
+        <div class="preview-brand-name">Al-Karamat</div>
+        <div class="preview-chip" id="previewOrderCount">0 total orders</div>
+      </div>
       <div class="preview-head">
         <div>
+          <div class="preview-kicker">Your cart details</div>
           <div class="preview-title" id="previewCustomerName">Customer</div>
           <div class="preview-sub" id="previewMeta"></div>
         </div>
-        <div class="preview-total" id="previewTotal">PKR 0</div>
+        <div>
+          <span class="preview-total-caption">Total</span>
+          <div class="preview-total" id="previewTotal">PKR 0</div>
+        </div>
       </div>
       <div class="preview-grid" id="previewProducts"></div>
       <div class="preview-totals">
@@ -255,7 +273,7 @@
           <span class="preview-label">Shipping</span>
           <span class="preview-value" id="previewShipping">-</span>
         </div>
-        <div class="preview-total-box">
+        <div class="preview-total-box strong">
           <span class="preview-label">Total</span>
           <span class="preview-value" id="previewGrandTotal">-</span>
         </div>
@@ -322,6 +340,7 @@ function escapeHtml(value) {
 function openCheckoutPreview(checkout) {
   document.getElementById('previewCustomerName').textContent = checkout.customer_name || 'Customer';
   document.getElementById('previewMeta').textContent = `${checkout.created_date || ''}${checkout.customer_city ? ' • ' + checkout.customer_city : ''}${checkout.customer_country ? ' • ' + checkout.customer_country : ''}`;
+  document.getElementById('previewOrderCount').textContent = `${checkout.customer_orders_count || 0} total orders`;
   document.getElementById('previewTotal').textContent = checkout.display_total || '';
   document.getElementById('previewSubtotal').textContent = checkout.display_subtotal || '-';
   document.getElementById('previewShipping').textContent = checkout.display_shipping || '-';
