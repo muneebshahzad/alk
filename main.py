@@ -193,6 +193,58 @@ def normalize_customer_phone(value):
     return digits[-10:] if len(digits) >= 10 else digits
 
 
+def normalize_country_code(value):
+    return str(value or "").strip().upper()
+
+
+def get_phone_country_prefix(country_code):
+    prefixes = {
+        "PK": "92",
+        "US": "1",
+        "CA": "1",
+        "GB": "44",
+        "AE": "971",
+        "SA": "966",
+    }
+    return prefixes.get(normalize_country_code(country_code), "")
+
+
+def format_customer_phone(phone, country_code=""):
+    raw = str(phone or "").strip()
+    if not raw:
+        return ""
+    digits = "".join(ch for ch in raw if ch.isdigit())
+    if not digits:
+        return raw
+    if raw.startswith("+"):
+        return f"+{digits}"
+    if digits.startswith("00"):
+        return f"+{digits[2:]}"
+    prefix = get_phone_country_prefix(country_code)
+    local = normalize_customer_phone(raw)
+    if prefix and local:
+        return f"+{prefix}{local}"
+    return raw
+
+
+def get_customer_phone_candidates(checkout, shipping, billing, customer):
+    default_address = as_dict(checkout.get("default_address"))
+    return [
+        checkout.get("phone"),
+        shipping.get("phone"),
+        billing.get("phone"),
+        customer.get("phone"),
+        default_address.get("phone"),
+    ]
+
+
+def first_present(values):
+    for value in values:
+        if value:
+            return value
+    return ""
+
+
 def shopify_api_base_url():
     shop_url = (os.getenv("SHOP_URL") or "").strip()
     if not shop_url:
@@ -245,8 +297,43 @@ def get_checkout_image_url(line_item):
     return image or ""
 
 
+async def get_checkout_line_item_image(session, line_item, product_cache):
+    image_src = get_checkout_image_url(line_item)
+    if image_src:
+        return image_src
+
+    product_id = line_item.get("product_id")
+    variant_id = line_item.get("variant_id")
+    if not product_id:
+        return ""
+
+    product_id_key = str(product_id)
+    if product_id_key not in product_cache:
+        product_cache[product_id_key] = None
+        try:
+            product_data = await async_shopify_fetch(session, f"products/{product_id}.json")
+            product_cache[product_id_key] = as_dict(product_data.get("product") if product_data else {})
+        except Exception as error:
+            print(f"Could not fetch product image for abandoned checkout item {product_id}: {error}")
+
+    product = as_dict(product_cache.get(product_id_key))
+    if not product:
+        return ""
+
+    if variant_id:
+        for variant in product.get("variants", []) or []:
+            variant = as_dict(variant)
+            if str(variant.get("id")) == str(variant_id) and variant.get("image_id"):
+                for image in product.get("images", []) or []:
+                    image = as_dict(image)
+                    if str(image.get("id")) == str(variant.get("image_id")):
+                        return image.get("src") or ""
+
+    return as_dict(product.get("image")).get("src") or ""
+
+
 def build_abandoned_whatsapp_url(phone, customer_name):
-    phone = normalize_customer_phone(phone)
+    phone = "".join(ch for ch in str(phone or "") if ch.isdigit())
     if not phone:
         return ""
     text = f"Hello {customer_name or ''}, you left items in your cart. Would you like help completing your order?"
@@ -265,7 +352,7 @@ async def fetch_shopify_abandoned_checkouts(days=7):
                     "limit": 250,
                     "created_at_min": created_at_min,
                     "status": status,
-                    "fields": "id,token,cart_token,created_at,completed_at,email,phone,total_price,subtotal_price,customer,shipping_address,billing_address,line_items,abandoned_checkout_url",
+                    "fields": "id,token,cart_token,created_at,completed_at,email,phone,currency,presentment_currency,total_price,subtotal_price,customer,default_address,shipping_address,billing_address,line_items,abandoned_checkout_url",
                 },
                 "checkouts",
             )
@@ -391,69 +478,78 @@ async def build_abandoned_checkouts_data(days=7):
     fallback_counts = build_abandoned_checkout_customer_counts(recovery_orders)
     today = datetime.now().date()
     rows = []
+    product_cache = {}
 
-    for checkout in checkouts:
-        checkout = as_dict(checkout)
-        customer = as_dict(checkout.get("customer"))
-        shipping = as_dict(checkout.get("shipping_address"))
-        billing = as_dict(checkout.get("billing_address"))
-        recovered_order = find_recovered_order(checkout, recovery_indexes)
-        completed_at = checkout.get("completed_at")
-        is_recovered = bool(completed_at or recovered_order)
-        customer_name = (
-            shipping.get("name")
-            or billing.get("name")
-            or " ".join(part for part in [customer.get("first_name"), customer.get("last_name")] if part)
-            or checkout.get("email")
-            or checkout.get("phone")
-            or "No customer"
-        )
-        checkout_line_items = checkout.get("line_items", []) or []
-        if isinstance(checkout_line_items, dict):
-            checkout_line_items = [checkout_line_items]
-        items = []
-        for line_item in checkout_line_items:
-            line_item = as_dict(line_item)
-            quantity = parse_int(line_item.get("quantity"), 0)
-            unit_price = parse_money(line_item.get("price", 0))
-            title = line_item.get("title") or line_item.get("name") or "Product"
-            variant_title = line_item.get("variant_title") or ""
-            items.append(
+    async with aiohttp.ClientSession() as session:
+        for checkout in checkouts:
+            checkout = as_dict(checkout)
+            customer = as_dict(checkout.get("customer"))
+            shipping = as_dict(checkout.get("shipping_address"))
+            billing = as_dict(checkout.get("billing_address"))
+            recovered_order = find_recovered_order(checkout, recovery_indexes)
+            completed_at = checkout.get("completed_at")
+            is_recovered = bool(completed_at or recovered_order)
+            customer_name = (
+                shipping.get("name")
+                or billing.get("name")
+                or " ".join(part for part in [customer.get("first_name"), customer.get("last_name")] if part)
+                or checkout.get("email")
+                or checkout.get("phone")
+                or "No customer"
+            )
+            checkout_line_items = checkout.get("line_items", []) or []
+            if isinstance(checkout_line_items, dict):
+                checkout_line_items = [checkout_line_items]
+            items = []
+            for line_item in checkout_line_items:
+                line_item = as_dict(line_item)
+                quantity = parse_int(line_item.get("quantity"), 0)
+                unit_price = parse_money(line_item.get("price", 0))
+                title = line_item.get("title") or line_item.get("name") or "Product"
+                variant_title = line_item.get("variant_title") or ""
+                items.append(
+                    {
+                        "title": f"{title} - {variant_title}" if variant_title and variant_title != "Default Title" else title,
+                        "quantity": quantity,
+                        "unit_price": unit_price,
+                        "line_total": round(unit_price * quantity, 2),
+                        "image": await get_checkout_line_item_image(session, line_item, product_cache),
+                    }
+                )
+
+            created_at = checkout.get("created_at", "")
+            country = shipping.get("country") or billing.get("country") or ""
+            country_code = normalize_country_code(shipping.get("country_code") or billing.get("country_code") or checkout.get("buyer_accepts_sms_marketing_country") or "")
+            raw_phone = first_present(get_customer_phone_candidates(checkout, shipping, billing, customer))
+            customer_phone = format_customer_phone(raw_phone, country_code)
+            currency = checkout.get("presentment_currency") or checkout.get("currency") or "PKR"
+            rows.append(
                 {
-                    "title": f"{title} - {variant_title}" if variant_title and variant_title != "Default Title" else title,
-                    "quantity": quantity,
-                    "unit_price": unit_price,
-                    "line_total": round(unit_price * quantity, 2),
-                    "image": get_checkout_image_url(line_item),
+                    "id": checkout.get("id"),
+                    "token": checkout.get("token") or checkout.get("cart_token") or checkout.get("id"),
+                    "created_at": created_at,
+                    "customer_name": customer_name,
+                    "customer_email": checkout.get("email") or customer.get("email") or "",
+                    "customer_phone": customer_phone,
+                    "customer_city": shipping.get("city") or billing.get("city") or "",
+                    "customer_country": country,
+                    "customer_country_code": country_code,
+                    "customer_address": shipping.get("address1") or billing.get("address1") or "",
+                    "customer_orders_count": get_checkout_customer_total_orders(checkout, fallback_counts),
+                    "total_price": parse_money(checkout.get("total_price", 0)),
+                    "subtotal_price": parse_money(checkout.get("subtotal_price", checkout.get("total_price", 0))),
+                    "currency": currency,
+                    "abandoned_checkout_url": checkout.get("abandoned_checkout_url") or "",
+                    "recovered": is_recovered,
+                    "recovered_order_name": (recovered_order or {}).get("name", ""),
+                    "recovered_order_link": shopify_order_admin_link((recovered_order or {}).get("id")),
+                    "completed_at": completed_at or (recovered_order or {}).get("created_at", ""),
+                    "items": items,
+                    "created_date": str(created_at or "")[:10],
+                    "whatsapp_url": build_abandoned_whatsapp_url(customer_phone, customer_name),
+                    "is_today": parse_date_for_sort(created_at).date() == today,
                 }
             )
-
-        created_at = checkout.get("created_at", "")
-        customer_phone = normalize_customer_phone(checkout.get("phone") or shipping.get("phone") or billing.get("phone") or customer.get("phone") or "")
-        rows.append(
-            {
-                "id": checkout.get("id"),
-                "token": checkout.get("token") or checkout.get("cart_token") or checkout.get("id"),
-                "created_at": created_at,
-                "customer_name": customer_name,
-                "customer_email": checkout.get("email") or customer.get("email") or "",
-                "customer_phone": customer_phone,
-                "customer_city": shipping.get("city") or billing.get("city") or "",
-                "customer_address": shipping.get("address1") or billing.get("address1") or "",
-                "customer_orders_count": get_checkout_customer_total_orders(checkout, fallback_counts),
-                "total_price": parse_money(checkout.get("total_price", 0)),
-                "subtotal_price": parse_money(checkout.get("subtotal_price", checkout.get("total_price", 0))),
-                "abandoned_checkout_url": checkout.get("abandoned_checkout_url") or "",
-                "recovered": is_recovered,
-                "recovered_order_name": (recovered_order or {}).get("name", ""),
-                "recovered_order_link": shopify_order_admin_link((recovered_order or {}).get("id")),
-                "completed_at": completed_at or (recovered_order or {}).get("created_at", ""),
-                "items": items,
-                "created_date": str(created_at or "")[:10],
-                "whatsapp_url": build_abandoned_whatsapp_url(customer_phone, customer_name),
-                "is_today": parse_date_for_sort(created_at).date() == today,
-            }
-        )
 
     rows = sorted(rows, key=lambda row: parse_date_timestamp(row.get("created_at")), reverse=True)
     summary = {
