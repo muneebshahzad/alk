@@ -103,10 +103,9 @@
       {% for checkout in abandoned_checkouts %}
       {% set status_key = 'recovered' if checkout.recovered else 'open' %}
       {% set phone = checkout.customer_phone or '' %}
-      {% set wa_phone = phone | replace('+','') %}
       <div class="checkout-card"
            data-status="{{ status_key }}"
-           data-search="{{ checkout.token }} {{ checkout.customer_name }} {{ checkout.customer_email }} {{ checkout.customer_phone }} {{ checkout.customer_city }} {{ checkout.customer_address }} {{ checkout.recovered_order_name }} {% for item in checkout.items %}{{ item.title }} {% endfor %}">
+           data-search="{{ checkout.token }} {{ checkout.customer_name }} {{ checkout.customer_email }} {{ checkout.customer_phone }} {{ checkout.customer_city }} {{ checkout.customer_address }} {{ checkout.recovered_order_name }} {% for item in checkout['items'] %}{{ item.title }} {% endfor %}">
         <div class="checkout-head">
           <div>
             {% if checkout.abandoned_checkout_url %}
@@ -114,7 +113,7 @@
             {% else %}
             <span class="checkout-token">{{ checkout.token }}</span>
             {% endif %}
-            <div class="checkout-date">{{ checkout.created_at[:10] }}</div>
+            <div class="checkout-date">{{ checkout.created_date or checkout.created_at or '-' }}</div>
           </div>
           <div class="checkout-spacer"></div>
           <span class="recovery-badge {{ status_key }}">
@@ -126,7 +125,7 @@
 
         <div class="checkout-body">
           <div class="products">
-            {% for item in checkout.items %}
+            {% for item in checkout['items'] %}
             <div class="product">
               <div class="product-img">
                 {% if item.image %}<img src="{{ item.image }}" alt="">{% else %}Item{% endif %}
@@ -181,7 +180,9 @@
               <span class="info-lbl">Actions</span>
               <span class="info-val">
                 <a class="btn btn-outline" href="tel:{{ phone }}" style="text-decoration:none;">Call</a>
-                <a class="btn btn-success" href="https://wa.me/{{ wa_phone }}?text={{ ('Hello ' ~ checkout.customer_name ~ ', you left items in your cart. Would you like help completing your order?') | urlencode }}" target="_blank" style="text-decoration:none;margin-left:6px;">WhatsApp</a>
+                {% if checkout.whatsapp_url %}
+                <a class="btn btn-success" href="{{ checkout.whatsapp_url }}" target="_blank" style="text-decoration:none;margin-left:6px;">WhatsApp</a>
+                {% endif %}
               </span>
             </div>
             {% endif %}

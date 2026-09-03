@@ -56,6 +56,13 @@ def parse_money(value, default=0.0):
         return round(float(default), 2)
 
 
+def parse_int(value, default=0):
+    try:
+        return int(float(value or default))
+    except (TypeError, ValueError):
+        return int(default)
+
+
 def extract_shopify_money(value, default=0.0):
     if isinstance(value, dict):
         for key in ("amount", "current_total_amount"):
@@ -227,6 +234,25 @@ def get_abandoned_created_at_min(days=7):
     return (datetime.now() - timedelta(days=days)).replace(microsecond=0).isoformat()
 
 
+def as_dict(value):
+    return value if isinstance(value, dict) else {}
+
+
+def get_checkout_image_url(line_item):
+    image = line_item.get("image_url") or line_item.get("image") or ""
+    if isinstance(image, dict):
+        return image.get("src") or image.get("url") or ""
+    return image or ""
+
+
+def build_abandoned_whatsapp_url(phone, customer_name):
+    phone = normalize_customer_phone(phone)
+    if not phone:
+        return ""
+    text = f"Hello {customer_name or ''}, you left items in your cart. Would you like help completing your order?"
+    return f"https://wa.me/{phone}?{urlencode({'text': text})}"
+
+
 async def fetch_shopify_abandoned_checkouts(days=7):
     created_at_min = get_abandoned_created_at_min(days)
     seen = {}
@@ -235,10 +261,16 @@ async def fetch_shopify_abandoned_checkouts(days=7):
             rows = await fetch_shopify_paginated_rest(
                 session,
                 "checkouts.json",
-                {"limit": 250, "created_at_min": created_at_min, "status": status},
+                {
+                    "limit": 250,
+                    "created_at_min": created_at_min,
+                    "status": status,
+                    "fields": "id,token,cart_token,created_at,completed_at,email,phone,total_price,subtotal_price,customer,shipping_address,billing_address,line_items,abandoned_checkout_url",
+                },
                 "checkouts",
             )
             for row in rows:
+                row = as_dict(row)
                 seen[str(row.get("id") or row.get("token") or row.get("cart_token"))] = row
     return list(seen.values())
 
@@ -361,9 +393,10 @@ async def build_abandoned_checkouts_data(days=7):
     rows = []
 
     for checkout in checkouts:
-        customer = checkout.get("customer") or {}
-        shipping = checkout.get("shipping_address") or {}
-        billing = checkout.get("billing_address") or {}
+        checkout = as_dict(checkout)
+        customer = as_dict(checkout.get("customer"))
+        shipping = as_dict(checkout.get("shipping_address"))
+        billing = as_dict(checkout.get("billing_address"))
         recovered_order = find_recovered_order(checkout, recovery_indexes)
         completed_at = checkout.get("completed_at")
         is_recovered = bool(completed_at or recovered_order)
@@ -380,7 +413,8 @@ async def build_abandoned_checkouts_data(days=7):
             checkout_line_items = [checkout_line_items]
         items = []
         for line_item in checkout_line_items:
-            quantity = int(line_item.get("quantity") or 0)
+            line_item = as_dict(line_item)
+            quantity = parse_int(line_item.get("quantity"), 0)
             unit_price = parse_money(line_item.get("price", 0))
             title = line_item.get("title") or line_item.get("name") or "Product"
             variant_title = line_item.get("variant_title") or ""
@@ -390,11 +424,12 @@ async def build_abandoned_checkouts_data(days=7):
                     "quantity": quantity,
                     "unit_price": unit_price,
                     "line_total": round(unit_price * quantity, 2),
-                    "image": line_item.get("image_url") or line_item.get("image") or "",
+                    "image": get_checkout_image_url(line_item),
                 }
             )
 
         created_at = checkout.get("created_at", "")
+        customer_phone = normalize_customer_phone(checkout.get("phone") or shipping.get("phone") or billing.get("phone") or customer.get("phone") or "")
         rows.append(
             {
                 "id": checkout.get("id"),
@@ -402,7 +437,7 @@ async def build_abandoned_checkouts_data(days=7):
                 "created_at": created_at,
                 "customer_name": customer_name,
                 "customer_email": checkout.get("email") or customer.get("email") or "",
-                "customer_phone": normalize_customer_phone(checkout.get("phone") or shipping.get("phone") or billing.get("phone") or customer.get("phone") or ""),
+                "customer_phone": customer_phone,
                 "customer_city": shipping.get("city") or billing.get("city") or "",
                 "customer_address": shipping.get("address1") or billing.get("address1") or "",
                 "customer_orders_count": get_checkout_customer_total_orders(checkout, fallback_counts),
@@ -414,6 +449,8 @@ async def build_abandoned_checkouts_data(days=7):
                 "recovered_order_link": shopify_order_admin_link((recovered_order or {}).get("id")),
                 "completed_at": completed_at or (recovered_order or {}).get("created_at", ""),
                 "items": items,
+                "created_date": str(created_at or "")[:10],
+                "whatsapp_url": build_abandoned_whatsapp_url(customer_phone, customer_name),
                 "is_today": parse_date_for_sort(created_at).date() == today,
             }
         )
