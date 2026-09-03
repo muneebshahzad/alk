@@ -56,6 +56,49 @@ def parse_money(value, default=0.0):
         return round(float(default), 2)
 
 
+def extract_shopify_money(value, default=0.0):
+    if isinstance(value, dict):
+        for key in ("amount", "current_total_amount"):
+            if key in value:
+                return parse_money(value.get(key), default)
+        for nested_key in ("shop_money", "presentment_money"):
+            nested = value.get(nested_key)
+            if isinstance(nested, dict) and "amount" in nested:
+                return parse_money(nested.get("amount"), default)
+            if nested is not None and hasattr(nested, "amount"):
+                return parse_money(getattr(nested, "amount", None), default)
+    if value is not None:
+        for key in ("amount", "current_total_amount"):
+            if hasattr(value, key):
+                return parse_money(getattr(value, key, None), default)
+        for nested_key in ("shop_money", "presentment_money"):
+            nested = getattr(value, nested_key, None)
+            if isinstance(nested, dict) and "amount" in nested:
+                return parse_money(nested.get("amount"), default)
+            if nested is not None and hasattr(nested, "amount"):
+                return parse_money(getattr(nested, "amount", None), default)
+    return parse_money(value, default)
+
+
+def get_order_attr(order, name, default=None):
+    if isinstance(order, dict):
+        return order.get(name, default)
+    return getattr(order, name, default)
+
+
+def get_shopify_order_shipping_total(order):
+    shipping_set = get_order_attr(order, "total_shipping_price_set")
+    shipping_total = extract_shopify_money(shipping_set, 0)
+    if shipping_total:
+        return shipping_total
+
+    shipping_lines = get_order_attr(order, "shipping_lines", []) or []
+    try:
+        return round(sum(extract_shopify_money(getattr(line, "price", None), 0) for line in shipping_lines), 2)
+    except TypeError:
+        return round(sum(extract_shopify_money((line or {}).get("price"), 0) for line in shipping_lines), 2)
+
+
 def format_number(value):
     try:
         return f"{int(float(value)):,}"
@@ -1004,6 +1047,9 @@ async def process_order(session, order):
         created_at_str = order.created_at
         created_at_obj = datetime.fromisoformat(created_at_str)
         formatted_date = created_at_obj.strftime('%Y-%m-%d')
+        subtotal_price = parse_money(getattr(order, "current_subtotal_price", None) or getattr(order, "subtotal_price", 0))
+        total_price = parse_money(getattr(order, "current_total_price", None) or getattr(order, "total_price", subtotal_price))
+        shipping_charges = get_shopify_order_shipping_total(order)
 
         order_info = {
             'order_link': "https://admin.shopify.com/store/alkaramat/orders/" + str(order.id),
@@ -1012,7 +1058,13 @@ async def process_order(session, order):
             'order_num': order.name.replace("#", ""),
             'order_id': order.name.replace("#", ""),
             'created_at': formatted_date,
-            'total_price': order.current_subtotal_price,
+            'subtotal_price': subtotal_price,
+            'current_subtotal_price': subtotal_price,
+            'shipping_charges': shipping_charges,
+            'total_discounts': parse_money(getattr(order, "total_discounts", 0)),
+            'total_price': total_price,
+            'current_total_price': total_price,
+            'display_total_price': total_price,
             'line_items': [],
             'financial_status': order.financial_status.title(),
             'fulfillment_status': order.fulfillment_status or "Unfulfilled",
@@ -1603,6 +1655,10 @@ def build_pending_orders_mobile_data():
         if financial_status in PAID_FINANCIAL_STATUSES:
             payment_label = "Partially Paid" if "partially" in financial_status else "Paid"
             payment_class = "partial" if "partially" in financial_status else "paid"
+        subtotal_price = parse_money(shopify_order.get("current_subtotal_price", shopify_order.get("subtotal_price", 0)))
+        total_price = parse_money(shopify_order.get("current_total_price", shopify_order.get("total_price", subtotal_price)))
+        shipping_charges = parse_money(shopify_order.get("shipping_charges", 0))
+        total_discounts = parse_money(shopify_order.get("total_discounts", 0))
         all_orders.append(
             {
                 "order_via": "Shopify",
@@ -1621,13 +1677,13 @@ def build_pending_orders_mobile_data():
                 "financial_status": shopify_order.get("financial_status", ""),
                 "payment_status_label": payment_label,
                 "payment_status_class": payment_class,
-                "subtotal_price": parse_money(shopify_order.get("total_price", 0)),
-                "current_subtotal_price": parse_money(shopify_order.get("total_price", 0)),
-                "shipping_charges": 0,
-                "total_discounts": 0,
-                "total_price": parse_money(shopify_order.get("total_price", 0)),
-                "current_total_price": parse_money(shopify_order.get("total_price", 0)),
-                "display_total_price": parse_money(shopify_order.get("total_price", 0)),
+                "subtotal_price": subtotal_price,
+                "current_subtotal_price": subtotal_price,
+                "shipping_charges": shipping_charges,
+                "total_discounts": total_discounts,
+                "total_price": total_price,
+                "current_total_price": total_price,
+                "display_total_price": total_price,
                 "pending_total_price": round(sum(parse_money(item.get("line_total", 0)) for item in items), 2),
                 "pending_total_cost": round(sum(parse_money(item.get("line_cost_total", 0)) for item in items), 2),
             }
