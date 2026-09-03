@@ -1,0 +1,221 @@
+{% extends 'base.html' %}
+{% block title %}Alkaramat - Abandoned Orders{% endblock %}
+
+{% block content %}
+<style>
+  .abandoned-page { display:flex; flex-direction:column; height:100%; overflow:hidden; }
+  .abandoned-scroll { flex:1; overflow:auto; padding:14px; }
+  .metric-row { display:grid; grid-template-columns:repeat(5,minmax(140px,1fr)); gap:10px; margin-bottom:14px; }
+  .metric-card { background:#fff; border:1px solid #e3e6f0; border-radius:12px; padding:14px 16px; box-shadow:0 1px 4px rgba(0,0,0,0.04); }
+  .metric-label { font-size:10px; color:#858796; font-weight:800; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:5px; }
+  .metric-value { font-family:'DM Mono',monospace; font-size:22px; font-weight:800; color:#2d2e36; line-height:1; }
+  .metric-value.gold { color:#d4a800; }
+  .metric-value.green { color:#1cc88a; }
+  .metric-value.red { color:#e74a3b; }
+  .toolbar { display:flex; align-items:center; gap:8px; padding:10px 14px; background:#f2f4f8; border-bottom:1px solid #e3e6f0; overflow-x:auto; flex-shrink:0; }
+  .fpill { padding:5px 13px; border-radius:99px; border:1.5px solid #e3e6f0; font-size:11px; font-weight:700; background:#fff; color:#8a8b96; cursor:pointer; white-space:nowrap; font-family:'DM Sans',sans-serif; }
+  .fpill.active { background:#4e73df; color:#fff; border-color:#4e73df; }
+  .checkout-list { display:flex; flex-direction:column; gap:10px; max-width:1060px; }
+  .checkout-card { background:#fff; border:1.5px solid #e3e6f0; border-radius:12px; overflow:hidden; box-shadow:0 1px 4px rgba(0,0,0,0.04); }
+  .checkout-head { display:flex; align-items:center; gap:12px; padding:12px 14px 10px; border-bottom:1px solid #f2f4f8; }
+  .checkout-token { font-family:'DM Mono',monospace; font-size:13px; font-weight:800; color:#4e73df; text-decoration:none; }
+  .checkout-date { font-size:10px; color:#b0b2be; margin-top:2px; }
+  .checkout-spacer { flex:1; }
+  .checkout-amount { font-family:'DM Mono',monospace; font-size:15px; font-weight:800; color:#2d2e36; white-space:nowrap; }
+  .checkout-cur { font-size:10px; color:#858796; margin-left:2px; }
+  .recovery-badge { display:inline-flex; align-items:center; gap:5px; padding:4px 10px; border-radius:99px; font-size:11px; font-weight:800; white-space:nowrap; }
+  .recovery-badge.open { background:#fff3cd; color:#8b5a00; }
+  .recovery-badge.recovered { background:#d4f5e9; color:#0f6848; }
+  .checkout-body { display:flex; gap:18px; padding:12px 14px 14px; align-items:flex-start; }
+  .products { display:flex; gap:10px; flex-wrap:wrap; max-width:320px; flex-shrink:0; }
+  .product { width:76px; display:flex; flex-direction:column; align-items:center; gap:5px; }
+  .product-img { width:76px; height:76px; border-radius:9px; background:#f2f4f8; border:1px solid #e8eaef; overflow:hidden; display:flex; align-items:center; justify-content:center; color:#8a8b96; font-size:11px; font-weight:700; }
+  .product-img img { width:100%; height:100%; object-fit:cover; }
+  .product-name { font-size:9px; color:#4a4b55; text-align:center; line-height:1.3; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; max-width:76px; font-weight:600; }
+  .product-qty { font-size:9px; color:#b0b2be; }
+  .info-block { flex:1; min-width:0; display:grid; grid-template-columns:repeat(2,minmax(180px,1fr)); gap:8px 18px; }
+  .info-row { display:flex; gap:7px; font-size:12px; align-items:flex-start; min-width:0; }
+  .info-lbl { color:#b0b2be; width:92px; flex-shrink:0; font-size:10px; padding-top:2px; }
+  .info-val { color:#2d2e36; font-weight:600; line-height:1.35; min-width:0; overflow-wrap:anywhere; }
+  .empty-state { text-align:center; padding:44px 14px; color:#858796; font-size:13px; background:#fff; border:1px solid #e3e6f0; border-radius:12px; }
+  .error-box { margin-bottom:12px; padding:10px 12px; border-radius:10px; background:#fef0ee; color:#a8281c; border:1px solid #f5c0b8; font-size:12px; font-weight:700; }
+
+  @media (max-width: 900px) {
+    .metric-row { grid-template-columns:repeat(2,minmax(140px,1fr)); }
+    .checkout-body { flex-direction:column; }
+    .products { max-width:none; }
+    .info-block { grid-template-columns:1fr; width:100%; }
+  }
+  @media (max-width: 560px) {
+    .metric-row { grid-template-columns:1fr; }
+    .checkout-head { flex-wrap:wrap; }
+    .checkout-spacer { flex-basis:100%; height:0; }
+  }
+</style>
+
+<div class="abandoned-page">
+  <div class="topbar">
+    <span class="topbar-title">Abandoned Orders</span>
+    <div style="flex:1"></div>
+    <div class="search-box">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#858796" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+      <input id="checkoutSearch" placeholder="Search abandoned orders..." style="width:220px;" oninput="filterCheckouts()"/>
+      <button id="searchClear" onclick="document.getElementById('checkoutSearch').value='';filterCheckouts()" style="display:none;border:none;background:none;cursor:pointer;color:#858796;font-size:15px;line-height:1;padding:0;">x</button>
+    </div>
+  </div>
+
+  <div class="toolbar">
+    <button class="fpill active" data-filter="all" onclick="setCheckoutFilter(this)">All</button>
+    <button class="fpill" data-filter="open" onclick="setCheckoutFilter(this)">Not recovered</button>
+    <button class="fpill" data-filter="recovered" onclick="setCheckoutFilter(this)">Recovered</button>
+    <a class="btn btn-outline" style="margin-left:auto;text-decoration:none;" href="/">Back to dashboard</a>
+  </div>
+
+  <div class="abandoned-scroll">
+    {% if error %}
+    <div class="error-box">Could not load abandoned checkouts: {{ error }}</div>
+    {% endif %}
+
+    <div class="metric-row">
+      <div class="metric-card">
+        <div class="metric-label">Abandoned last 7 days</div>
+        <div class="metric-value gold">{{ summary.last_7_days|format_number }}</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">Abandoned today</div>
+        <div class="metric-value gold">{{ summary.today|format_number }}</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">Not recovered</div>
+        <div class="metric-value red">{{ summary.open|format_number }}</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">Recovered</div>
+        <div class="metric-value green">{{ summary.recovered|format_number }}</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">Checkout value</div>
+        <div class="metric-value">{{ summary.value|int|format_number }}</div>
+      </div>
+    </div>
+
+    <div class="checkout-list" id="checkoutList">
+      {% for checkout in abandoned_checkouts %}
+      {% set status_key = 'recovered' if checkout.recovered else 'open' %}
+      {% set phone = checkout.customer_phone or '' %}
+      {% set wa_phone = phone | replace('+','') %}
+      <div class="checkout-card"
+           data-status="{{ status_key }}"
+           data-search="{{ checkout.token }} {{ checkout.customer_name }} {{ checkout.customer_email }} {{ checkout.customer_phone }} {{ checkout.customer_city }} {{ checkout.customer_address }} {{ checkout.recovered_order_name }} {% for item in checkout.items %}{{ item.title }} {% endfor %}">
+        <div class="checkout-head">
+          <div>
+            {% if checkout.abandoned_checkout_url %}
+            <a class="checkout-token" href="{{ checkout.abandoned_checkout_url }}" target="_blank">{{ checkout.token }}</a>
+            {% else %}
+            <span class="checkout-token">{{ checkout.token }}</span>
+            {% endif %}
+            <div class="checkout-date">{{ checkout.created_at[:10] }}</div>
+          </div>
+          <div class="checkout-spacer"></div>
+          <span class="recovery-badge {{ status_key }}">
+            <span style="width:6px;height:6px;border-radius:50%;background:{{ '#1cc88a' if checkout.recovered else '#f6c23e' }};"></span>
+            {{ 'Recovered' if checkout.recovered else 'Not recovered' }}
+          </span>
+          <span class="checkout-amount">{{ checkout.total_price|int|format_number }}<span class="checkout-cur">PKR</span></span>
+        </div>
+
+        <div class="checkout-body">
+          <div class="products">
+            {% for item in checkout.items %}
+            <div class="product">
+              <div class="product-img">
+                {% if item.image %}<img src="{{ item.image }}" alt="">{% else %}Item{% endif %}
+              </div>
+              <div class="product-name" title="{{ item.title }}">{{ item.title }}</div>
+              <div class="product-qty">x{{ item.quantity }}</div>
+            </div>
+            {% endfor %}
+          </div>
+
+          <div class="info-block">
+            <div class="info-row">
+              <span class="info-lbl">Customer</span>
+              <span class="info-val">{{ checkout.customer_name }}{% if checkout.customer_city %}, <span style="font-weight:400;color:#858796">{{ checkout.customer_city }}</span>{% endif %}</span>
+            </div>
+            <div class="info-row">
+              <span class="info-lbl">Total orders</span>
+              <span class="info-val">{{ checkout.customer_orders_count|format_number }}</span>
+            </div>
+            {% if checkout.customer_phone %}
+            <div class="info-row">
+              <span class="info-lbl">Phone</span>
+              <span class="info-val" style="font-family:'DM Mono',monospace;color:#4e73df">{{ checkout.customer_phone }}</span>
+            </div>
+            {% endif %}
+            {% if checkout.customer_email %}
+            <div class="info-row">
+              <span class="info-lbl">Email</span>
+              <span class="info-val">{{ checkout.customer_email }}</span>
+            </div>
+            {% endif %}
+            {% if checkout.customer_address %}
+            <div class="info-row">
+              <span class="info-lbl">Address</span>
+              <span class="info-val" style="color:#858796;font-size:11px;">{{ checkout.customer_address }}</span>
+            </div>
+            {% endif %}
+            <div class="info-row">
+              <span class="info-lbl">Recovered via</span>
+              <span class="info-val">
+                {% if checkout.recovered_order_link %}
+                <a href="{{ checkout.recovered_order_link }}" target="_blank" style="color:#4e73df;text-decoration:none;">{{ checkout.recovered_order_name }}</a>
+                {% elif checkout.completed_at %}
+                Completed checkout
+                {% else %}
+                -
+                {% endif %}
+              </span>
+            </div>
+            {% if phone %}
+            <div class="info-row">
+              <span class="info-lbl">Actions</span>
+              <span class="info-val">
+                <a class="btn btn-outline" href="tel:{{ phone }}" style="text-decoration:none;">Call</a>
+                <a class="btn btn-success" href="https://wa.me/{{ wa_phone }}?text={{ ('Hello ' ~ checkout.customer_name ~ ', you left items in your cart. Would you like help completing your order?') | urlencode }}" target="_blank" style="text-decoration:none;margin-left:6px;">WhatsApp</a>
+              </span>
+            </div>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+      {% else %}
+      <div class="empty-state">No abandoned Shopify checkouts found in the last 7 days.</div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let checkoutFilter = 'all';
+
+function setCheckoutFilter(btn) {
+  document.querySelectorAll('.fpill').forEach(pill => pill.classList.remove('active'));
+  btn.classList.add('active');
+  checkoutFilter = btn.dataset.filter;
+  filterCheckouts();
+}
+
+function filterCheckouts() {
+  const searchInput = document.getElementById('checkoutSearch');
+  const query = (searchInput.value || '').toLowerCase().trim();
+  document.getElementById('searchClear').style.display = query ? 'block' : 'none';
+  document.querySelectorAll('.checkout-card').forEach(card => {
+    const statusMatch = checkoutFilter === 'all' || card.dataset.status === checkoutFilter;
+    const searchMatch = !query || (card.dataset.search || '').toLowerCase().includes(query);
+    card.style.display = statusMatch && searchMatch ? '' : 'none';
+  });
+}
+</script>
+{% endblock %}

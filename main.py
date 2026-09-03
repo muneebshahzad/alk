@@ -12,7 +12,8 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from flask import Flask, render_template, jsonify, request, flash, redirect, url_for, abort, session, send_from_directory
 from markupsafe import Markup
-from datetime import datetime
+from datetime import datetime, timedelta
+from urllib.parse import urlencode
 import pymssql, shopify
 import aiohttp
 import lazop
@@ -115,6 +116,294 @@ def parse_date_for_sort(value):
         except ValueError:
             continue
     return datetime.min
+
+
+def parse_date_timestamp(value):
+    parsed = parse_date_for_sort(value)
+    if parsed == datetime.min:
+        return 0.0
+    try:
+        return parsed.timestamp()
+    except (OverflowError, OSError, ValueError):
+        return 0.0
+
+
+def normalize_customer_lookup_value(value):
+    return str(value or "").strip().lower()
+
+
+def normalize_customer_phone(value):
+    if isinstance(value, dict):
+        value = value.get("phone") or value.get("number") or ""
+    digits = "".join(ch for ch in str(value or "") if ch.isdigit())
+    if digits.startswith("00"):
+        digits = digits[2:]
+    if digits.startswith("92") and len(digits) > 10:
+        digits = digits[2:]
+    return digits[-10:] if len(digits) >= 10 else digits
+
+
+def shopify_api_base_url():
+    shop_url = (os.getenv("SHOP_URL") or "").strip()
+    if not shop_url:
+        raise RuntimeError("SHOP_URL is not configured.")
+    base_url_clean = shop_url.split("/admin")[0].rstrip("/")
+    return f"{base_url_clean}/admin/api/2024-04"
+
+
+async def fetch_shopify_rest_resource(session, resource_path, params=None):
+    query = f"?{urlencode(params)}" if params else ""
+    return await async_shopify_fetch(session, f"{resource_path}{query}")
+
+
+async def fetch_shopify_paginated_rest(session, resource_path, params=None, root_key=None, max_pages=10):
+    collected = []
+    since_id = None
+    params = dict(params or {})
+    for _ in range(max_pages):
+        page_params = dict(params)
+        if since_id:
+            page_params["since_id"] = since_id
+        payload = await fetch_shopify_rest_resource(session, resource_path, page_params)
+        if not payload:
+            break
+        rows = payload.get(root_key) if root_key else None
+        if rows is None:
+            rows = payload.get(resource_path.split(".", 1)[0], [])
+        rows = rows or []
+        collected.extend(rows)
+        if len(rows) < int(page_params.get("limit", 250)):
+            break
+        since_id = rows[-1].get("id")
+        if not since_id:
+            break
+    return collected
+
+
+def get_abandoned_created_at_min(days=7):
+    return (datetime.now() - timedelta(days=days)).replace(microsecond=0).isoformat()
+
+
+async def fetch_shopify_abandoned_checkouts(days=7):
+    created_at_min = get_abandoned_created_at_min(days)
+    seen = {}
+    async with aiohttp.ClientSession() as session:
+        for status in ("open", "closed"):
+            rows = await fetch_shopify_paginated_rest(
+                session,
+                "checkouts.json",
+                {"limit": 250, "created_at_min": created_at_min, "status": status},
+                "checkouts",
+            )
+            for row in rows:
+                seen[str(row.get("id") or row.get("token") or row.get("cart_token"))] = row
+    return list(seen.values())
+
+
+async def fetch_recent_shopify_orders_for_recovery(days=30):
+    async with aiohttp.ClientSession() as session:
+        return await fetch_shopify_paginated_rest(
+            session,
+            "orders.json",
+            {
+                "limit": 250,
+                "status": "any",
+                "created_at_min": get_abandoned_created_at_min(days),
+                "fields": "id,name,created_at,email,phone,total_price,customer,checkout_token,cart_token",
+            },
+            "orders",
+        )
+
+
+def build_order_recovery_indexes(orders):
+    by_checkout_token = {}
+    by_cart_token = {}
+    by_email = {}
+    by_phone = {}
+
+    for order in orders or []:
+        customer = order.get("customer") or {}
+        checkout_token = normalize_customer_lookup_value(order.get("checkout_token"))
+        cart_token = normalize_customer_lookup_value(order.get("cart_token"))
+        email = normalize_customer_lookup_value(order.get("email") or customer.get("email"))
+        phone = normalize_customer_phone(order.get("phone") or customer.get("phone"))
+        if checkout_token:
+            by_checkout_token.setdefault(checkout_token, []).append(order)
+        if cart_token:
+            by_cart_token.setdefault(cart_token, []).append(order)
+        if email:
+            by_email.setdefault(email, []).append(order)
+        if phone:
+            by_phone.setdefault(phone, []).append(order)
+
+    return {
+        "checkout_token": by_checkout_token,
+        "cart_token": by_cart_token,
+        "email": by_email,
+        "phone": by_phone,
+    }
+
+
+def find_recovered_order(checkout, indexes):
+    checkout_created_at = parse_date_timestamp(checkout.get("created_at"))
+    customer = checkout.get("customer") or {}
+    token = normalize_customer_lookup_value(checkout.get("token"))
+    cart_token = normalize_customer_lookup_value(checkout.get("cart_token"))
+    email = normalize_customer_lookup_value(checkout.get("email") or customer.get("email"))
+    phone = normalize_customer_phone(checkout.get("phone") or customer.get("phone"))
+    candidates = []
+
+    for key, index in (
+        (token, indexes.get("checkout_token", {})),
+        (cart_token, indexes.get("cart_token", {})),
+        (email, indexes.get("email", {})),
+        (phone, indexes.get("phone", {})),
+    ):
+        if key:
+            candidates.extend(index.get(key, []))
+
+    unique_candidates = {str(order.get("id")): order for order in candidates if order.get("id")}.values()
+    dated_candidates = [
+        order for order in unique_candidates
+        if parse_date_timestamp(order.get("created_at")) >= checkout_created_at
+    ]
+    if not dated_candidates:
+        return None
+    return sorted(dated_candidates, key=lambda order: parse_date_timestamp(order.get("created_at")))[0]
+
+
+def build_abandoned_checkout_customer_counts(recovery_orders):
+    counts = {}
+    for order in recovery_orders or []:
+        customer = order.get("customer") or {}
+        customer_id = str(customer.get("id") or "").strip()
+        email = normalize_customer_lookup_value(order.get("email") or customer.get("email"))
+        phone = normalize_customer_phone(order.get("phone") or customer.get("phone"))
+        for key in (f"id:{customer_id}" if customer_id else "", f"email:{email}" if email else "", f"phone:{phone}" if phone else ""):
+            if key:
+                counts[key] = counts.get(key, 0) + 1
+    return counts
+
+
+def get_checkout_customer_total_orders(checkout, fallback_counts):
+    customer = checkout.get("customer") or {}
+    for field in ("orders_count", "order_count", "number_of_orders"):
+        if customer.get(field) is not None:
+            try:
+                return int(customer.get(field) or 0)
+            except (TypeError, ValueError):
+                pass
+
+    customer_id = str(customer.get("id") or "").strip()
+    email = normalize_customer_lookup_value(checkout.get("email") or customer.get("email"))
+    phone = normalize_customer_phone(checkout.get("phone") or customer.get("phone"))
+    for key in (f"id:{customer_id}" if customer_id else "", f"email:{email}" if email else "", f"phone:{phone}" if phone else ""):
+        if key and key in fallback_counts:
+            return fallback_counts[key]
+    return 0
+
+
+def shopify_order_admin_link(order_id):
+    if not order_id:
+        return ""
+    return f"https://admin.shopify.com/store/alkaramat/orders/{order_id}"
+
+
+async def build_abandoned_checkouts_data(days=7):
+    checkouts = await fetch_shopify_abandoned_checkouts(days)
+    recovery_orders = await fetch_recent_shopify_orders_for_recovery(max(days, 30))
+    recovery_indexes = build_order_recovery_indexes(recovery_orders)
+    fallback_counts = build_abandoned_checkout_customer_counts(recovery_orders)
+    today = datetime.now().date()
+    rows = []
+
+    for checkout in checkouts:
+        customer = checkout.get("customer") or {}
+        shipping = checkout.get("shipping_address") or {}
+        billing = checkout.get("billing_address") or {}
+        recovered_order = find_recovered_order(checkout, recovery_indexes)
+        completed_at = checkout.get("completed_at")
+        is_recovered = bool(completed_at or recovered_order)
+        customer_name = (
+            shipping.get("name")
+            or billing.get("name")
+            or " ".join(part for part in [customer.get("first_name"), customer.get("last_name")] if part)
+            or checkout.get("email")
+            or checkout.get("phone")
+            or "No customer"
+        )
+        checkout_line_items = checkout.get("line_items", []) or []
+        if isinstance(checkout_line_items, dict):
+            checkout_line_items = [checkout_line_items]
+        items = []
+        for line_item in checkout_line_items:
+            quantity = int(line_item.get("quantity") or 0)
+            unit_price = parse_money(line_item.get("price", 0))
+            title = line_item.get("title") or line_item.get("name") or "Product"
+            variant_title = line_item.get("variant_title") or ""
+            items.append(
+                {
+                    "title": f"{title} - {variant_title}" if variant_title and variant_title != "Default Title" else title,
+                    "quantity": quantity,
+                    "unit_price": unit_price,
+                    "line_total": round(unit_price * quantity, 2),
+                    "image": line_item.get("image_url") or line_item.get("image") or "",
+                }
+            )
+
+        created_at = checkout.get("created_at", "")
+        rows.append(
+            {
+                "id": checkout.get("id"),
+                "token": checkout.get("token") or checkout.get("cart_token") or checkout.get("id"),
+                "created_at": created_at,
+                "customer_name": customer_name,
+                "customer_email": checkout.get("email") or customer.get("email") or "",
+                "customer_phone": normalize_customer_phone(checkout.get("phone") or shipping.get("phone") or billing.get("phone") or customer.get("phone") or ""),
+                "customer_city": shipping.get("city") or billing.get("city") or "",
+                "customer_address": shipping.get("address1") or billing.get("address1") or "",
+                "customer_orders_count": get_checkout_customer_total_orders(checkout, fallback_counts),
+                "total_price": parse_money(checkout.get("total_price", 0)),
+                "subtotal_price": parse_money(checkout.get("subtotal_price", checkout.get("total_price", 0))),
+                "abandoned_checkout_url": checkout.get("abandoned_checkout_url") or "",
+                "recovered": is_recovered,
+                "recovered_order_name": (recovered_order or {}).get("name", ""),
+                "recovered_order_link": shopify_order_admin_link((recovered_order or {}).get("id")),
+                "completed_at": completed_at or (recovered_order or {}).get("created_at", ""),
+                "items": items,
+                "is_today": parse_date_for_sort(created_at).date() == today,
+            }
+        )
+
+    rows = sorted(rows, key=lambda row: parse_date_timestamp(row.get("created_at")), reverse=True)
+    summary = {
+        "last_7_days": len(rows),
+        "today": sum(1 for row in rows if row.get("is_today")),
+        "recovered": sum(1 for row in rows if row.get("recovered")),
+        "open": sum(1 for row in rows if not row.get("recovered")),
+        "value": round(sum(parse_money(row.get("total_price", 0)) for row in rows), 2),
+    }
+    return rows, summary
+
+
+async def build_abandoned_checkouts_summary(days=7):
+    checkouts = await fetch_shopify_abandoned_checkouts(days)
+    today = datetime.now().date()
+    return {
+        "last_7_days": len(checkouts),
+        "today": sum(1 for checkout in checkouts if parse_date_for_sort(checkout.get("created_at")).date() == today),
+        "recovered": sum(1 for checkout in checkouts if checkout.get("completed_at")),
+        "open": sum(1 for checkout in checkouts if not checkout.get("completed_at")),
+        "value": round(sum(parse_money(checkout.get("total_price", 0)) for checkout in checkouts), 2),
+    }
+
+
+def get_abandoned_summary_safe():
+    try:
+        return asyncio.run(build_abandoned_checkouts_summary())
+    except Exception as error:
+        print(f"Could not fetch abandoned checkouts: {error}")
+        return {"last_7_days": 0, "today": 0, "recovered": 0, "open": 0, "value": 0.0, "error": str(error)}
 
 
 def is_lahore_city(city):
@@ -1035,7 +1324,14 @@ def apply_bulk_tag():
 def tracking_home():
     global order_details
     total_order_value = sum(parse_money(order.get("total_price", 0)) for order in order_details)
-    return render_template("track.html", order_details=order_details, darazOrders=[], employee_approvals=build_employee_approval_items(), total_order_value=total_order_value)
+    return render_template(
+        "track.html",
+        order_details=order_details,
+        darazOrders=[],
+        employee_approvals=build_employee_approval_items(),
+        total_order_value=total_order_value,
+        abandoned_summary=get_abandoned_summary_safe(),
+    )
 
 
 @app.route('/refresh', methods=['POST'])
@@ -1043,7 +1339,13 @@ def refresh_data():
     global order_details
     try:
         order_details = asyncio.run(getShopifyOrders())
-        return render_template("track.html", order_details=order_details, darazOrders=[], employee_approvals=build_employee_approval_items())
+        return render_template(
+            "track.html",
+            order_details=order_details,
+            darazOrders=[],
+            employee_approvals=build_employee_approval_items(),
+            abandoned_summary=get_abandoned_summary_safe(),
+        )
     except Exception as e:
         print(f"Error refreshing data: {e}")
         return jsonify({'message': 'Failed to refresh data'}), 500
@@ -1057,6 +1359,24 @@ def displayTracking(tracking_num):
 
     data = asyncio.run(async_func())
     return render_template('trackingdata_alk.html', data=data)
+
+
+@app.route('/abandoned')
+def abandoned_orders():
+    try:
+        abandoned_checkouts, summary = asyncio.run(build_abandoned_checkouts_data())
+        error = None
+    except Exception as fetch_error:
+        print(f"Could not build abandoned checkouts page: {fetch_error}")
+        abandoned_checkouts = []
+        summary = {"last_7_days": 0, "today": 0, "recovered": 0, "open": 0, "value": 0.0}
+        error = str(fetch_error)
+    return render_template(
+        "abandoned.html",
+        abandoned_checkouts=abandoned_checkouts,
+        summary=summary,
+        error=error,
+    )
 
 
 @app.route('/undelivered')
@@ -1446,6 +1766,7 @@ def build_admin_mobile_sections():
         {"id": "scanner", "label": "Scanner", "icon": "Scan", "src": "/employee_portal"},
         {"id": "employee-orders", "label": "Orders", "icon": "List", "src": "/employee_portal/orders"},
         {"id": "pending", "label": "Pending", "icon": "Board", "src": "/pending?embedded=1"},
+        {"id": "abandoned", "label": "Abandoned", "icon": "Cart", "src": "/abandoned?embedded=1"},
         {"id": "undelivered", "label": "Undelivered", "icon": "Truck", "src": "/undelivered?embedded=1"},
         {"id": "product-costs", "label": "Product Costs", "icon": "Cost", "src": "/product-costs?embedded=1"},
     ]
