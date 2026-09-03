@@ -22,7 +22,6 @@
   .checkout-date { font-size:10px; color:#b0b2be; margin-top:2px; }
   .checkout-spacer { flex:1; }
   .checkout-amount { font-family:'DM Mono',monospace; font-size:15px; font-weight:800; color:#2d2e36; white-space:nowrap; }
-  .checkout-cur { font-size:10px; color:#858796; margin-left:2px; }
   .view-btn { border:1.5px solid #d8dfef; background:#fff; color:#4e73df; border-radius:10px; padding:8px 12px; font-size:11px; font-weight:800; cursor:pointer; font-family:'DM Sans',sans-serif; }
   .view-btn:hover { border-color:#4e73df; background:#f5f7ff; }
   .recovery-badge { display:inline-flex; align-items:center; gap:5px; padding:4px 10px; border-radius:99px; font-size:11px; font-weight:800; white-space:nowrap; }
@@ -39,6 +38,8 @@
   .info-row { display:flex; gap:7px; font-size:12px; align-items:flex-start; min-width:0; }
   .info-lbl { color:#b0b2be; width:92px; flex-shrink:0; font-size:10px; padding-top:2px; }
   .info-val { color:#2d2e36; font-weight:600; line-height:1.35; min-width:0; overflow-wrap:anywhere; }
+  .orders-chip { display:inline-flex; align-items:center; gap:6px; padding:6px 10px; border-radius:999px; background:#eef4ff; color:#3158c9; border:1px solid #d7e2ff; font-size:12px; font-weight:900; }
+  .orders-chip strong { font-family:'DM Mono',monospace; font-size:14px; color:#0f1835; }
   .empty-state { text-align:center; padding:44px 14px; color:#858796; font-size:13px; background:#fff; border:1px solid #e3e6f0; border-radius:12px; }
   .error-box { margin-bottom:12px; padding:10px 12px; border-radius:10px; background:#fef0ee; color:#a8281c; border:1px solid #f5c0b8; font-size:12px; font-weight:700; }
   .preview-backdrop { position:fixed; inset:0; z-index:2000; display:none; align-items:center; justify-content:center; padding:24px; background:rgba(18,24,38,0.56); backdrop-filter:blur(4px); }
@@ -58,6 +59,8 @@
   .preview-product-title { font-size:15px; font-weight:900; line-height:1.25; color:#0f1835; }
   .preview-product-meta { display:flex; justify-content:space-between; gap:10px; margin-top:8px; color:#7d8190; font-size:12px; font-weight:700; }
   .preview-customer { display:grid; grid-template-columns:repeat(2,minmax(180px,1fr)); gap:10px 18px; background:rgba(255,255,255,0.72); border:1px solid rgba(15,24,53,0.08); border-radius:18px; padding:16px; }
+  .preview-totals { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin:0 0 16px; }
+  .preview-total-box { background:#fff; border:1px solid rgba(15,24,53,0.08); border-radius:14px; padding:12px; }
   .preview-label { display:block; color:#9a9dab; font-size:10px; text-transform:uppercase; font-weight:900; letter-spacing:0.05em; margin-bottom:4px; }
   .preview-value { font-size:14px; font-weight:800; color:#0f1835; overflow-wrap:anywhere; }
   .preview-actions { display:flex; justify-content:flex-end; gap:10px; padding:14px 18px; border-top:1px solid #eef0f6; background:#fff; position:sticky; bottom:0; }
@@ -69,6 +72,7 @@
     .products { max-width:none; }
     .info-block { grid-template-columns:1fr; width:100%; }
     .preview-customer { grid-template-columns:1fr; }
+    .preview-totals { grid-template-columns:1fr; }
   }
   @media (max-width: 560px) {
     .metric-row { grid-template-columns:1fr; }
@@ -144,7 +148,7 @@
             <span style="width:6px;height:6px;border-radius:50%;background:{{ '#1cc88a' if checkout.recovered else '#f6c23e' }};"></span>
             {{ 'Recovered' if checkout.recovered else 'Not recovered' }}
           </span>
-          <span class="checkout-amount">{{ checkout.total_price|int|format_number }}<span class="checkout-cur">{{ checkout.currency or 'PKR' }}</span></span>
+          <span class="checkout-amount">{{ checkout.display_total }}</span>
           <button class="view-btn" type="button" onclick='openCheckoutPreview({{ checkout|tojson }})'>View</button>
         </div>
 
@@ -168,7 +172,7 @@
             </div>
             <div class="info-row">
               <span class="info-lbl">Total orders</span>
-              <span class="info-val">{{ checkout.customer_orders_count|format_number }}</span>
+              <span class="info-val"><span class="orders-chip"><strong>{{ checkout.customer_orders_count|format_number }}</strong> total orders</span></span>
             </div>
             {% if checkout.customer_phone %}
             <div class="info-row">
@@ -188,6 +192,10 @@
               <span class="info-val">{{ checkout.customer_email }}</span>
             </div>
             {% endif %}
+            <div class="info-row">
+              <span class="info-lbl">Shipping</span>
+              <span class="info-val">{{ checkout.display_shipping }}</span>
+            </div>
             {% if checkout.customer_address %}
             <div class="info-row">
               <span class="info-lbl">Address</span>
@@ -235,12 +243,23 @@
           <div class="preview-title" id="previewCustomerName">Customer</div>
           <div class="preview-sub" id="previewMeta"></div>
         </div>
-        <div class="preview-total">
-          <span id="previewTotal">0</span>
-          <span class="preview-currency" id="previewCurrency">PKR</span>
-        </div>
+        <div class="preview-total" id="previewTotal">PKR 0</div>
       </div>
       <div class="preview-grid" id="previewProducts"></div>
+      <div class="preview-totals">
+        <div class="preview-total-box">
+          <span class="preview-label">Subtotal</span>
+          <span class="preview-value" id="previewSubtotal">-</span>
+        </div>
+        <div class="preview-total-box">
+          <span class="preview-label">Shipping</span>
+          <span class="preview-value" id="previewShipping">-</span>
+        </div>
+        <div class="preview-total-box">
+          <span class="preview-label">Total</span>
+          <span class="preview-value" id="previewGrandTotal">-</span>
+        </div>
+      </div>
       <div class="preview-customer">
         <div>
           <span class="preview-label">Phone</span>
@@ -255,8 +274,8 @@
           <span class="preview-value" id="previewAddress">-</span>
         </div>
         <div>
-          <span class="preview-label">Recovery</span>
-          <span class="preview-value" id="previewRecovery">Not recovered</span>
+          <span class="preview-label">Country</span>
+          <span class="preview-value" id="previewCountry">-</span>
         </div>
       </div>
     </div>
@@ -290,10 +309,6 @@ function filterCheckouts() {
   });
 }
 
-function formatPreviewMoney(value) {
-  return Math.round(Number(value || 0)).toLocaleString();
-}
-
 function escapeHtml(value) {
   return String(value || '').replace(/[&<>"']/g, ch => ({
     '&': '&amp;',
@@ -307,12 +322,14 @@ function escapeHtml(value) {
 function openCheckoutPreview(checkout) {
   document.getElementById('previewCustomerName').textContent = checkout.customer_name || 'Customer';
   document.getElementById('previewMeta').textContent = `${checkout.created_date || ''}${checkout.customer_city ? ' • ' + checkout.customer_city : ''}${checkout.customer_country ? ' • ' + checkout.customer_country : ''}`;
-  document.getElementById('previewTotal').textContent = formatPreviewMoney(checkout.total_price);
-  document.getElementById('previewCurrency').textContent = checkout.currency || 'PKR';
+  document.getElementById('previewTotal').textContent = checkout.display_total || '';
+  document.getElementById('previewSubtotal').textContent = checkout.display_subtotal || '-';
+  document.getElementById('previewShipping').textContent = checkout.display_shipping || '-';
+  document.getElementById('previewGrandTotal').textContent = checkout.display_total || '-';
   document.getElementById('previewPhone').textContent = checkout.customer_phone || '-';
   document.getElementById('previewEmail').textContent = checkout.customer_email || '-';
   document.getElementById('previewAddress').textContent = checkout.customer_address || '-';
-  document.getElementById('previewRecovery').textContent = checkout.recovered ? `Recovered ${checkout.recovered_order_name || ''}` : 'Not recovered';
+  document.getElementById('previewCountry').textContent = [checkout.customer_country, checkout.customer_country_code ? `(${checkout.customer_country_code})` : ''].filter(Boolean).join(' ') || '-';
 
   const products = Array.isArray(checkout.items) ? checkout.items : [];
   document.getElementById('previewProducts').innerHTML = products.map(item => `
@@ -322,7 +339,7 @@ function openCheckoutPreview(checkout) {
         <div class="preview-product-title">${escapeHtml(item.title || 'Product')}</div>
         <div class="preview-product-meta">
           <span>Qty ${escapeHtml(item.quantity || 0)}</span>
-          <span>${formatPreviewMoney(item.line_total || item.unit_price)} ${escapeHtml(checkout.currency || 'PKR')}</span>
+          <span>${escapeHtml(item.display_line_total || '')}</span>
         </div>
       </div>
     </div>

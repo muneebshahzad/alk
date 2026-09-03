@@ -197,6 +197,21 @@ def normalize_country_code(value):
     return str(value or "").strip().upper()
 
 
+def infer_country_code(country):
+    normalized = str(country or "").strip().lower()
+    aliases = {
+        "pakistan": "PK",
+        "united states": "US",
+        "usa": "US",
+        "united kingdom": "GB",
+        "uk": "GB",
+        "united arab emirates": "AE",
+        "uae": "AE",
+        "saudi arabia": "SA",
+    }
+    return aliases.get(normalized, "")
+
+
 def get_phone_country_prefix(country_code):
     prefixes = {
         "PK": "92",
@@ -243,6 +258,22 @@ def first_present(values):
         if value:
             return value
     return ""
+
+
+def format_currency_amount(value, currency="PKR"):
+    amount = parse_money(value, 0)
+    currency = str(currency or "PKR").upper()
+    amount_text = f"{int(amount):,}" if amount == int(amount) else f"{amount:,.2f}"
+    symbols = {
+        "USD": "$",
+        "GBP": "£",
+        "EUR": "€",
+    }
+    if currency in symbols:
+        return f"{symbols[currency]}{amount_text} ({currency})"
+    if currency == "PKR":
+        return f"PKR {amount_text}"
+    return f"{amount_text} {currency}"
 
 
 def shopify_api_base_url():
@@ -295,6 +326,30 @@ def get_checkout_image_url(line_item):
     if isinstance(image, dict):
         return image.get("src") or image.get("url") or ""
     return image or ""
+
+
+def get_checkout_shipping_total(checkout):
+    shipping_lines = checkout.get("shipping_lines") or []
+    if isinstance(shipping_lines, dict):
+        shipping_lines = [shipping_lines]
+    shipping_total = sum(parse_money(as_dict(line).get("price"), 0) for line in shipping_lines)
+    if shipping_total:
+        return round(shipping_total, 2)
+
+    for key in ("shipping_price", "shipping_rate"):
+        value = checkout.get(key)
+        if isinstance(value, dict):
+            candidate = parse_money(value.get("price"), 0)
+        else:
+            candidate = parse_money(value, 0)
+        if candidate:
+            return candidate
+
+    total = parse_money(checkout.get("total_price"), 0)
+    subtotal = parse_money(checkout.get("subtotal_price"), 0)
+    if total > subtotal:
+        return round(total - subtotal, 2)
+    return 0.0
 
 
 async def get_checkout_line_item_image(session, line_item, product_cache):
@@ -352,7 +407,6 @@ async def fetch_shopify_abandoned_checkouts(days=7):
                     "limit": 250,
                     "created_at_min": created_at_min,
                     "status": status,
-                    "fields": "id,token,cart_token,created_at,completed_at,email,phone,currency,presentment_currency,total_price,subtotal_price,customer,default_address,shipping_address,billing_address,line_items,abandoned_checkout_url",
                 },
                 "checkouts",
             )
@@ -519,10 +573,16 @@ async def build_abandoned_checkouts_data(days=7):
 
             created_at = checkout.get("created_at", "")
             country = shipping.get("country") or billing.get("country") or ""
-            country_code = normalize_country_code(shipping.get("country_code") or billing.get("country_code") or checkout.get("buyer_accepts_sms_marketing_country") or "")
+            country_code = normalize_country_code(shipping.get("country_code") or billing.get("country_code") or checkout.get("buyer_accepts_sms_marketing_country") or infer_country_code(country))
             raw_phone = first_present(get_customer_phone_candidates(checkout, shipping, billing, customer))
             customer_phone = format_customer_phone(raw_phone, country_code)
             currency = checkout.get("presentment_currency") or checkout.get("currency") or "PKR"
+            total_price = parse_money(checkout.get("total_price", 0))
+            subtotal_price = parse_money(checkout.get("subtotal_price", checkout.get("total_line_items_price", total_price)))
+            shipping_total = get_checkout_shipping_total(checkout)
+            for item in items:
+                item["display_line_total"] = format_currency_amount(item.get("line_total"), currency)
+                item["display_unit_price"] = format_currency_amount(item.get("unit_price"), currency)
             rows.append(
                 {
                     "id": checkout.get("id"),
@@ -534,11 +594,15 @@ async def build_abandoned_checkouts_data(days=7):
                     "customer_city": shipping.get("city") or billing.get("city") or "",
                     "customer_country": country,
                     "customer_country_code": country_code,
-                    "customer_address": shipping.get("address1") or billing.get("address1") or "",
+                    "customer_address": " ".join(part for part in [shipping.get("address1") or billing.get("address1") or "", shipping.get("address2") or billing.get("address2") or ""] if part),
                     "customer_orders_count": get_checkout_customer_total_orders(checkout, fallback_counts),
-                    "total_price": parse_money(checkout.get("total_price", 0)),
-                    "subtotal_price": parse_money(checkout.get("subtotal_price", checkout.get("total_price", 0))),
+                    "total_price": total_price,
+                    "subtotal_price": subtotal_price,
+                    "shipping_charges": shipping_total,
                     "currency": currency,
+                    "display_total": format_currency_amount(total_price, currency),
+                    "display_subtotal": format_currency_amount(subtotal_price, currency),
+                    "display_shipping": format_currency_amount(shipping_total, currency),
                     "abandoned_checkout_url": checkout.get("abandoned_checkout_url") or "",
                     "recovered": is_recovered,
                     "recovered_order_name": (recovered_order or {}).get("name", ""),
