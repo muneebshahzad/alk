@@ -42,6 +42,7 @@ ADMIN_PORTAL_SESSION_KEY = "admin_portal_authenticated"
 EMPLOYEE_PORTAL_PASSWORD = os.getenv("EMPLOYEE_PORTAL_PASSWORD", "@@@t")
 ADMIN_PORTAL_PASSWORD = os.getenv("ADMIN_PORTAL_PASSWORD", "security")
 PRODUCT_COSTS_SETTING_KEY = "product_cost_overrides_v1"
+ABANDONED_VIEWED_SETTING_KEY = "abandoned_checkout_viewed_v1"
 PAID_FINANCIAL_STATUSES = {"paid", "partially_paid", "partially refunded", "partially_refunded"}
 
 
@@ -395,6 +396,18 @@ def build_abandoned_whatsapp_url(phone, customer_name):
     return f"https://wa.me/{phone}?{urlencode({'text': text})}"
 
 
+def load_abandoned_viewed_tokens():
+    try:
+        return set(json.loads(get_app_setting(ABANDONED_VIEWED_SETTING_KEY, "[]")) or [])
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return set()
+
+
+def save_abandoned_viewed_tokens(tokens):
+    cleaned = sorted({str(token) for token in tokens if token})
+    return set_app_setting(ABANDONED_VIEWED_SETTING_KEY, json.dumps(cleaned))
+
+
 async def fetch_shopify_abandoned_checkouts(days=7):
     created_at_min = get_abandoned_created_at_min(days)
     seen = {}
@@ -530,6 +543,7 @@ async def build_abandoned_checkouts_data(days=7):
     recovery_orders = await fetch_recent_shopify_orders_for_recovery(max(days, 30))
     recovery_indexes = build_order_recovery_indexes(recovery_orders)
     fallback_counts = build_abandoned_checkout_customer_counts(recovery_orders)
+    viewed_tokens = load_abandoned_viewed_tokens()
     today = datetime.now().date()
     rows = []
     product_cache = {}
@@ -603,6 +617,7 @@ async def build_abandoned_checkouts_data(days=7):
                     "display_total": format_currency_amount(total_price, currency),
                     "display_subtotal": format_currency_amount(subtotal_price, currency),
                     "display_shipping": format_currency_amount(shipping_total, currency),
+                    "viewed": str(checkout.get("token") or checkout.get("cart_token") or checkout.get("id")) in viewed_tokens,
                     "abandoned_checkout_url": checkout.get("abandoned_checkout_url") or "",
                     "recovered": is_recovered,
                     "recovered_order_name": (recovered_order or {}).get("name", ""),
@@ -621,6 +636,8 @@ async def build_abandoned_checkouts_data(days=7):
         "today": sum(1 for row in rows if row.get("is_today")),
         "recovered": sum(1 for row in rows if row.get("recovered")),
         "open": sum(1 for row in rows if not row.get("recovered")),
+        "viewed": sum(1 for row in rows if row.get("viewed")),
+        "not_viewed": sum(1 for row in rows if not row.get("viewed")),
         "value": round(sum(parse_money(row.get("total_price", 0)) for row in rows), 2),
     }
     return rows, summary
@@ -634,6 +651,8 @@ async def build_abandoned_checkouts_summary(days=7):
         "today": sum(1 for checkout in checkouts if parse_date_for_sort(checkout.get("created_at")).date() == today),
         "recovered": sum(1 for checkout in checkouts if checkout.get("completed_at")),
         "open": sum(1 for checkout in checkouts if not checkout.get("completed_at")),
+        "viewed": 0,
+        "not_viewed": len(checkouts),
         "value": round(sum(parse_money(checkout.get("total_price", 0)) for checkout in checkouts), 2),
     }
 
@@ -643,7 +662,7 @@ def get_abandoned_summary_safe():
         return asyncio.run(build_abandoned_checkouts_summary())
     except Exception as error:
         print(f"Could not fetch abandoned checkouts: {error}")
-        return {"last_7_days": 0, "today": 0, "recovered": 0, "open": 0, "value": 0.0, "error": str(error)}
+        return {"last_7_days": 0, "today": 0, "recovered": 0, "open": 0, "viewed": 0, "not_viewed": 0, "value": 0.0, "error": str(error)}
 
 
 def is_lahore_city(city):
@@ -1618,7 +1637,7 @@ def abandoned_orders():
     except Exception as fetch_error:
         print(f"Could not build abandoned checkouts page: {fetch_error}")
         abandoned_checkouts = []
-        summary = {"last_7_days": 0, "today": 0, "recovered": 0, "open": 0, "value": 0.0}
+        summary = {"last_7_days": 0, "today": 0, "recovered": 0, "open": 0, "viewed": 0, "not_viewed": 0, "value": 0.0}
         error = str(fetch_error)
     return render_template(
         "abandoned.html",
@@ -1626,6 +1645,18 @@ def abandoned_orders():
         summary=summary,
         error=error,
     )
+
+
+@app.route('/abandoned/mark-viewed', methods=['POST'])
+def mark_abandoned_viewed():
+    data = request.get_json(silent=True) or {}
+    token = str(data.get("token") or "").strip()
+    if not token:
+        return jsonify({"success": False, "error": "Missing checkout token"}), 400
+    viewed_tokens = load_abandoned_viewed_tokens()
+    viewed_tokens.add(token)
+    saved = save_abandoned_viewed_tokens(viewed_tokens)
+    return jsonify({"success": saved, "token": token, "viewed_count": len(viewed_tokens)})
 
 
 @app.route('/undelivered')
