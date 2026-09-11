@@ -10,6 +10,7 @@ import time
 import hmac
 import hashlib
 import json
+from urllib.parse import urlencode
 import mimetypes
 import itertools
 import random
@@ -154,10 +155,13 @@ class LazopClient(object):
 
         api_url = "%s%s" % (self._server_url,request._api_pame)
 
-        full_url = api_url + "?";
-        for key in sign_parameter:
-            full_url += key + "=" + str(sign_parameter[key]) + "&";
-        full_url = full_url[0:-1]
+        # Keep authentication credentials out of error logs while retaining
+        # enough request context to diagnose Daraz API failures.
+        safe_log_parameters = {
+            key: "[REDACTED]" if key in (P_ACCESS_TOKEN, P_SIGN, "refresh_token", "code") else value
+            for key, value in sign_parameter.items()
+        }
+        full_url = api_url + "?" + urlencode(safe_log_parameters)
 
         try:
             if(request._http_method == 'POST' or len(request._file_params) != 0) :

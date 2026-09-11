@@ -305,10 +305,10 @@
                                 </button>
                                 <div class="dropdown-menu">
                                     <a class="dropdown-item" href="https://wa.me/{{ order.customer_details.phone }}?text=Hello%20{{ order.customer_details.name }},%20Your%20order%23{{ order.order_id }}..." target="_blank">Send Dispatch Message</a>
-                                    <a class="dropdown-item" href="https://wa.me/{{ order.customer_details.phone }}?text=Hello%20{{ order.customer_details.name }},%20Your%20order%23{{ order.order_id }}%20from%20TickBags.com%20has%20been%20delayed..." target="_blank">Send Delay Message</a>
+                                    <a class="dropdown-item" href="https://wa.me/{{ order.customer_details.phone }}?text=Hello%20{{ order.customer_details.name }},%20Your%20order%23{{ order.order_id }}%20from%20TheAlkaramat.com%20has%20been%20delayed..." target="_blank">Send Delay Message</a>
                                     <a class="dropdown-item" href="https://wa.me/{{ order.customer_details.phone }}?text=Hello%20{{ order.customer_details.name }},%20Logistics%20company%20made%20an%20attempt..." target="_blank">Send Address Closed Message</a>
                                     <a class="dropdown-item" href="https://wa.me/{{ order.customer_details.phone }}?text=Hello%20{{ order.customer_details.name }},%20Logistics%20company%20made%20an%20attempt..." target="_blank">Send Refused Message</a>
-                                    <a class="dropdown-item" href="https://wa.me/{{ order.customer_details.phone }}?text=Hello%20{{ order.customer_details.name }},%20Your%20order%23{{ order.order_id }}%20from%20TickBags.com%20was%20delivered..." target="_blank">Send Feedback Message</a>
+                                    <a class="dropdown-item" href="https://wa.me/{{ order.customer_details.phone }}?text=Hello%20{{ order.customer_details.name }},%20Your%20order%23{{ order.order_id }}%20from%20TheAlkaramat.com%20was%20delivered..." target="_blank">Send Feedback Message</a>
                                 </div>
                             </div>
                         {% else %}
@@ -391,8 +391,7 @@
                 <td>{{ order.order_id }}</td>
                 <td>
                     {{ order.customer.name }}<br>
-                    {{ order.customer.address.address1 }} {{ order.customer.address.address5 }}<br>
-                    {{ order.customer.address.address4 }}<br>
+                    {{ order.customer.address }}<br>
                     {{ order.customer.phone }}<br>
                     <a href="tel:{{ order.customer.phone }}" class="btn btn-primary btn-sm">Call</a>
                     <div class="btn-group">
@@ -400,11 +399,11 @@
                             WhatsApp
                         </button>
                         <div class="dropdown-menu">
-                            <a class="dropdown-item" href="https://wa.me/{{ order.customer.phone }}?text=Hello%20{{ order.customer.name }},%20Your%20order%23{{ order.order_id }}%20from%20TickBags.com%20has%20been%20dispatched..." target="_blank">Send Dispatch Message</a>
-                            <a class="dropdown-item" href="https://wa.me/{{ order.customer.phone }}?text=Hello%20{{ order.customer.name }},%20Your%20order%23{{ order.order_id }}%20from%20TickBags.com%20has%20been%20delayed..." target="_blank">Send Delay Message</a>
+                            <a class="dropdown-item" href="https://wa.me/{{ order.customer.phone }}?text=Hello%20{{ order.customer.name }},%20Your%20order%23{{ order.order_id }}%20from%20TheAlkaramat.com%20has%20been%20dispatched..." target="_blank">Send Dispatch Message</a>
+                            <a class="dropdown-item" href="https://wa.me/{{ order.customer.phone }}?text=Hello%20{{ order.customer.name }},%20Your%20order%23{{ order.order_id }}%20from%20TheAlkaramat.com%20has%20been%20delayed..." target="_blank">Send Delay Message</a>
                             <a class="dropdown-item" href="https://wa.me/{{ order.customer.phone }}?text=Hello%20{{ order.customer.name }},%20Logistics%20company%20made%20an%20attempt..." target="_blank">Send Address Closed Message</a>
                             <a class="dropdown-item" href="https://wa.me/{{ order.customer.phone }}?text=Hello%20{{ order.customer.name }},%20Logistics%20company%20made%20an%20attempt..." target="_blank">Send Refused Message</a>
-                            <a class="dropdown-item" href="https://wa.me/{{ order.customer.phone }}?text=Hello%20{{ order.customer.name }},%20Your%20order%23{{ order.order_id }}%20from%20TickBags.com%20was%20delivered..." target="_blank">Send Feedback Message</a>
+                            <a class="dropdown-item" href="https://wa.me/{{ order.customer.phone }}?text=Hello%20{{ order.customer.name }},%20Your%20order%23{{ order.order_id }}%20from%20TheAlkaramat.com%20was%20delivered..." target="_blank">Send Feedback Message</a>
                         </div>
                     </div>
                 </td>

@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block title %}Daraz Orders · Alkaramat Ops{% endblock %}
+
+{% block content %}
+<div class="topbar">
+  <span class="topbar-title">Daraz Orders</span>
+  <span class="section-count" style="background:rgba(248,92,44,.1);color:#f85c2c;">{{ darazOrders|length }}</span>
+  <div style="flex:1;"></div>
+  <a class="btn" href="/daraz/orders" style="background:#f85c2c;color:#fff;text-decoration:none;">↻ Refresh</a>
+  {% if daraz_oauth_url %}<a class="btn btn-outline" href="{{ daraz_oauth_url }}" style="text-decoration:none;">Connect Daraz</a>{% endif %}
+</div>
+
+<div style="padding:18px;overflow:auto;flex:1;min-height:0;">
+  {% if error_message %}
+  <div style="margin-bottom:14px;padding:12px 14px;border-radius:9px;background:#fce4ec;color:#8b1a10;font-size:13px;">
+    <strong>Daraz orders could not be loaded.</strong> {{ error_message }}
+  </div>
+  {% endif %}
+
+  <div class="section-card">
+    <div class="section-header">
+      <span style="font-size:15px;font-weight:700;">Seller orders</span>
+      <span class="section-count" style="background:rgba(248,92,44,.1);color:#f85c2c;">{{ darazOrders|length }}</span>
+    </div>
+    <div style="overflow-x:auto;">
+      <table style="width:100%;border-collapse:collapse;min-width:820px;font-size:12px;">
+        <thead style="background:#f8f9fc;color:#858796;text-align:left;text-transform:uppercase;font-size:10px;letter-spacing:.04em;">
+          <tr>
+            <th style="padding:10px 14px;">Order</th>
+            <th style="padding:10px 14px;">Customer</th>
+            <th style="padding:10px 14px;">Status</th>
+            <th style="padding:10px 14px;">Date</th>
+            <th style="padding:10px 14px;text-align:right;">Total</th>
+            <th style="padding:10px 14px;">Items</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for order in darazOrders %}
+          <tr style="border-top:1px solid #e3e6f0;vertical-align:top;">
+            <td style="padding:14px;font-family:'DM Mono',monospace;font-weight:700;color:#f85c2c;">{{ order.order_id }}</td>
+            <td style="padding:14px;max-width:240px;">
+              <div style="font-weight:700;">{{ order.customer.name }}</div>
+              <div style="color:#858796;margin-top:3px;">{{ order.customer.address }}</div>
+              <div style="margin-top:5px;"><a href="tel:{{ order.customer.phone }}" style="color:#4e73df;">{{ order.customer.phone }}</a></div>
+            </td>
+            <td style="padding:14px;">{{ status_badge(order.status) }}</td>
+            <td style="padding:14px;white-space:nowrap;">{{ order.date }}</td>
+            <td style="padding:14px;text-align:right;font-weight:700;white-space:nowrap;">Rs {{ order.total_price|float|int|format_number }}</td>
+            <td style="padding:10px 14px;">
+              {% for item in order.items_list %}
+              <div style="display:flex;gap:9px;align-items:center;padding:4px 0;{% if not loop.last %}border-bottom:1px solid #f0f1f5;{% endif %}">
+                {% if item.item_image %}<img src="{{ item.item_image }}" alt="" style="width:38px;height:38px;border-radius:6px;object-fit:cover;">{% endif %}
+                <div>
+                  <div style="font-weight:600;">{{ item.item_title }}</div>
+                  <div style="color:#858796;margin-top:2px;">{{ item.tracking_number }} · {{ item.status }}</div>
+                </div>
+              </div>
+              {% endfor %}
+            </td>
+          </tr>
+          {% else %}
+          <tr><td colspan="6" style="padding:44px;text-align:center;color:#858796;">No Daraz orders found.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}
