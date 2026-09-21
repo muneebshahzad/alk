@@ -1,4 +1,6 @@
 import asyncio
+import secrets
+from daraz_auth import callback_url
 import base64
 import hashlib
 import hmac
@@ -353,22 +355,30 @@ def get_app_base_url():
 
 
 def get_daraz_callback_url():
-    explicit = (os.getenv("DARAZ_CALLBACK_URL") or "").strip()
-    if explicit:
-        return explicit
-    base_url = get_app_base_url()
-    return f"{base_url}/daraz" if base_url else ""
+    return callback_url()
 
 
 def get_daraz_authorize_url():
-    app_key = (os.getenv("DARAZ_APP_KEY") or "").strip()
-    callback = get_daraz_callback_url()
-    if not app_key or not callback:
+    if not (os.getenv("DARAZ_APP_KEY") or "").strip():
         return ""
-    return (
-        "https://api.daraz.pk/oauth/authorize"
-        f"?response_type=code&redirect_uri={quote(callback, safe='')}&client_id={quote(app_key, safe='')}"
-    )
+    return url_for('daraz_connect')
+
+
+@app.route('/daraz/connect')
+def daraz_connect():
+    try:
+        callback = get_daraz_callback_url()
+        config = daraz_configuration()
+    except RuntimeError as error:
+        return jsonify({'success': False, 'error': str(error)}), 400
+    if request.host_url.rstrip('/') != 'https://dashboard.alkaramat.com':
+        return jsonify({'error': 'Start Connect Daraz at https://dashboard.alkaramat.com.'}), 400
+    state = secrets.token_urlsafe(32)
+    session['daraz_oauth'] = {'state': state, 'created_at': time.time(), 'callback': callback}
+    return redirect('https://api.daraz.pk/oauth/authorize?' + urlencode({
+        'response_type': 'code', 'redirect_uri': callback,
+        'client_id': config['app_key'], 'state': state, 'force_auth': 'true',
+    }))
 
 
 def refresh_daraz_cache_if_needed(force=False):
@@ -1428,24 +1438,26 @@ def send_email():
         return jsonify({'error': str(e)}), 500
 
 
-@retry(stop=stop_after_attempt(5), wait=wait_exponential(min=1, max=10))
 async def fetch_tracking_data(session, tracking_number):
-    url = f"https://cod.callcourier.com.pk/api/CallCourier/GetTackingHistory?cn={tracking_number}"
-    timeout = ClientTimeout(total=100)
+    if not tracking_number or str(tracking_number).strip() == "N/A":
+        return []
+    url = "https://cod.callcourier.com.pk/api/CallCourier/GetTackingHistory"
+    timeout = ClientTimeout(total=20)
     try:
-        async with session.get(url, timeout=timeout) as response:
-            if response.status == 200:
-                data = await response.json()
-                if isinstance(data, list) and data:
-                    return data
-                elif isinstance(data, dict) and data.get('d'):
-                    return data['d']
-                return []
-            else:
-                return {"error": f"HTTP {response.status}"}
-    except Exception as e:
-        return {"error": str(e)}
-
+        async with session.get(url, params={"cn": tracking_number}, timeout=timeout) as response:
+            if response.status != 200:
+                return {"error": "Courier tracking is temporarily unavailable. Please try again later."}
+            data = await response.json()
+            if isinstance(data, dict) and "d" in data:
+                data = data["d"]
+                if isinstance(data, str):
+                    data = json.loads(data)
+            if isinstance(data, list):
+                return [event for event in data if isinstance(event, dict)
+                        and str(event.get("ProcessDescForPortal") or "").strip()]
+            return []
+    except Exception:
+        return {"error": "Courier tracking is temporarily unavailable. Please try again later."}
 
 async def process_line_item(session, line_item, fulfillments):
     if line_item.fulfillment_status is None and line_item.fulfillable_quantity == 0:
@@ -1464,7 +1476,7 @@ async def process_line_item(session, line_item, fulfillments):
                         # Assumes the last item in the list holds the current status
                         tracking_details = data[-1]['ProcessDescForPortal']
                     else:
-                        tracking_details = "DELIVERED"  # Default or fallback
+                        tracking_details = "Tracking unavailable"
                     tracking_info.append({
                         'tracking_number': tracking_number,
                         'status': tracking_details,
@@ -1855,6 +1867,18 @@ def refresh_data():
 
 @app.route('/daraz')
 def daraz_callback():
+    pending = session.pop('daraz_oauth', None)
+    state = request.args.get('state', '')
+    try:
+        callback = get_daraz_callback_url()
+    except RuntimeError as error:
+        return jsonify({'success': False, 'error': str(error)}), 400
+    if (not pending or not state
+            or not secrets.compare_digest(state, pending.get('state', ''))
+            or not 0 <= time.time() - pending.get('created_at', 0) <= 600
+            or pending.get('callback') != callback
+            or request.base_url != callback):
+        return jsonify({'success': False, 'error': 'Invalid or expired Daraz connection. Start Connect Daraz again from Al Karamat; do not edit the callback URL.'}), 400
     code = (request.args.get('code') or '').strip()
     if code:
         try:
@@ -1910,7 +1934,12 @@ def displayTracking(tracking_num):
             return await fetch_tracking_data(session, tracking_num)
 
     data = asyncio.run(async_func())
-    return render_template('trackingdata_alk.html', data=data)
+    return render_template(
+        'trackingdata_alk.html',
+        data=data if isinstance(data, list) else [],
+        tracking_number=tracking_num,
+        tracking_error=data.get("error") if isinstance(data, dict) else None,
+    )
 
 
 @app.route('/abandoned')

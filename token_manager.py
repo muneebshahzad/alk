@@ -5,9 +5,9 @@ from datetime import datetime, timedelta
 import lazop
 
 from db import get_app_setting, set_app_setting
+from daraz_auth import token_setting_key
 
 
-DARAZ_TOKEN_SETTING_KEY = "daraz_tokens"
 DARAZ_API_URL = os.getenv("DARAZ_API_URL", "https://api.daraz.pk/rest").rstrip("/")
 
 
@@ -31,13 +31,13 @@ def save_tokens(access_token, refresh_token, expires_in=604800):
     }
     if not data["access_token"] or not data["refresh_token"]:
         raise RuntimeError("Daraz did not return both access and refresh tokens.")
-    if not set_app_setting(DARAZ_TOKEN_SETTING_KEY, json.dumps(data)):
+    if not set_app_setting(token_setting_key(), json.dumps(data)):
         raise RuntimeError("Could not persist Daraz tokens in the application database.")
     return data
 
 
 def load_tokens():
-    raw = (get_app_setting(DARAZ_TOKEN_SETTING_KEY, "") or "").strip()
+    raw = (get_app_setting(token_setting_key(), "") or "").strip()
     if raw:
         try:
             data = json.loads(raw)

@@ -62,14 +62,14 @@
             <h1 class="mb-4">Order Tracking</h1>
             <form action="/track" method="get" id="trackingForm">
     <div class="input-group">
-        <input type="text" class="form-control" placeholder="Enter Tracking Number" name="trackingNum" required>
+        <input type="text" class="form-control" placeholder="Enter Tracking Number" name="trackingNum" value="{{ tracking_number }}" required>
         <div class="input-group-append">
             <button class="btn btn-primary" type="submit">Track</button>
         </div>
     </div>
 </form>
         </div>
-        {% if data[0] %}
+        {% if data %}
         <!-- Tracking Information -->
         <div class="tracking-information">
             <h2>Tracking Information for {{ data[0].ConsignmentNo }}</h2>
@@ -99,13 +99,13 @@
             </ul>
         </div>
         {% endif %}
-        {% if data.Message %}
-        <div class="container mt-5">
-        <div class="alert alert-danger">
-            <h4 class="alert-heading">Error</h4>
-            <p>No Details Found!</p>
+        {% if not data %}
+        <div class="alert alert-warning" role="status">
+            <h4 class="alert-heading">Tracking unavailable</h4>
+            <p>Tracking number: <strong>{{ tracking_number }}</strong></p>
+            <p>{{ tracking_error or 'No tracking history is available from the courier yet. Please check again later.' }}</p>
+            <p class="mb-0">An unavailable tracking history does not mean the shipment has been delivered.</p>
         </div>
-    </div>
         {% endif %}
     </div>
 
