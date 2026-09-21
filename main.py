@@ -371,7 +371,8 @@ def daraz_connect():
         config = daraz_configuration()
     except RuntimeError as error:
         return jsonify({'success': False, 'error': str(error)}), 400
-    if request.host_url.rstrip('/') != 'https://dashboard.alkaramat.com':
+    # TLS can terminate at the hosting proxy; validate the host independently.
+    if request.host.lower() != 'dashboard.alkaramat.com':
         return jsonify({'error': 'Start Connect Daraz at https://dashboard.alkaramat.com.'}), 400
     state = secrets.token_urlsafe(32)
     session['daraz_oauth'] = {'state': state, 'created_at': time.time(), 'callback': callback}
@@ -1877,7 +1878,8 @@ def daraz_callback():
             or not secrets.compare_digest(state, pending.get('state', ''))
             or not 0 <= time.time() - pending.get('created_at', 0) <= 600
             or pending.get('callback') != callback
-            or request.base_url != callback):
+            or request.host.lower() != 'dashboard.alkaramat.com'
+            or request.path != '/daraz'):
         return jsonify({'success': False, 'error': 'Invalid or expired Daraz connection. Start Connect Daraz again from Al Karamat; do not edit the callback URL.'}), 400
     code = (request.args.get('code') or '').strip()
     if code:

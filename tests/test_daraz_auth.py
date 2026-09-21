@@ -62,3 +62,30 @@ class DarazAuthTests(unittest.TestCase):
     def test_wrong_host_cannot_start_connection(self):
         response = self.client.get('/daraz/connect', base_url='https://dashboard.thesleekspace.com')
         self.assertEqual(response.status_code, 400)
+
+    def test_proxy_http_connect_still_generates_https_callback(self):
+        response = self.client.get('/daraz/connect', base_url='http://dashboard.alkaramat.com')
+        self.assertEqual(response.status_code, 302)
+        params = parse_qs(urlsplit(response.location).query)
+        self.assertEqual(params['redirect_uri'], ['https://dashboard.alkaramat.com/daraz'])
+
+    def test_proxy_http_callback_accepts_valid_state_once(self):
+        base = 'http://dashboard.alkaramat.com'
+        response = self.client.get('/daraz/connect', base_url=base)
+        state = parse_qs(urlsplit(response.location).query)['state'][0]
+        # Stop at token exchange, avoiding any real network or persistence.
+        self.exchange.LazopClient.side_effect = RuntimeError('token exchange reached')
+        url = '/daraz?' + urlencode({'code': 'test-code', 'state': state})
+        response = self.client.get(url, base_url=base)
+        self.assertEqual(response.json['error'], 'token exchange reached')
+        self.exchange.LazopClient.assert_called_once()
+        self.exchange.reset_mock()
+        response = self.client.get(url, base_url=base)
+        self.assertEqual(response.status_code, 400)
+        self.exchange.LazopClient.assert_not_called()
+
+    def test_forwarded_header_cannot_override_wrong_host(self):
+        response = self.client.get('/daraz/connect',
+            base_url='http://dashboard.thesleekspace.com',
+            headers={'X-Forwarded-Host': 'dashboard.alkaramat.com', 'X-Forwarded-Proto': 'https'})
+        self.assertEqual(response.status_code, 400)
