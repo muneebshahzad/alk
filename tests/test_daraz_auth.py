@@ -21,7 +21,8 @@ class DarazAuthTests(unittest.TestCase):
         scope = dict(app=app, os=os, secrets=secrets, time=time, request=request,
                      session=session, jsonify=jsonify, redirect=redirect, url_for=url_for,
                      urlencode=urlencode, callback_url=callback_url,
-                     daraz_configuration=lambda: {'app_key': 'alk-key'}, lazop=self.exchange)
+                     daraz_configuration=lambda: {'app_key': 'alk-key', 'app_secret': 'test-secret'},
+                     DARAZ_API_URL='https://api.daraz.pk/rest', lazop=self.exchange)
         tree = ast.parse((Path(__file__).resolve().parents[1] / 'main.py').read_text())
         names = {'get_daraz_callback_url', 'daraz_connect', 'daraz_callback'}
         nodes = [n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name in names]
