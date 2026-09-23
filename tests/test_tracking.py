@@ -7,9 +7,17 @@ from types import SimpleNamespace
 import unittest
 
 source = ast.parse((Path(__file__).resolve().parents[1] / 'main.py').read_text())
-functions = [node for node in source.body if isinstance(node, ast.AsyncFunctionDef)
-             and node.name in {'fetch_tracking_data', 'process_line_item'}]
-namespace = {'json': json, 'ClientTimeout': lambda **kwargs: kwargs}
+functions = [node for node in source.body if
+             (isinstance(node, ast.AsyncFunctionDef)
+              and node.name in {'fetch_tracking_data', 'process_line_item'})
+             or (isinstance(node, ast.FunctionDef)
+                 and node.name in {'is_digidokaan_tracking_number', 'tracking_url_for_number'})]
+namespace = {
+    'json': json,
+    'ClientTimeout': lambda **kwargs: kwargs,
+    'quote': __import__('urllib.parse', fromlist=['quote']).quote,
+    'urlencode': __import__('urllib.parse', fromlist=['urlencode']).urlencode,
+}
 exec(compile(ast.Module(body=functions, type_ignores=[]), 'main.py', 'exec'), namespace)
 
 
@@ -61,6 +69,18 @@ class TrackingTests(unittest.IsolatedAsyncioTestCase):
         line = SimpleNamespace(quantity=2, fulfillment_status=None, fulfillable_quantity=2)
         result = await namespace['process_line_item'](None, line, [])
         self.assertEqual(result[0]['status'], 'Un-Booked')
+
+    def test_digidokaan_tracking_url(self):
+        number = '22322367960798'
+        self.assertTrue(namespace['is_digidokaan_tracking_number'](number))
+        self.assertEqual(
+            namespace['tracking_url_for_number'](number),
+            'https://digidokaan.pk/real-time-tracking?t_id=22322367960798',
+        )
+
+    def test_other_tracking_numbers_stay_on_portal(self):
+        self.assertFalse(namespace['is_digidokaan_tracking_number']('123456789'))
+        self.assertEqual(namespace['tracking_url_for_number']('123 456'), '/track/123%20456')
 
 
 if __name__ == '__main__':

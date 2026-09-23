@@ -1460,6 +1460,18 @@ async def fetch_tracking_data(session, tracking_number):
     except Exception:
         return {"error": "Courier tracking is temporarily unavailable. Please try again later."}
 
+
+def is_digidokaan_tracking_number(tracking_number):
+    normalized = "".join(character for character in str(tracking_number or "") if character.isdigit())
+    return len(normalized) == 14 and normalized.startswith("223")
+
+
+def tracking_url_for_number(tracking_number):
+    normalized = str(tracking_number or "").strip()
+    if is_digidokaan_tracking_number(normalized):
+        return "https://digidokaan.pk/real-time-tracking?" + urlencode({"t_id": normalized})
+    return f"/track/{quote(normalized, safe='')}"
+
 async def process_line_item(session, line_item, fulfillments):
     if line_item.fulfillment_status is None and line_item.fulfillable_quantity == 0:
         return []
@@ -1480,6 +1492,7 @@ async def process_line_item(session, line_item, fulfillments):
                         tracking_details = "Tracking unavailable"
                     tracking_info.append({
                         'tracking_number': tracking_number,
+                        'tracking_url': tracking_url_for_number(tracking_number),
                         'status': tracking_details,
                         'quantity': item.quantity
                     })
@@ -1572,6 +1585,7 @@ async def process_order(session, order):
                     'product_title': line_item.title + (f" - {variant_name}" if variant_name else ""),
                     'quantity': info['quantity'],
                     'tracking_number': info['tracking_number'],
+                    'tracking_url': info.get('tracking_url') or tracking_url_for_number(info['tracking_number']),
                     'status': info['status']
                 })
                 order_info['status'] = info['status']
@@ -1931,6 +1945,9 @@ def daraz_token_status():
 
 @app.route('/track/<tracking_num>')
 def displayTracking(tracking_num):
+    if is_digidokaan_tracking_number(tracking_num):
+        return redirect(tracking_url_for_number(tracking_num))
+
     async def async_func():
         async with aiohttp.ClientSession() as session:
             return await fetch_tracking_data(session, tracking_num)

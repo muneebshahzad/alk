@@ -216,7 +216,7 @@
                   <div class="item-title">{{ item.item_title }}</div>
                   <div class="item-meta">
                     {% if item.tracking_number and item.tracking_number != 'N/A' %}
-                    <a href="/track/{{ item.tracking_number }}" target="_blank" style="color:#4e73df;text-decoration:none;">{{ item.tracking_number }}</a>
+                    <a href="{{ item.tracking_url or ('/track/' ~ item.tracking_number) }}" target="_blank" rel="noopener" style="color:#4e73df;text-decoration:none;">{{ item.tracking_number }}</a>
                     {% else %}
                     No tracking yet
                     {% endif %}
