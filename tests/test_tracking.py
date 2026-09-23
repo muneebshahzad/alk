@@ -17,8 +17,19 @@ namespace = {
     'ClientTimeout': lambda **kwargs: kwargs,
     'quote': __import__('urllib.parse', fromlist=['quote']).quote,
     'urlencode': __import__('urllib.parse', fromlist=['urlencode']).urlencode,
+    'fetch_tracking_status': None,
 }
 exec(compile(ast.Module(body=functions, type_ignores=[]), 'main.py', 'exec'), namespace)
+
+
+async def tracking_status_from_call_courier(session, tracking_number):
+    data = await namespace['fetch_tracking_data'](session, tracking_number)
+    if data and isinstance(data, list) and data[-1].get('ProcessDescForPortal'):
+        return data[-1]['ProcessDescForPortal']
+    return 'Tracking unavailable'
+
+
+namespace['fetch_tracking_status'] = tracking_status_from_call_courier
 
 
 class Response:
@@ -70,12 +81,12 @@ class TrackingTests(unittest.IsolatedAsyncioTestCase):
         result = await namespace['process_line_item'](None, line, [])
         self.assertEqual(result[0]['status'], 'Un-Booked')
 
-    def test_digidokaan_tracking_url(self):
+    def test_digidokaan_tracking_uses_portal(self):
         number = '22322367960798'
         self.assertTrue(namespace['is_digidokaan_tracking_number'](number))
         self.assertEqual(
             namespace['tracking_url_for_number'](number),
-            'https://digidokaan.pk/real-time-tracking?t_id=22322367960798',
+            '/track/22322367960798',
         )
 
     def test_other_tracking_numbers_stay_on_portal(self):

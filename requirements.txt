@@ -7,3 +7,4 @@ pytz
 ShopifyAPI
 gunicorn 
 psycopg2-binary
+certifi

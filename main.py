@@ -34,6 +34,10 @@ from db import (
     upsert_order_status,
 )
 from token_manager import get_access_token, load_tokens, save_tokens
+from digidokaan import (
+    fetch_tracking_history as fetch_digidokaan_tracking_history,
+    fetch_tracking_status as fetch_digidokaan_tracking_status,
+)
 
 app = Flask(__name__)
 app.debug = True
@@ -1461,6 +1465,16 @@ async def fetch_tracking_data(session, tracking_number):
         return {"error": "Courier tracking is temporarily unavailable. Please try again later."}
 
 
+async def fetch_tracking_status(session, tracking_number):
+    if is_digidokaan_tracking_number(tracking_number):
+        status = await fetch_digidokaan_tracking_status(session, tracking_number)
+        return status or "Tracking unavailable"
+    data = await fetch_tracking_data(session, tracking_number)
+    if data and isinstance(data, list) and data[-1].get("ProcessDescForPortal"):
+        return data[-1]["ProcessDescForPortal"]
+    return "Tracking unavailable"
+
+
 def is_digidokaan_tracking_number(tracking_number):
     normalized = "".join(character for character in str(tracking_number or "") if character.isdigit())
     return len(normalized) == 14 and normalized.startswith("223")
@@ -1468,8 +1482,6 @@ def is_digidokaan_tracking_number(tracking_number):
 
 def tracking_url_for_number(tracking_number):
     normalized = str(tracking_number or "").strip()
-    if is_digidokaan_tracking_number(normalized):
-        return "https://digidokaan.pk/real-time-tracking?" + urlencode({"t_id": normalized})
     return f"/track/{quote(normalized, safe='')}"
 
 async def process_line_item(session, line_item, fulfillments):
@@ -1484,12 +1496,7 @@ async def process_line_item(session, line_item, fulfillments):
             for item in fulfillment.line_items:
                 if item.id == line_item.id:
                     tracking_number = fulfillment.tracking_number
-                    data = await fetch_tracking_data(session, tracking_number)
-                    if data and isinstance(data, list) and data[-1].get('ProcessDescForPortal'):
-                        # Assumes the last item in the list holds the current status
-                        tracking_details = data[-1]['ProcessDescForPortal']
-                    else:
-                        tracking_details = "Tracking unavailable"
+                    tracking_details = await fetch_tracking_status(session, tracking_number)
                     tracking_info.append({
                         'tracking_number': tracking_number,
                         'tracking_url': tracking_url_for_number(tracking_number),
@@ -1945,11 +1952,10 @@ def daraz_token_status():
 
 @app.route('/track/<tracking_num>')
 def displayTracking(tracking_num):
-    if is_digidokaan_tracking_number(tracking_num):
-        return redirect(tracking_url_for_number(tracking_num))
-
     async def async_func():
         async with aiohttp.ClientSession() as session:
+            if is_digidokaan_tracking_number(tracking_num):
+                return await fetch_digidokaan_tracking_history(session, tracking_num)
             return await fetch_tracking_data(session, tracking_num)
 
     data = asyncio.run(async_func())
