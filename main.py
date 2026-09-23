@@ -2158,7 +2158,7 @@ def build_employee_portal_orders():
         refresh_daraz_cache_if_needed()
         employee_orders = [serialize_shopify_order_for_employee(order) for order in order_details]
         employee_orders.extend(serialize_daraz_order_for_employee(order) for order in daraz_orders)
-        return sorted(employee_orders, key=lambda order: parse_date_for_sort(order.get("created_at")), reverse=True)
+        return sorted(employee_orders, key=lambda order: parse_date_timestamp(order.get("created_at")), reverse=True)
     except Exception as error:
         print(f"Could not load employee portal orders: {error}")
         return []
@@ -2318,7 +2318,9 @@ def build_pending_orders_mobile_data():
                 "pending_total_cost": round(sum(parse_money(item.get("line_cost_total", 0)) for item in items), 2),
             }
         )
-    return sorted(all_orders, key=lambda order: parse_date_for_sort(order.get("date")), reverse=True)
+    # Shopify display dates can be timezone-naive while Daraz returns ISO dates
+    # with an offset. Normalize both to numeric timestamps before comparing them.
+    return sorted(all_orders, key=lambda order: parse_date_timestamp(order.get("date")), reverse=True)
 
 
 def build_pending_items_table_data():
@@ -2398,7 +2400,7 @@ def build_employee_approval_items():
                     "tags": shopify_order.get("tags", []),
                 }
             )
-    return sorted(approvals, key=lambda item: parse_date_for_sort(item.get("date")), reverse=True)
+    return sorted(approvals, key=lambda item: parse_date_timestamp(item.get("date")), reverse=True)
 
 
 def get_active_shopify_products(limit=250):
@@ -2659,7 +2661,7 @@ def employee_portal_updates():
         }
         for order in orders
     ]
-    summaries.sort(key=lambda item: parse_date_for_sort(item.get("created_at")), reverse=True)
+    summaries.sort(key=lambda item: parse_date_timestamp(item.get("created_at")), reverse=True)
     return jsonify(
         {
             "success": True,
