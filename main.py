@@ -64,7 +64,6 @@ DARAZ_ORDER_STATUSES = tuple(
 DARAZ_ORDER_LOOKBACK_DAYS = max(int(os.getenv("DARAZ_ORDER_LOOKBACK_DAYS", "365")), 1)
 DARAZ_PAGE_LIMIT = min(max(int(os.getenv("DARAZ_PAGE_LIMIT", "50")), 1), 100)
 DARAZ_MAX_PAGES_PER_STATUS = max(int(os.getenv("DARAZ_MAX_PAGES_PER_STATUS", "1")), 1)
-SHOPIFY_ORDER_LOOKBACK_DAYS = max(int(os.getenv("SHOPIFY_ORDER_LOOKBACK_DAYS", "30")), 1)
 
 
 def normalize_scan_term(term):
@@ -1508,10 +1507,13 @@ async def process_line_item(session, line_item, fulfillments):
         {"tracking_number": "N/A", "status": "Un-Booked", "quantity": line_item.quantity}
     ]
 
-ORDER_PROCESS_SEM = asyncio.Semaphore(5)
-
 async def safe_process_order(session, order):
-    async with ORDER_PROCESS_SEM:
+    loop = asyncio.get_running_loop()
+    semaphore = getattr(loop, "order_process_sem", None)
+    if semaphore is None:
+        semaphore = asyncio.Semaphore(5)
+        loop.order_process_sem = semaphore
+    async with semaphore:
         return await process_order(session, order)
 
 
@@ -1612,22 +1614,13 @@ def pending_orders():
     return render_template('pending.html', all_orders=all_orders, pending_items=pending_items, summary=summary)
 
 
-def shopify_order_query_parameters(now=None):
-    current_time = now or datetime.now().astimezone()
-    return {
-        "limit": 250,
-        "order": "created_at DESC",
-        "created_at_min": (current_time - timedelta(days=SHOPIFY_ORDER_LOOKBACK_DAYS)).isoformat(timespec="seconds"),
-        "status": "any",
-    }
-
-
 async def getShopifyOrders():
+    start_date = datetime(2024, 9, 1).isoformat()
     order_details = []
     total_start_time = time.time()
 
     try:
-        orders = shopify.Order.find(**shopify_order_query_parameters())
+        orders = shopify.Order.find(limit=250, order="created_at DESC", created_at_min=start_date)
     except Exception as e:
         print(f"Error fetching orders: {e}")
         return []
