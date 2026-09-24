@@ -1480,7 +1480,7 @@ async def fetch_tracking_status(session, tracking_number):
 
 def is_digidokaan_tracking_number(tracking_number):
     normalized = "".join(character for character in str(tracking_number or "") if character.isdigit())
-    return len(normalized) == 14 and normalized.startswith("223")
+    return len(normalized) in {14, 15} and normalized.startswith("223")
 
 
 def tracking_url_for_number(tracking_number):

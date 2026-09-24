@@ -89,6 +89,11 @@ class TrackingTests(unittest.IsolatedAsyncioTestCase):
             '/track/22322367960798',
         )
 
+    def test_fifteen_digit_digidokaan_tracking_uses_api(self):
+        number = '223341067972346'
+        self.assertTrue(namespace['is_digidokaan_tracking_number'](number))
+        self.assertEqual(namespace['tracking_url_for_number'](number), '/track/223341067972346')
+
     def test_other_tracking_numbers_stay_on_portal(self):
         self.assertFalse(namespace['is_digidokaan_tracking_number']('123456789'))
         self.assertEqual(namespace['tracking_url_for_number']('123 456'), '/track/123%20456')
