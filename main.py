@@ -2975,13 +2975,12 @@ shopify.ShopifyResource.set_user(api_key)
 shopify.ShopifyResource.set_password(password)
 init_db()
 
-try:
-    print("Starting initial fetch...")
-    order_details = asyncio.run(getShopifyOrders())
-    print(f"Loaded {len(order_details)} orders.")
-except Exception as e:
-    print(f"Init load failed: {e}")
-    order_details = []
+order_details = []
+print("Starting initial order fetch in background...")
+with tracking_refresh_lock:
+    tracking_refresh_state.update(running=True, error="")
+initial_refresh_worker = threading.Thread(target=refresh_tracking_in_background, daemon=True)
+initial_refresh_worker.start()
 
 if __name__ == "__main__":
     app.run(port=5001)
