@@ -48,6 +48,7 @@ daraz_orders = []
 daraz_refresh_lock = threading.Lock()
 daraz_refresh_attempted = False
 daraz_last_error = ""
+product_display_cache = {}
 EMPLOYEE_PORTAL_SESSION_KEY = "employee_portal_authenticated"
 ADMIN_PORTAL_SESSION_KEY = "admin_portal_authenticated"
 EMPLOYEE_PORTAL_PASSWORD = os.getenv("EMPLOYEE_PORTAL_PASSWORD", "@@@t")
@@ -1507,11 +1508,64 @@ async def process_line_item(session, line_item, fulfillments):
         {"tracking_number": "N/A", "status": "Un-Booked", "quantity": line_item.quantity}
     ]
 
+
+async def fetch_product_display(session, line_item):
+    image_src = "https://static.thenounproject.com/png/1578832-200.png"
+    variant_name = line_item.variant_title or ""
+    if line_item.product_id is None:
+        return image_src, variant_name
+    cache_key = (str(line_item.product_id), str(line_item.variant_id or ""))
+    cached = product_display_cache.get(cache_key)
+    if cached:
+        return cached
+
+    loop = asyncio.get_running_loop()
+    inflight = getattr(loop, "product_display_inflight", None)
+    if inflight is None:
+        inflight = {}
+        loop.product_display_inflight = inflight
+
+    task = inflight.get(cache_key)
+    if task is None:
+        async def load_product():
+            current_image = image_src
+            current_variant = variant_name
+            try:
+                product_data = await async_shopify_fetch(session, f"products/{line_item.product_id}.json")
+                product = product_data.get("product") if product_data else None
+                if product and product.get("variants"):
+                    for variant in product["variants"]:
+                        if str(variant.get("id")) != str(line_item.variant_id):
+                            continue
+                        image_id = variant.get("image_id")
+                        if image_id is not None:
+                            image_data = await async_shopify_fetch(
+                                session, f"products/{line_item.product_id}/images/{image_id}.json"
+                            )
+                            if image_data and image_data.get("image"):
+                                current_image = image_data["image"].get("src") or current_image
+                        else:
+                            current_image = (product.get("image") or {}).get("src") or current_image
+                        break
+            except Exception as error:
+                print(f"Error fetching product details: {error}")
+            return current_image, current_variant
+
+        task = asyncio.create_task(load_product())
+        inflight[cache_key] = task
+    try:
+        result = await task
+        product_display_cache[cache_key] = result
+        return result
+    finally:
+        if inflight.get(cache_key) is task:
+            inflight.pop(cache_key, None)
+
 async def safe_process_order(session, order):
     loop = asyncio.get_running_loop()
     semaphore = getattr(loop, "order_process_sem", None)
     if semaphore is None:
-        semaphore = asyncio.Semaphore(5)
+        semaphore = asyncio.Semaphore(25)
         loop.order_process_sem = semaphore
     async with semaphore:
         return await process_order(session, order)
@@ -1560,30 +1614,7 @@ async def process_order(session, order):
         for tracking_info_list, line_item in zip(results, order.line_items):
             if tracking_info_list is None: continue
 
-            image_src = "https://static.thenounproject.com/png/1578832-200.png"
-            variant_name = line_item.variant_title or ""
-
-            if line_item.product_id is not None:
-                try:
-                    product_endpoint = f"products/{line_item.product_id}.json"
-                    product_data = await async_shopify_fetch(session, product_endpoint)
-                    product = product_data.get('product') if product_data else None
-
-                    if product and product.get('variants'):
-                        for variant in product['variants']:
-                            if variant['id'] == line_item.variant_id:
-                                image_id = variant.get('image_id')
-                                variant_name = line_item.variant_title or ""
-                                if image_id is not None:
-                                    image_endpoint = f"products/{line_item.product_id}/images/{image_id}.json"
-                                    image_data = await async_shopify_fetch(session, image_endpoint)
-                                    if image_data and image_data.get('image'):
-                                        image_src = image_data['image']['src']
-                                else:
-                                    image_src = product.get('image', {}).get('src', image_src)
-                                break
-                except Exception as e:
-                    print(f"Error fetching product details: {e}")
+            image_src, variant_name = await fetch_product_display(session, line_item)
 
             for info in tracking_info_list:
                 order_info['line_items'].append({
