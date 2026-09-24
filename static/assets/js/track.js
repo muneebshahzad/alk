@@ -77,14 +77,12 @@
         });
     }
         document.getElementById('refreshButton').addEventListener('click', async function () {
-             alert('Refreshing in Background!')
-            const response = await fetch('/refresh', {
-                method: 'POST'
-            });
-            const result = await response.json();
-            if (result.message === 'Data refreshed successfully') {
-                location.reload();
-            } else {
-                alert('Failed to refresh data');
+            await fetch('/refresh', { method: 'POST' });
+            for (let attempt = 0; attempt < 150; attempt++) {
+                await new Promise(resolve => setTimeout(resolve, 2000));
+                const state = await fetch('/refresh/status', { cache: 'no-store' }).then(response => response.json());
+                if (state.status === 'complete') return location.reload();
+                if (state.status === 'failed') return alert(state.message);
             }
+            alert('Refresh is taking longer than expected');
         });

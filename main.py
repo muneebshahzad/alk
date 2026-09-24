@@ -49,6 +49,8 @@ daraz_refresh_lock = threading.Lock()
 daraz_refresh_attempted = False
 daraz_last_error = ""
 product_display_cache = {}
+tracking_refresh_lock = threading.Lock()
+tracking_refresh_state = {"running": False, "error": "", "shopify_count": 0, "daraz_count": 0}
 EMPLOYEE_PORTAL_SESSION_KEY = "employee_portal_authenticated"
 ADMIN_PORTAL_SESSION_KEY = "admin_portal_authenticated"
 EMPLOYEE_PORTAL_PASSWORD = os.getenv("EMPLOYEE_PORTAL_PASSWORD", "@@@t")
@@ -1895,8 +1897,7 @@ def tracking_home():
     )
 
 
-@app.route('/refresh', methods=['POST'])
-def refresh_data():
+def refresh_tracking_in_background():
     global order_details
     try:
         refreshed_orders = asyncio.run(getShopifyOrders())
@@ -1905,24 +1906,41 @@ def refresh_data():
         elif order_details:
             print("Shopify refresh returned no orders; preserving the existing dashboard cache.")
         daraz_rows = refresh_daraz_cache_if_needed(force=True)
-        if request.headers.get("X-Requested-With") == "XMLHttpRequest" or request.is_json:
-            return jsonify(
-                {
-                    "message": "Data refreshed successfully",
-                    "shopify_count": len(order_details),
-                    "daraz_count": len(daraz_rows),
-                }
+        with tracking_refresh_lock:
+            tracking_refresh_state.update(
+                running=False,
+                error="",
+                shopify_count=len(order_details),
+                daraz_count=len(daraz_rows),
             )
-        return render_template(
-            "track.html",
-            order_details=order_details,
-            darazOrders=daraz_rows,
-            employee_approvals=build_employee_approval_items(),
-            abandoned_summary=get_abandoned_summary_safe(),
-        )
-    except Exception as e:
-        print(f"Error refreshing data: {e}")
-        return jsonify({'message': 'Failed to refresh data'}), 500
+    except Exception as error:
+        print(f"Error refreshing data: {error}")
+        with tracking_refresh_lock:
+            tracking_refresh_state.update(running=False, error=str(error))
+
+
+@app.route('/refresh', methods=['POST'])
+def refresh_data():
+    with tracking_refresh_lock:
+        if tracking_refresh_state["running"]:
+            return jsonify({"message": "Tracking refresh is already running", "status": "running"}), 202
+        tracking_refresh_state.update(running=True, error="")
+    worker = threading.Thread(target=refresh_tracking_in_background, daemon=True)
+    worker.start()
+    return jsonify({"message": "Tracking refresh started", "status": "running"}), 202
+
+
+@app.route('/refresh/status')
+def refresh_data_status():
+    with tracking_refresh_lock:
+        state = dict(tracking_refresh_state)
+    state["status"] = "running" if state["running"] else ("failed" if state["error"] else "complete")
+    state["message"] = (
+        "Refreshing tracking data"
+        if state["running"]
+        else ("Tracking refresh failed" if state["error"] else "Data refreshed successfully")
+    )
+    return jsonify(state)
 
 
 @app.route('/daraz')

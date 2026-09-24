@@ -1105,24 +1105,31 @@ async function applyReturnedToAll() {
 }
 
 // ── Refresh Tracking ──
-function refreshTracking() {
+async function refreshTracking() {
   const btn  = document.getElementById('refreshTrackingBtn');
   const icon = document.getElementById('refreshIcon');
   btn.disabled = true;
   icon.style.animation = 'spin 1s linear infinite';
   icon.style.display = 'inline-block';
-  fetch('/refresh', { method: 'POST', headers: { 'X-Requested-With': 'XMLHttpRequest' } })
-    .then(r => r.json())
-    .then(d => {
-      icon.style.animation = '';
-      btn.disabled = false;
-      if (d.message === 'Data refreshed successfully') {
+  try {
+    await fetch('/refresh', { method: 'POST', headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+    showToast('Refreshing tracking data…');
+    for (let attempt = 0; attempt < 150; attempt++) {
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      const response = await fetch('/refresh/status', { cache: 'no-store' });
+      const state = await response.json();
+      if (state.status === 'complete') {
         location.reload();
         return;
       }
-      showToast(d.message || 'Tracking refresh completed.');
-    })
-    .catch(() => { icon.style.animation = ''; btn.disabled = false; showToast('Refresh failed'); });
+      if (state.status === 'failed') throw new Error(state.error || 'Refresh failed');
+    }
+    throw new Error('Refresh is taking longer than expected');
+  } catch (error) {
+    icon.style.animation = '';
+    btn.disabled = false;
+    showToast(error.message || 'Refresh failed');
+  }
 }
 
 // ── Dropdowns ──
