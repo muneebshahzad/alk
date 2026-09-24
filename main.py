@@ -64,6 +64,7 @@ DARAZ_ORDER_STATUSES = tuple(
 DARAZ_ORDER_LOOKBACK_DAYS = max(int(os.getenv("DARAZ_ORDER_LOOKBACK_DAYS", "365")), 1)
 DARAZ_PAGE_LIMIT = min(max(int(os.getenv("DARAZ_PAGE_LIMIT", "50")), 1), 100)
 DARAZ_MAX_PAGES_PER_STATUS = max(int(os.getenv("DARAZ_MAX_PAGES_PER_STATUS", "1")), 1)
+SHOPIFY_ORDER_LOOKBACK_DAYS = max(int(os.getenv("SHOPIFY_ORDER_LOOKBACK_DAYS", "30")), 1)
 
 
 def normalize_scan_term(term):
@@ -1611,13 +1612,22 @@ def pending_orders():
     return render_template('pending.html', all_orders=all_orders, pending_items=pending_items, summary=summary)
 
 
+def shopify_order_query_parameters(now=None):
+    current_time = now or datetime.now().astimezone()
+    return {
+        "limit": 250,
+        "order": "created_at DESC",
+        "created_at_min": (current_time - timedelta(days=SHOPIFY_ORDER_LOOKBACK_DAYS)).isoformat(timespec="seconds"),
+        "status": "any",
+    }
+
+
 async def getShopifyOrders():
-    start_date = datetime(2024, 9, 1).isoformat()
     order_details = []
     total_start_time = time.time()
 
     try:
-        orders = shopify.Order.find(limit=250, order="created_at DESC", created_at_min=start_date)
+        orders = shopify.Order.find(**shopify_order_query_parameters())
     except Exception as e:
         print(f"Error fetching orders: {e}")
         return []
@@ -1865,7 +1875,11 @@ def tracking_home():
 def refresh_data():
     global order_details
     try:
-        order_details = asyncio.run(getShopifyOrders())
+        refreshed_orders = asyncio.run(getShopifyOrders())
+        if refreshed_orders:
+            order_details = refreshed_orders
+        elif order_details:
+            print("Shopify refresh returned no orders; preserving the existing dashboard cache.")
         daraz_rows = refresh_daraz_cache_if_needed(force=True)
         if request.headers.get("X-Requested-With") == "XMLHttpRequest" or request.is_json:
             return jsonify(
