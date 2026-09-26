@@ -313,3 +313,42 @@ async def fetch_pending_shipper_advice(session):
     _shipper_advice_cache = rows
     _shipper_advice_cache_expires_at = time.monotonic() + 2 * 60
     return rows
+
+
+async def submit_shipper_advice(session, tracking_number, gateway_id, advice_status, remarks):
+    """Submit a reattempt or return instruction for one pending shipment."""
+    global _shipper_advice_cache, _shipper_advice_cache_expires_at
+    normalized_tracking = "".join(ch for ch in str(tracking_number or "") if ch.isdigit())
+    normalized_status = str(advice_status or "").strip().casefold()
+    status_values = {"reattempt": "reattempt", "return": "return"}
+    if not normalized_tracking or normalized_status not in status_values:
+        raise ValueError("Choose Reattempt or Return")
+    clean_remarks = str(remarks or "").strip()
+    if not clean_remarks:
+        raise ValueError("Remarks are required")
+    config = configuration()
+    if not config:
+        raise RuntimeError("DigiDokaan is not configured")
+
+    token = await _access_token(session, config)
+    timeout = ClientTimeout(total=25)
+    async with session.post(
+        config["base_url"] + "/api/courier/shipper_advice_action",
+        json={
+            "phone": config["phone"],
+            "gateway_id": str(gateway_id or config["gateway_id"]),
+            "tracking_no": normalized_tracking,
+            "shipper_advice_status": status_values[normalized_status],
+            "shipper_advice_remarks": clean_remarks,
+        },
+        headers={"Accept": "application/json", "Authorization": "Bearer " + token},
+        timeout=timeout,
+        ssl=_SSL_CONTEXT,
+    ) as response:
+        body = await response.json(content_type=None)
+    if response.status != 200 or not isinstance(body, dict) or body.get("code") != 200:
+        message = (body.get("error") or body.get("message")) if isinstance(body, dict) else ""
+        raise RuntimeError(message or "DigiDokaan did not accept the shipper advice")
+    _shipper_advice_cache = None
+    _shipper_advice_cache_expires_at = 0.0
+    return body

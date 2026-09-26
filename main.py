@@ -39,6 +39,7 @@ from digidokaan import (
     fetch_payments as fetch_digidokaan_payments,
     fetch_tracking_history as fetch_digidokaan_tracking_history,
     fetch_tracking_status as fetch_digidokaan_tracking_status,
+    submit_shipper_advice,
 )
 
 app = Flask(__name__)
@@ -1671,6 +1672,45 @@ def payments_page():
         payments = {"balance": {}, "ready": {}, "ledger": {}}
         error = str(fetch_error)
     return render_template("payments.html", payments=payments, payments_error=error)
+
+
+@app.route('/api/shipper-advice', methods=['POST'])
+def post_shipper_advice():
+    data = request.get_json(silent=True) or {}
+    tracking_number = "".join(ch for ch in str(data.get("tracking_number") or "") if ch.isdigit())
+    advice_status = str(data.get("advice_status") or "").strip().casefold()
+    remarks = str(data.get("remarks") or "").strip()
+    if not tracking_number or advice_status not in {"reattempt", "return"} or not remarks:
+        return jsonify({"success": False, "error": "Tracking number, action and remarks are required."}), 400
+
+    async def submit():
+        async with aiohttp.ClientSession() as client:
+            pending = await fetch_pending_shipper_advice(client)
+            shipment = next(
+                (row for row in pending if str(row.get("tracking_no") or "").strip() == tracking_number),
+                None,
+            )
+            if not shipment:
+                raise ValueError("This shipment is no longer awaiting shipper advice.")
+            return await submit_shipper_advice(
+                client,
+                tracking_number,
+                shipment.get("gateway_id"),
+                advice_status,
+                remarks,
+            )
+
+    try:
+        result = asyncio.run(submit())
+        return jsonify({
+            "success": True,
+            "message": result.get("msg") or result.get("message") or "Shipper advice submitted successfully.",
+        })
+    except ValueError as error:
+        return jsonify({"success": False, "error": str(error)}), 409
+    except Exception as error:
+        print(f"Could not submit DigiDokaan shipper advice: {error}")
+        return jsonify({"success": False, "error": str(error)}), 502
 
 
 async def getShopifyOrders():

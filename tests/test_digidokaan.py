@@ -6,6 +6,28 @@ from unittest.mock import AsyncMock, patch
 import digidokaan
 
 
+class AdviceResponse:
+    status = 200
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args):
+        return None
+
+    async def json(self, **kwargs):
+        return {"code": 200, "msg": "Shipper advice submitted successfully."}
+
+
+class AdviceSession:
+    def __init__(self):
+        self.payload = None
+
+    def post(self, url, **kwargs):
+        self.payload = kwargs.get("json")
+        return AdviceResponse()
+
+
 class DigiDokaanTrackingTests(IsolatedAsyncioTestCase):
     def setUp(self):
         digidokaan._status_cache.clear()
@@ -59,6 +81,37 @@ class DigiDokaanTrackingTests(IsolatedAsyncioTestCase):
         self.assertEqual(statuses, ["Delivered", "Delivered"])
         self.assertEqual(cached, "Delivered")
         fetch.assert_awaited_once()
+
+    async def test_submit_shipper_advice_uses_validated_payload(self):
+        session = AdviceSession()
+        config = {
+            "base_url": "https://digidokaan.pk",
+            "phone": "923000000000",
+            "password": "secret",
+            "gateway_id": "5",
+        }
+        with patch.object(digidokaan, "configuration", return_value=config), patch.object(
+            digidokaan, "_access_token", AsyncMock(return_value="private-token")
+        ):
+            result = await digidokaan.submit_shipper_advice(
+                session, "223 17467960795", 5, "Reattempt", "Please attempt tomorrow"
+            )
+
+        self.assertEqual(result["code"], 200)
+        self.assertEqual(
+            session.payload,
+            {
+                "phone": "923000000000",
+                "gateway_id": "5",
+                "tracking_no": "22317467960795",
+                "shipper_advice_status": "reattempt",
+                "shipper_advice_remarks": "Please attempt tomorrow",
+            },
+        )
+
+    async def test_submit_shipper_advice_requires_remarks(self):
+        with self.assertRaisesRegex(ValueError, "Remarks are required"):
+            await digidokaan.submit_shipper_advice(object(), "22317467960795", 5, "return", "")
 
 
 if __name__ == "__main__":
