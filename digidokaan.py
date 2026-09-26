@@ -18,6 +18,7 @@ _shipper_advice_cache_expires_at = 0.0
 _TOKEN_TTL_SECONDS = 6 * 60 * 60
 _ACTIVE_CACHE_SECONDS = 5 * 60
 _TERMINAL_CACHE_SECONDS = 24 * 60 * 60
+_OPERATIONS_REFRESH_SECONDS = 6 * 60 * 60
 _TERMINAL_STATUSES = {"delivered", "returned", "return delivered", "cancelled"}
 _SSL_CONTEXT = ssl.create_default_context(cafile=certifi.where())
 
@@ -285,7 +286,7 @@ async def fetch_payments(session):
     )
     result = {"balance": balance, "ready": ready, "ledger": ledger}
     _payments_cache = result
-    _payments_cache_expires_at = time.monotonic() + 5 * 60
+    _payments_cache_expires_at = time.monotonic() + _OPERATIONS_REFRESH_SECONDS
     return result
 
 
@@ -311,7 +312,7 @@ async def fetch_pending_shipper_advice(session):
     if response.status != 200 or not isinstance(rows, list):
         raise RuntimeError("DigiDokaan shipper advice is temporarily unavailable")
     _shipper_advice_cache = rows
-    _shipper_advice_cache_expires_at = time.monotonic() + 2 * 60
+    _shipper_advice_cache_expires_at = time.monotonic() + _OPERATIONS_REFRESH_SECONDS
     return rows
 
 
