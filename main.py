@@ -1902,7 +1902,15 @@ def refresh_tracking_in_background():
     try:
         refreshed_orders = asyncio.run(getShopifyOrders())
         if refreshed_orders:
-            order_details = refreshed_orders
+            refreshed_ids = {
+                str(order.get("id") or order.get("shopify_id") or "")
+                for order in refreshed_orders
+            }
+            preserved_orders = [
+                order for order in order_details
+                if str(order.get("id") or order.get("shopify_id") or "") not in refreshed_ids
+            ]
+            order_details = refreshed_orders + preserved_orders
         elif order_details:
             print("Shopify refresh returned no orders; preserving the existing dashboard cache.")
         daraz_rows = refresh_daraz_cache_if_needed(force=True)
