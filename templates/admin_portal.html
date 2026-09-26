@@ -63,10 +63,12 @@
       padding: 12px 14px;
     }
     .brand-lockup {
-      width: 118px;
-      display: block;
+      display: flex;
+      align-items:center;
+      gap:9px;
       margin: 0;
     }
+    .brand-icon { width:34px; height:34px; border-radius:9px; flex:0 0 auto; }
     .brand-lockup span {
       display: block;
       color: var(--ink);
@@ -216,6 +218,14 @@
       justify-content: center;
       border: 2px solid #fff;
     }
+    .notification-wrap { position:relative; }
+    .notification-panel { position:fixed; top:76px; left:max(12px,env(safe-area-inset-left)); z-index:55; width:min(420px,calc(100vw - 24px)); max-height:min(70dvh,620px); overflow:auto; display:none; background:#fffdf9; border:1px solid var(--line); border-radius:18px; box-shadow:var(--shadow); }
+    .notification-panel.open { display:block; }
+    .notification-head { display:flex; align-items:center; justify-content:space-between; padding:14px 16px; border-bottom:1px solid var(--line); font-weight:800; }
+    .notification-group-title { padding:12px 15px 6px; color:var(--muted); font-size:10px; font-weight:900; letter-spacing:.08em; text-transform:uppercase; }
+    .notification-item { width:100%; display:grid; grid-template-columns:1fr auto; gap:4px 10px; padding:12px 15px; text-align:left; background:transparent; border:0; border-bottom:1px solid rgba(20,33,61,.07); }
+    .notification-item strong { font-size:13px; color:var(--ink); }.notification-item span { font-size:11px; color:var(--muted); }.notification-item em { font-size:11px; color:var(--blue); font-style:normal; font-weight:800; }
+    .notification-empty { padding:28px 16px; text-align:center; color:var(--muted); font-size:13px; }
     .login-field {
       width: 100%;
       border-radius: 16px;
@@ -348,6 +358,7 @@
     {% if view == 'login' %}
       <form class="login-card card" method="post" id="passwordLoginForm">
         <a class="brand-lockup" href="#">
+          <img class="brand-icon" src="/static/admin-portal-icon-192.png" alt="Alkaramat">
           <span>Alkaramat</span>
         </a>
         <h1>Admin mobile.</h1>
@@ -369,7 +380,12 @@
     {% else %}
       <section class="hero card">
         <div class="hero-topline">
+          <div class="notification-wrap">
+            <button class="icon-btn" type="button" id="notificationBtn" title="Notifications" aria-label="Notifications">🔔</button>
+            <span class="menu-badge" id="notificationBadge"></span>
+          </div>
           <button class="brand-lockup" type="button" id="logoHomeBtn" style="background:none;border:none;padding:0;cursor:pointer;">
+            <img class="brand-icon" src="/static/admin-portal-icon-192.png" alt="">
             <span>Alkaramat</span>
           </button>
           <div class="hero-actions">
@@ -407,7 +423,9 @@
                 data-src="{{ section.src }}"
                 data-label="{{ section.label }}"
               >
-                <span class="tab-icon">{{ section.icon }}</span>
+                <span class="tab-icon" aria-hidden="true">
+                  {% if section.icon == 'home' %}⌂{% elif section.icon == 'scan' %}▣{% elif section.icon == 'orders' %}☷{% elif section.icon == 'pending' %}◫{% elif section.icon == 'abandoned' %}◔{% elif section.icon == 'payments' %}₨{% elif section.icon == 'cost' %}◇{% endif %}
+                </span>
                 <span class="tab-label">{{ section.label }}</span>
               </button>
             {% endfor %}
@@ -421,6 +439,10 @@
           </div>
         </aside>
       </div>
+      <section class="notification-panel" id="notificationPanel" aria-label="Notifications">
+        <div class="notification-head"><span>Notifications</span><button class="icon-btn" type="button" id="notificationCloseBtn">×</button></div>
+        <div id="notificationContent"><div class="notification-empty">Loading notifications…</div></div>
+      </section>
     {% endif %}
   </div>
 
@@ -562,6 +584,9 @@
       installConfirmBtn.hidden = isIOS || !deferredInstallPrompt;
       installDialog.showModal();
     }));
+    if (window.matchMedia('(display-mode: standalone)').matches || navigator.standalone) {
+      document.querySelectorAll('[data-install-app]').forEach(button => button.hidden = true);
+    }
     installConfirmBtn?.addEventListener('click', async () => {
       if (!deferredInstallPrompt) return;
       await deferredInstallPrompt.prompt();
@@ -591,6 +616,10 @@
       const menuCloseBtn = document.getElementById('menuCloseBtn');
       const menuOverlay = document.getElementById('menuOverlay');
       const openCurrentToolBtn = document.getElementById('openCurrentToolBtn');
+      const notificationBtn = document.getElementById('notificationBtn');
+      const notificationPanel = document.getElementById('notificationPanel');
+      const notificationBadge = document.getElementById('notificationBadge');
+      const notificationContent = document.getElementById('notificationContent');
       let currentSectionId = defaultSection;
 
       function getSectionById(id) {
@@ -614,6 +643,33 @@
       function closeMenu() {
         menuOverlay?.classList.remove('open');
         menuOverlay?.setAttribute('aria-hidden', 'true');
+      }
+
+      function escapeHtml(value) {
+        return String(value ?? '').replace(/[&<>'"]/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[char]));
+      }
+
+      async function loadNotifications(open = false) {
+        if (open) notificationPanel?.classList.add('open');
+        try {
+          const result = await responseJson(await fetch('/api/admin/notifications'));
+          notificationBadge.textContent = result.count || '';
+          notificationBadge.style.display = result.count ? 'flex' : 'none';
+          const abandoned = (result.abandoned || []).map(item => `<button class="notification-item" data-abandoned-token="${escapeHtml(item.token)}"><strong>${escapeHtml(item.title)}</strong><em>${escapeHtml(item.amount)}</em><span>Abandoned · ${escapeHtml(item.age)}</span></button>`).join('');
+          const advice = (result.shipper_advice || []).map(item => `<button class="notification-item" data-advice><strong>${escapeHtml(item.title)}</strong><em>${escapeHtml(item.tracking)}</em><span>${escapeHtml(item.reason)}</span></button>`).join('');
+          notificationContent.innerHTML = `${abandoned ? '<div class="notification-group-title">New abandoned checkouts</div>' + abandoned : ''}${advice ? '<div class="notification-group-title">Shipper advice</div>' + advice : ''}` || '<div class="notification-empty">You are all caught up.</div>';
+          notificationContent.querySelectorAll('[data-abandoned-token]').forEach(button => button.addEventListener('click', async () => {
+            await fetch('/abandoned/mark-viewed', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:button.dataset.abandonedToken})});
+            notificationPanel.classList.remove('open');
+            openSection('abandoned');
+            loadNotifications(false);
+          }));
+          notificationContent.querySelectorAll('[data-advice]').forEach(button => button.addEventListener('click', () => {
+            notificationPanel.classList.remove('open'); openSection('dashboard');
+          }));
+        } catch (error) {
+          notificationContent.innerHTML = `<div class="notification-empty">${error.message}</div>`;
+        }
       }
 
       function openSection(sectionId, persist = true) {
@@ -641,6 +697,8 @@
 
       logoHomeBtn?.addEventListener('click', () => openSection('dashboard'));
       menuToggleBtn?.addEventListener('click', openMenu);
+      notificationBtn?.addEventListener('click', () => loadNotifications(true));
+      document.getElementById('notificationCloseBtn')?.addEventListener('click', () => notificationPanel?.classList.remove('open'));
       menuCloseBtn?.addEventListener('click', closeMenu);
       menuOverlay?.addEventListener('click', event => {
         if (event.target === menuOverlay) {
@@ -665,6 +723,7 @@
 
       const remembered = localStorage.getItem('tbAdminPortalSection');
       openSection(remembered || defaultSection, false);
+      window.setTimeout(() => loadNotifications(false), 800);
     </script>
   {% endif %}
 </body>

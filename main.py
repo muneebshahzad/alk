@@ -71,6 +71,7 @@ daraz_last_error = ""
 product_display_cache = {}
 tracking_refresh_lock = threading.Lock()
 tracking_refresh_state = {"running": False, "error": "", "shopify_count": 0, "daraz_count": 0}
+abandoned_checkout_cache = {"rows": None, "expires_at": 0.0}
 EMPLOYEE_PORTAL_SESSION_KEY = "employee_portal_authenticated"
 ADMIN_PORTAL_SESSION_KEY = "admin_portal_authenticated"
 EMPLOYEE_PORTAL_PASSWORD = os.getenv("EMPLOYEE_PORTAL_PASSWORD", "@@@t")
@@ -681,7 +682,25 @@ def save_abandoned_viewed_tokens(tokens):
     return set_app_setting(ABANDONED_VIEWED_SETTING_KEY, json.dumps(cleaned))
 
 
+def relative_time_label(value):
+    created = parse_date_for_sort(value)
+    now = datetime.now(created.tzinfo) if created.tzinfo else datetime.now()
+    seconds = max(int((now - created).total_seconds()), 0)
+    if seconds < 60:
+        return "Just now"
+    if seconds < 3600:
+        minutes = seconds // 60
+        return f"{minutes} minute{'s' if minutes != 1 else ''} ago"
+    if seconds < 86400:
+        hours = seconds // 3600
+        return f"{hours} hour{'s' if hours != 1 else ''} ago"
+    days = seconds // 86400
+    return f"{days} day{'s' if days != 1 else ''} ago"
+
+
 async def fetch_shopify_abandoned_checkouts(days=7):
+    if days == 7 and abandoned_checkout_cache["rows"] is not None and abandoned_checkout_cache["expires_at"] > time.monotonic():
+        return abandoned_checkout_cache["rows"]
     created_at_min = get_abandoned_created_at_min(days)
     seen = {}
     async with aiohttp.ClientSession() as session:
@@ -699,7 +718,11 @@ async def fetch_shopify_abandoned_checkouts(days=7):
             for row in rows:
                 row = as_dict(row)
                 seen[str(row.get("id") or row.get("token") or row.get("cart_token"))] = row
-    return list(seen.values())
+    rows = list(seen.values())
+    if days == 7:
+        abandoned_checkout_cache["rows"] = rows
+        abandoned_checkout_cache["expires_at"] = time.monotonic() + 5 * 60
+    return rows
 
 
 async def fetch_recent_shopify_orders_for_recovery(days=30):
@@ -811,9 +834,11 @@ def shopify_order_admin_link(order_id):
     return f"https://admin.shopify.com/store/alkaramat/orders/{order_id}"
 
 
-async def build_abandoned_checkouts_data(days=7):
-    checkouts = await fetch_shopify_abandoned_checkouts(days)
-    recovery_orders = await fetch_recent_shopify_orders_for_recovery(max(days, 30))
+async def build_abandoned_checkouts_data(days=7, include_product_fallbacks=True):
+    checkouts, recovery_orders = await asyncio.gather(
+        fetch_shopify_abandoned_checkouts(days),
+        fetch_recent_shopify_orders_for_recovery(max(days, 30)),
+    )
     recovery_indexes = build_order_recovery_indexes(recovery_orders)
     fallback_counts = build_abandoned_checkout_customer_counts(recovery_orders)
     viewed_tokens = load_abandoned_viewed_tokens()
@@ -854,7 +879,10 @@ async def build_abandoned_checkouts_data(days=7):
                         "quantity": quantity,
                         "unit_price": unit_price,
                         "line_total": round(unit_price * quantity, 2),
-                        "image": await get_checkout_line_item_image(session, line_item, product_cache),
+                        "image": (
+                            await get_checkout_line_item_image(session, line_item, product_cache)
+                            if include_product_fallbacks else get_checkout_image_url(line_item)
+                        ),
                     }
                 )
 
@@ -898,6 +926,7 @@ async def build_abandoned_checkouts_data(days=7):
                     "completed_at": completed_at or (recovered_order or {}).get("created_at", ""),
                     "items": items,
                     "created_date": str(created_at or "")[:10],
+                    "relative_age": relative_time_label(created_at),
                     "whatsapp_url": build_abandoned_whatsapp_url(customer_phone, customer_name),
                     "is_today": parse_date_for_sort(created_at).date() == today,
                 }
@@ -918,14 +947,21 @@ async def build_abandoned_checkouts_data(days=7):
 
 async def build_abandoned_checkouts_summary(days=7):
     checkouts = await fetch_shopify_abandoned_checkouts(days)
+    viewed_tokens = load_abandoned_viewed_tokens()
     today = datetime.now().date()
+    unviewed = [
+        checkout for checkout in checkouts
+        if str(checkout.get("token") or checkout.get("cart_token") or checkout.get("id")) not in viewed_tokens
+    ]
+    newest_unviewed = max(unviewed, key=lambda row: parse_date_timestamp(row.get("created_at")), default=None)
     return {
         "last_7_days": len(checkouts),
         "today": sum(1 for checkout in checkouts if parse_date_for_sort(checkout.get("created_at")).date() == today),
         "recovered": sum(1 for checkout in checkouts if checkout.get("completed_at")),
         "open": sum(1 for checkout in checkouts if not checkout.get("completed_at")),
-        "viewed": 0,
-        "not_viewed": len(checkouts),
+        "viewed": len(checkouts) - len(unviewed),
+        "not_viewed": len(unviewed),
+        "newest_unviewed_age": relative_time_label(newest_unviewed.get("created_at")) if newest_unviewed else "",
         "value": round(sum(parse_money(checkout.get("total_price", 0)) for checkout in checkouts), 2),
     }
 
@@ -1698,7 +1734,22 @@ def payments_page():
         print(f"Could not load DigiDokaan payments: {fetch_error}")
         payments = {"balance": {}, "ready": {}, "ledger": {}}
         error = str(fetch_error)
-    return render_template("payments.html", payments=payments, payments_error=error)
+    ledger = payments.get("ledger") or {}
+    ledger_rows = ledger.get("data") if isinstance(ledger.get("data"), list) else []
+    shipment_keys = {
+        str(row.get("tracking_no") or row.get("order_no") or "").strip()
+        for row in ledger_rows if row.get("tracking_no") or row.get("order_no")
+    }
+    courier_deductions = round(sum(
+        parse_money(ledger.get(key), 0)
+        for key in ("total_delivery_charges", "total_sales_tax", "total_income_tax")
+    ), 2)
+    payment_stats = {
+        "shipment_count": len(shipment_keys),
+        "total_orders_value": parse_money(ledger.get("total_cod"), 0),
+        "courier_deductions": courier_deductions,
+    }
+    return render_template("payments.html", payments=payments, payment_stats=payment_stats, payments_error=error)
 
 
 @app.route('/api/shipper-advice', methods=['POST'])
@@ -2137,7 +2188,9 @@ def displayTracking(tracking_num):
 @app.route('/abandoned')
 def abandoned_orders():
     try:
-        abandoned_checkouts, summary = asyncio.run(build_abandoned_checkouts_data())
+        abandoned_checkouts, summary = asyncio.run(build_abandoned_checkouts_data(
+            include_product_fallbacks=request.args.get("embedded") != "1"
+        ))
         error = None
     except Exception as fetch_error:
         print(f"Could not build abandoned checkouts page: {fetch_error}")
@@ -2162,6 +2215,54 @@ def mark_abandoned_viewed():
     viewed_tokens.add(token)
     saved = save_abandoned_viewed_tokens(viewed_tokens)
     return jsonify({"success": saved, "token": token, "viewed_count": len(viewed_tokens)})
+
+
+@app.route('/api/admin/notifications')
+def admin_notifications():
+    if not admin_portal_is_authenticated():
+        return jsonify({"success": False, "error": "Unauthorized"}), 401
+
+    async def load_notifications():
+        async with aiohttp.ClientSession() as client:
+            abandoned, advice = await asyncio.gather(
+                fetch_shopify_abandoned_checkouts(7),
+                fetch_pending_shipper_advice(client),
+            )
+        return abandoned, advice
+
+    try:
+        abandoned, advice = asyncio.run(load_notifications())
+        viewed_tokens = load_abandoned_viewed_tokens()
+        abandoned_items = []
+        for checkout in sorted(abandoned, key=lambda row: parse_date_timestamp(row.get("created_at")), reverse=True):
+            token = str(checkout.get("token") or checkout.get("cart_token") or checkout.get("id") or "")
+            if not token or token in viewed_tokens:
+                continue
+            customer = as_dict(checkout.get("customer"))
+            shipping = as_dict(checkout.get("shipping_address"))
+            name = shipping.get("name") or " ".join(
+                part for part in (customer.get("first_name"), customer.get("last_name")) if part
+            ) or checkout.get("email") or "Customer"
+            abandoned_items.append({
+                "token": token,
+                "title": name,
+                "age": relative_time_label(checkout.get("created_at")),
+                "amount": format_currency_amount(checkout.get("total_price"), checkout.get("currency") or "PKR"),
+            })
+        advice_items = [{
+            "tracking": str(item.get("tracking_no") or ""),
+            "title": item.get("customer_name") or item.get("consignee_name") or "Shipment",
+            "reason": item.get("courier_status_reason") or "Shipper advice required",
+        } for item in advice]
+        return jsonify({
+            "success": True,
+            "count": len(abandoned_items) + len(advice_items),
+            "abandoned": abandoned_items[:20],
+            "shipper_advice": advice_items[:20],
+        })
+    except Exception as error:
+        print(f"Could not load admin notifications: {error}")
+        return jsonify({"success": False, "error": "Notifications are temporarily unavailable."}), 503
 
 
 @app.route('/undelivered')
@@ -2640,14 +2741,13 @@ def build_product_cost_rows(limit=250):
 
 def build_admin_mobile_sections():
     return [
-        {"id": "dashboard", "label": "Dashboard", "icon": "Home", "src": "/?embedded=1"},
-        {"id": "scanner", "label": "Scanner", "icon": "Scan", "src": "/employee_portal"},
-        {"id": "employee-orders", "label": "Orders", "icon": "List", "src": "/employee_portal/orders"},
-        {"id": "pending", "label": "Pending", "icon": "Board", "src": "/pending?embedded=1"},
-        {"id": "abandoned", "label": "Abandoned", "icon": "Cart", "src": "/abandoned?embedded=1"},
-        {"id": "undelivered", "label": "Undelivered", "icon": "Truck", "src": "/undelivered?embedded=1"},
-        {"id": "payments", "label": "Payments", "icon": "PKR", "src": "/payments?embedded=1"},
-        {"id": "product-costs", "label": "Product Costs", "icon": "Cost", "src": "/product-costs?embedded=1"},
+        {"id": "dashboard", "label": "Dashboard", "icon": "home", "src": "/?embedded=1"},
+        {"id": "scanner", "label": "Scanner", "icon": "scan", "src": "/employee_portal"},
+        {"id": "employee-orders", "label": "Orders", "icon": "orders", "src": "/employee_portal/orders"},
+        {"id": "pending", "label": "Pending", "icon": "pending", "src": "/pending?embedded=1"},
+        {"id": "abandoned", "label": "Abandoned", "icon": "abandoned", "src": "/abandoned?embedded=1"},
+        {"id": "payments", "label": "Payments", "icon": "payments", "src": "/payments?embedded=1"},
+        {"id": "product-costs", "label": "Product Costs", "icon": "cost", "src": "/product-costs?embedded=1"},
     ]
 
 

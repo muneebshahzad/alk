@@ -34,7 +34,19 @@
   .pay-error { background:#fff1f0; color:#a83a34; border:1px solid #f5c7c3; padding:13px 15px; border-radius:10px; margin-bottom:16px; }
   .empty { text-align:center; padding:30px; color:#9098a9; }
   @media(max-width:1000px){.pay-grid{grid-template-columns:repeat(2,minmax(0,1fr));}}
-  @media(max-width:600px){.pay-wrap{padding:14px}.pay-grid{grid-template-columns:1fr}.pay-head{align-items:flex-start;flex-direction:column}.pay-value{font-size:20px}}
+  @media(max-width:600px){
+    .pay-wrap{padding:12px;overflow-y:auto}
+    .pay-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+    .pay-head{align-items:flex-start;flex-direction:column;margin-bottom:12px}
+    .pay-head h1{font-size:21px}.pay-head p{font-size:12px}.pay-chip{font-size:10px;padding:6px 9px}
+    .pay-card{padding:12px;border-radius:12px}.pay-label{font-size:9px}.pay-value{font-size:17px}.pay-note{font-size:10px;line-height:1.35}
+    .pay-panel-head{padding:13px}.pay-table-wrap{max-height:none;overflow:visible}
+    .pay-table{display:block;min-width:0;width:100%}.pay-table thead{display:none}.pay-table tbody{display:grid;gap:8px;padding:8px}
+    .pay-table tr{display:grid;grid-template-columns:1fr 1fr;gap:7px 12px;padding:11px;border:1px solid #e7eaf2;border-radius:11px;background:#fff}
+    .pay-table td{display:flex;min-width:0;justify-content:space-between;gap:8px;padding:0;border:0;font-size:11px;text-align:right;overflow-wrap:anywhere}
+    .pay-table td::before{content:attr(data-label);color:#929bad;font-size:9px;font-weight:800;text-transform:uppercase;text-align:left}
+    .pay-table td[data-label="Status"],.pay-table td[data-label="Tracking"]{grid-column:1/-1}
+  }
 </style>
 <div class="pay-wrap">
   <div class="pay-head">
@@ -43,21 +55,19 @@
   </div>
   {% if payments_error %}<div class="pay-error">{{ payments_error }}</div>{% endif %}
   <div class="pay-grid">
-    <div class="pay-card primary"><div class="pay-label">Payment received</div><div class="pay-value green">PKR {{ ledger.total_cod|default(0, true)|format_currency }}</div><div class="pay-note">COD collected for delivered shipments</div></div>
-    <div class="pay-card primary"><div class="pay-label">Payment to be received</div><div class="pay-value green">PKR {{ ledger.total_balance|default(0, true)|format_currency }}</div><div class="pay-note">Net courier balance after charges and taxes</div></div>
-    <div class="pay-card"><div class="pay-label">Ready for settlement</div><div class="pay-value">PKR {{ balance.deliver_orders_payments|default(0, true)|format_currency }}</div><div class="pay-note">Delivered COD currently eligible for payout</div></div>
-    <div class="pay-card"><div class="pay-label">Pending order payment</div><div class="pay-value">PKR {{ balance.pending_orders_payment|default(0, true)|format_currency }}</div><div class="pay-note">Orders awaiting payment eligibility</div></div>
-    <div class="pay-card"><div class="pay-label">Reserve amount</div><div class="pay-value">PKR {{ balance.total_reserve_amount|default(0, true)|format_currency }}</div><div class="pay-note">Amount currently held in reserve</div></div>
-    <div class="pay-card"><div class="pay-label">Delivery charges</div><div class="pay-value red">PKR {{ ledger.total_delivery_charges|default(0, true)|format_currency }}</div><div class="pay-note">Courier charges deducted</div></div>
-    <div class="pay-card"><div class="pay-label">Sales tax</div><div class="pay-value red">PKR {{ ledger.total_sales_tax|default(0, true)|format_currency }}</div><div class="pay-note">Sales tax recorded by DigiDokaan</div></div>
-    <div class="pay-card"><div class="pay-label">Income tax</div><div class="pay-value red">PKR {{ ledger.total_income_tax|default(0, true)|format_currency }}</div><div class="pay-note">Income tax recorded by DigiDokaan</div></div>
+    <div class="pay-card primary"><div class="pay-label">Total orders value</div><div class="pay-value green">PKR {{ payment_stats.total_orders_value|format_currency }}</div><div class="pay-note">{{ payment_stats.shipment_count|format_number }} shipments represented in the ledger</div></div>
+    <div class="pay-card primary"><div class="pay-label">Payment to be received</div><div class="pay-value green">PKR {{ ledger.total_balance|default(0, true)|format_currency }}</div><div class="pay-note">Expected net COD after all deductions</div></div>
+    <div class="pay-card"><div class="pay-label">Ready for payout</div><div class="pay-value">PKR {{ balance.deliver_orders_payments|default(0, true)|format_currency }}</div><div class="pay-note">Delivered COD eligible for settlement</div></div>
+    <div class="pay-card"><div class="pay-label">Payment received</div><div class="pay-value">PKR {{ ledger.total_paid|default(balance.payment_received, true)|default(0, true)|format_currency }}</div><div class="pay-note">Settlements marked paid by DigiDokaan</div></div>
+    <div class="pay-card"><div class="pay-label">Pending settlement</div><div class="pay-value">PKR {{ balance.pending_orders_payment|default(0, true)|format_currency }}</div><div class="pay-note">Orders still awaiting payout eligibility</div></div>
+    <div class="pay-card"><div class="pay-label">Courier deductions</div><div class="pay-value red">PKR {{ payment_stats.courier_deductions|format_currency }}</div><div class="pay-note">Delivery charges and all courier taxes combined</div></div>
   </div>
 
   <section class="pay-panel">
     <div class="pay-panel-head"><h2>Ready settlements</h2><span class="pay-count">{{ ready_rows|length }} records</span></div>
     {% if ready_rows %}
     <div class="pay-table-wrap"><table class="pay-table"><thead><tr><th>Cheque / settlement</th><th>Date</th><th>Amount</th><th>Status</th></tr></thead><tbody>
-      {% for row in ready_rows %}<tr><td>{{ row.cheque_no or row.settlement_id or '—' }}</td><td>{{ row.cheque_date or row.settlement_date or '—' }}</td><td class="money">PKR {{ row.amount|default(row.cheque_amount, true)|default(0, true)|format_currency }}</td><td><span class="status">{{ row.status or row.settlement_status or 'Ready' }}</span></td></tr>{% endfor %}
+      {% for row in ready_rows %}<tr><td data-label="Settlement">{{ row.cheque_no or row.settlement_id or '—' }}</td><td data-label="Date">{{ row.cheque_date or row.settlement_date or '—' }}</td><td data-label="Amount" class="money">PKR {{ row.amount|default(row.cheque_amount, true)|default(0, true)|format_currency }}</td><td data-label="Status"><span class="status">{{ row.status or row.settlement_status or 'Ready' }}</span></td></tr>{% endfor %}
     </tbody></table></div>
     {% else %}<div class="empty">No payment batch has been assembled for settlement yet.</div>{% endif %}
   </section>
@@ -67,9 +77,9 @@
     {% if ledger_rows %}
     <div class="pay-table-wrap"><table class="pay-table"><thead><tr><th>Order</th><th>Reference</th><th>Tracking</th><th>Order date</th><th>Status</th><th>Entry</th><th>COD amount</th><th>Charge</th><th>Running balance</th></tr></thead><tbody>
       {% for row in ledger_rows %}<tr>
-        <td><strong>{{ row.order_no or '—' }}</strong></td><td>{{ row.external_reference_no or '—' }}</td><td>{{ row.tracking_no or '—' }}</td><td>{{ row.order_date or '—' }}</td>
-        <td><span class="status">{{ row.order_status or '—' }}</span></td><td>{{ (row.payment_type or row.payment_mode or '—')|upper }}</td>
-        <td class="money">PKR {{ row.amount|default(0, true)|format_currency }}</td><td class="money">PKR {{ row.sub_amount|default(row.cheque_amount, true)|default(0, true)|format_currency }}</td><td class="money">PKR {{ row.balance|default(0, true)|format_currency }}</td>
+        <td data-label="Order"><strong>{{ row.order_no or '—' }}</strong></td><td data-label="Reference">{{ row.external_reference_no or '—' }}</td><td data-label="Tracking">{{ row.tracking_no or '—' }}</td><td data-label="Date">{{ row.order_date or '—' }}</td>
+        <td data-label="Status"><span class="status">{{ row.order_status or '—' }}</span></td><td data-label="Entry">{{ (row.payment_type or row.payment_mode or '—')|upper }}</td>
+        <td data-label="COD" class="money">PKR {{ row.amount|default(0, true)|format_currency }}</td><td data-label="Charge" class="money">PKR {{ row.sub_amount|default(row.cheque_amount, true)|default(0, true)|format_currency }}</td><td data-label="Balance" class="money">PKR {{ row.balance|default(0, true)|format_currency }}</td>
       </tr>{% endfor %}
     </tbody></table></div>
     {% else %}<div class="empty">No DigiDokaan payment ledger entries are available.</div>{% endif %}

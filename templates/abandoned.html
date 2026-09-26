@@ -89,11 +89,35 @@
     .preview-customer { grid-template-columns:1fr; }
   }
   @media (max-width: 560px) {
-    .metric-row { grid-template-columns:1fr; }
-    .checkout-head { flex-wrap:wrap; }
-    .checkout-spacer { flex-basis:100%; height:0; }
-    .preview-shot { padding:20px; }
-    .preview-img { height:360px; }
+    .topbar { height:auto; min-height:52px; padding:10px 12px; flex-wrap:wrap; }
+    .topbar-title { width:100%; font-size:18px; }
+    .topbar .search-box { width:100%; }
+    .topbar .search-box input { width:100% !important; min-width:0; }
+    .toolbar { padding:9px 10px; }
+    .toolbar .btn { display:none; }
+    .abandoned-scroll { padding:10px; }
+    .metric-row { grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; overflow:visible; }
+    .metric-card { padding:11px 12px; min-width:0; }
+    .metric-value { font-size:18px; }
+    .checkout-list { width:100%; }
+    .checkout-head { display:grid; grid-template-columns:1fr auto; gap:8px; padding:12px; }
+    .checkout-head > div:first-child { min-width:0; }
+    .checkout-token { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .checkout-spacer { display:none; }
+    .recovery-badge, .view-state { justify-self:start; }
+    .checkout-amount { grid-column:2; grid-row:1; }
+    .view-btn { grid-column:2; grid-row:2 / span 2; align-self:stretch; }
+    .checkout-body { padding:10px 12px 13px; gap:12px; }
+    .products { flex-wrap:nowrap; width:100%; max-width:100%; overflow-x:auto; padding-bottom:4px; }
+    .product { flex:0 0 68px; }
+    .product-img { width:68px; height:68px; }
+    .info-block { grid-template-columns:1fr; gap:7px; }
+    .info-row { display:grid; grid-template-columns:76px 1fr; }
+    .info-lbl { width:auto; }
+    .preview-backdrop { padding:0; align-items:flex-end; }
+    .preview-modal { width:100%; max-height:94dvh; border-radius:22px 22px 0 0; }
+    .preview-shot { padding:16px; }
+    .preview-img { height:300px; }
   }
 </style>
 
@@ -169,7 +193,7 @@
             {% else %}
             <span class="checkout-token">{{ checkout.token }}</span>
             {% endif %}
-            <div class="checkout-date">{{ checkout.created_date or checkout.created_at or '-' }}</div>
+            <div class="checkout-date">{{ checkout.relative_age }} · {{ checkout.created_date or checkout.created_at or '-' }}</div>
           </div>
           <div class="checkout-spacer"></div>
           <span class="recovery-badge {{ status_key }}">

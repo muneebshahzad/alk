@@ -1,4 +1,4 @@
-const CACHE_NAME = 'alk-admin-portal-v3';
+const CACHE_NAME = 'alk-admin-portal-v4';
 const APP_SHELL = [
   '/admin_portal-manifest.webmanifest',
   '/static/admin-portal-icon-192.png',
