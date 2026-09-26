@@ -35,6 +35,7 @@ from db import (
 )
 from token_manager import get_access_token, load_tokens, save_tokens
 from digidokaan import (
+    fetch_pending_shipper_advice,
     fetch_payments as fetch_digidokaan_payments,
     fetch_tracking_history as fetch_digidokaan_tracking_history,
     fetch_tracking_status as fetch_digidokaan_tracking_status,
@@ -1911,11 +1912,21 @@ def apply_bulk_tag():
 def tracking_home():
     global order_details
     refresh_daraz_cache_if_needed()
+    try:
+        async def load_shipper_advice():
+            async with aiohttp.ClientSession() as client:
+                return await fetch_pending_shipper_advice(client)
+
+        shipper_advice_orders = asyncio.run(load_shipper_advice())
+    except Exception as advice_error:
+        print(f"Could not load DigiDokaan shipper advice: {advice_error}")
+        shipper_advice_orders = []
     total_order_value = sum(parse_money(order.get("total_price", 0)) for order in order_details)
     return render_template(
         "track.html",
         order_details=order_details,
         darazOrders=daraz_orders,
+        shipper_advice_orders=shipper_advice_orders,
         employee_approvals=build_employee_approval_items(),
         total_order_value=total_order_value,
         abandoned_summary=get_abandoned_summary_safe(),

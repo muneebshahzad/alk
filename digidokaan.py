@@ -13,6 +13,8 @@ _status_cache = {}
 _inflight = {}
 _payments_cache = None
 _payments_cache_expires_at = 0.0
+_shipper_advice_cache = None
+_shipper_advice_cache_expires_at = 0.0
 _TOKEN_TTL_SECONDS = 6 * 60 * 60
 _ACTIVE_CACHE_SECONDS = 5 * 60
 _TERMINAL_CACHE_SECONDS = 24 * 60 * 60
@@ -285,3 +287,29 @@ async def fetch_payments(session):
     _payments_cache = result
     _payments_cache_expires_at = time.monotonic() + 5 * 60
     return result
+
+
+async def fetch_pending_shipper_advice(session):
+    """Return the merchant's pending shipper-advice queue."""
+    global _shipper_advice_cache, _shipper_advice_cache_expires_at
+    if _shipper_advice_cache is not None and _shipper_advice_cache_expires_at > time.monotonic():
+        return _shipper_advice_cache
+    config = configuration()
+    if not config:
+        return []
+    token = await _access_token(session, config)
+    timeout = ClientTimeout(total=20)
+    async with session.post(
+        config["base_url"] + "/api/courier/get_shipper_advice_order",
+        json={"phone": config["phone"]},
+        headers={"Accept": "application/json", "Authorization": "Bearer " + token},
+        timeout=timeout,
+        ssl=_SSL_CONTEXT,
+    ) as response:
+        body = await response.json(content_type=None)
+    rows = body.get("data") if isinstance(body, dict) else None
+    if response.status != 200 or not isinstance(rows, list):
+        raise RuntimeError("DigiDokaan shipper advice is temporarily unavailable")
+    _shipper_advice_cache = rows
+    _shipper_advice_cache_expires_at = time.monotonic() + 2 * 60
+    return rows
