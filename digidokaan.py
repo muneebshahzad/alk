@@ -70,6 +70,31 @@ def _cached_status(tracking_number):
     return None
 
 
+def display_status_from_detail(body, fallback=None):
+    data = body.get("data") if isinstance(body, dict) else None
+    tracking = data.get("tracking_response") if isinstance(data, dict) else None
+    events = tracking.get("data") if isinstance(tracking, dict) else None
+    if isinstance(events, list):
+        for event in events:
+            if not isinstance(event, dict):
+                continue
+            event_status = str(event.get("status") or "").strip()
+            reason = str(event.get("status_reason") or "").strip()
+            failure_event = any(
+                marker in event_status.casefold()
+                for marker in (
+                    "delivery unsuccessful",
+                    "reason validation",
+                    "shipper advise",
+                    "undelivered",
+                )
+            )
+            if reason and failure_event:
+                return f"Undelivered - {reason}"
+    current = str(tracking.get("courier_status") or "").strip() if isinstance(tracking, dict) else ""
+    return current or fallback
+
+
 async def _fetch_status(session, tracking_number, config):
     global _token, _token_created_at
     token = await _access_token(session, config)
@@ -110,8 +135,21 @@ async def _fetch_status(session, tracking_number, config):
         (row for row in rows if str(row.get("tracking_no") or "").strip() == tracking_number),
         rows[0],
     )
-    status = str(exact.get("courier_status") or exact.get("status") or "").strip()
-    return status or None
+    fallback = str(exact.get("courier_status") or exact.get("status") or "").strip()
+    order_id = str(exact.get("order_id") or "").strip()
+    if not order_id:
+        return fallback or None
+    async with session.post(
+        config["base_url"] + "/api/seller/order/get_single_order_detail",
+        json={"phone": config["phone"], "order_no": order_id},
+        headers=headers,
+        timeout=timeout,
+        ssl=_SSL_CONTEXT,
+    ) as response:
+        detail_body = await response.json(content_type=None)
+    if response.status != 200:
+        return fallback or None
+    return display_status_from_detail(detail_body, fallback) or None
 
 
 async def fetch_tracking_status(session, tracking_number):

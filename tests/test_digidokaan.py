@@ -15,6 +15,29 @@ class DigiDokaanTrackingTests(IsolatedAsyncioTestCase):
         with patch.dict(os.environ, {}, clear=True):
             self.assertIsNone(digidokaan.configuration())
 
+    def test_delivery_failure_reason_becomes_undelivered_status(self):
+        body = {
+            "data": {
+                "tracking_response": {
+                    "courier_status": "Awaiting Shipper advice",
+                    "data": [
+                        {
+                            "status": "Shipment - Shipper Advise Requested",
+                            "status_reason": "Consignee Refused",
+                        },
+                        {
+                            "status": "Shipment - Out for Delivery",
+                            "status_reason": None,
+                        },
+                    ],
+                }
+            }
+        }
+        self.assertEqual(
+            digidokaan.display_status_from_detail(body, "Second Attempt"),
+            "Undelivered - Consignee Refused",
+        )
+
     async def test_concurrent_requests_are_deduplicated_and_cached(self):
         async def delayed_status(*args):
             await asyncio.sleep(0)
