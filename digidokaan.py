@@ -11,6 +11,8 @@ _token = ""
 _token_created_at = 0.0
 _status_cache = {}
 _inflight = {}
+_payments_cache = None
+_payments_cache_expires_at = 0.0
 _TOKEN_TTL_SECONDS = 6 * 60 * 60
 _ACTIVE_CACHE_SECONDS = 5 * 60
 _TERMINAL_CACHE_SECONDS = 24 * 60 * 60
@@ -246,3 +248,40 @@ async def fetch_tracking_history(session, tracking_number):
     except Exception as error:
         print(f"DigiDokaan tracking history unavailable for {normalized}: {error}")
         return []
+
+
+async def fetch_payments(session):
+    """Return the merchant's read-only DigiDokaan settlement summary and ledger."""
+    global _payments_cache, _payments_cache_expires_at
+    if _payments_cache is not None and _payments_cache_expires_at > time.monotonic():
+        return _payments_cache
+    config = configuration()
+    if not config:
+        raise RuntimeError("DigiDokaan payment credentials are not configured")
+    token = await _access_token(session, config)
+    headers = {"Accept": "application/json", "Authorization": "Bearer " + token}
+    payload = {"phone": config["phone"]}
+    timeout = ClientTimeout(total=30)
+
+    async def post(path):
+        async with session.post(
+            config["base_url"] + "/api/" + path,
+            json=payload,
+            headers=headers,
+            timeout=timeout,
+            ssl=_SSL_CONTEXT,
+        ) as response:
+            body = await response.json(content_type=None)
+        if response.status != 200 or not isinstance(body, dict) or body.get("code") != 200:
+            raise RuntimeError("DigiDokaan payments are temporarily unavailable")
+        return body
+
+    balance, ready, ledger = await asyncio.gather(
+        post("settlements/ledger_ready_for_payment_balance"),
+        post("settlements/ledger_ready_for_payments"),
+        post("settlements/ledger_single_cheque_detail"),
+    )
+    result = {"balance": balance, "ready": ready, "ledger": ledger}
+    _payments_cache = result
+    _payments_cache_expires_at = time.monotonic() + 5 * 60
+    return result

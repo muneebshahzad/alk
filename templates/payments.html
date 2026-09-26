@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}DigiDokaan Payments{% endblock %}
+{% block content %}
+{% set balance = payments.balance or {} %}
+{% set ledger = payments.ledger or {} %}
+{% set ready = payments.ready or {} %}
+{% set ledger_rows = (ledger.data or []) if ledger.data is iterable else [] %}
+{% set ready_page = ready.data or {} %}
+{% set ready_rows = (ready_page.data or []) if ready_page is mapping else [] %}
+<style>
+  .pay-wrap { padding: 22px; max-width: 1500px; margin: 0 auto; }
+  .pay-head { display:flex; justify-content:space-between; align-items:flex-end; gap:16px; margin-bottom:18px; }
+  .pay-head h1 { margin:0; font-size:24px; color:#24304a; }
+  .pay-head p { margin:5px 0 0; color:#7a8499; font-size:13px; }
+  .pay-chip { background:#eef2ff; color:#3346a8; border-radius:999px; padding:7px 12px; font-size:12px; font-weight:700; }
+  .pay-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; margin-bottom:18px; }
+  .pay-card { background:#fff; border:1px solid #e7eaf2; border-radius:13px; padding:16px; box-shadow:0 3px 12px rgba(34,48,84,.05); }
+  .pay-label { color:#8991a4; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.05em; }
+  .pay-value { color:#252a3a; font-size:23px; font-weight:800; margin-top:7px; }
+  .pay-value.green { color:#18875d; } .pay-value.red { color:#c84a42; }
+  .pay-note { color:#949bad; font-size:11px; margin-top:5px; }
+  .pay-panel { background:#fff; border:1px solid #e7eaf2; border-radius:13px; box-shadow:0 3px 12px rgba(34,48,84,.05); margin-bottom:18px; overflow:hidden; }
+  .pay-panel-head { padding:15px 17px; display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #edf0f5; }
+  .pay-panel-head h2 { margin:0; font-size:15px; color:#30384d; }
+  .pay-count { font-size:11px; color:#68738b; background:#f1f3f8; padding:4px 8px; border-radius:999px; }
+  .pay-table-wrap { overflow:auto; max-height:580px; }
+  .pay-table { border-collapse:collapse; width:100%; min-width:1050px; font-size:12px; }
+  .pay-table th { position:sticky; top:0; background:#f8f9fc; z-index:1; color:#737d92; text-align:left; padding:10px 12px; border-bottom:1px solid #e8ebf2; white-space:nowrap; }
+  .pay-table td { padding:11px 12px; border-bottom:1px solid #f0f2f6; color:#424a5d; vertical-align:top; }
+  .pay-table tr:hover td { background:#fbfcff; }
+  .money { font-weight:700; white-space:nowrap; } .muted { color:#8c95a8; }
+  .status { display:inline-block; padding:4px 8px; border-radius:999px; background:#eef2ff; color:#3c4ca3; font-weight:700; white-space:nowrap; }
+  .pay-error { background:#fff1f0; color:#a83a34; border:1px solid #f5c7c3; padding:13px 15px; border-radius:10px; margin-bottom:16px; }
+  .empty { text-align:center; padding:30px; color:#9098a9; }
+  @media(max-width:1000px){.pay-grid{grid-template-columns:repeat(2,minmax(0,1fr));}}
+  @media(max-width:600px){.pay-wrap{padding:14px}.pay-grid{grid-template-columns:1fr}.pay-head{align-items:flex-start;flex-direction:column}.pay-value{font-size:20px}}
+</style>
+<div class="pay-wrap">
+  <div class="pay-head">
+    <div><h1>DigiDokaan Payments</h1><p>Live COD balances, deductions and order-level settlement ledger.</p></div>
+    <span class="pay-chip">Read-only · refreshed every 5 minutes</span>
+  </div>
+  {% if payments_error %}<div class="pay-error">{{ payments_error }}</div>{% endif %}
+  <div class="pay-grid">
+    <div class="pay-card"><div class="pay-label">Delivered payments</div><div class="pay-value green">PKR {{ balance.deliver_orders_payments|default(0, true)|format_currency }}</div><div class="pay-note">COD collected from delivered orders</div></div>
+    <div class="pay-card"><div class="pay-label">Ledger balance</div><div class="pay-value">PKR {{ ledger.total_balance|default(0, true)|format_currency }}</div><div class="pay-note">Current balance after ledger entries</div></div>
+    <div class="pay-card"><div class="pay-label">Pending order payment</div><div class="pay-value">PKR {{ balance.pending_orders_payment|default(0, true)|format_currency }}</div><div class="pay-note">Orders awaiting payment eligibility</div></div>
+    <div class="pay-card"><div class="pay-label">Reserve amount</div><div class="pay-value">PKR {{ balance.total_reserve_amount|default(0, true)|format_currency }}</div><div class="pay-note">Amount currently held in reserve</div></div>
+    <div class="pay-card"><div class="pay-label">COD total</div><div class="pay-value">PKR {{ ledger.total_cod|default(0, true)|format_currency }}</div><div class="pay-note">Gross COD represented in ledger</div></div>
+    <div class="pay-card"><div class="pay-label">Delivery charges</div><div class="pay-value red">PKR {{ ledger.total_delivery_charges|default(0, true)|format_currency }}</div><div class="pay-note">Courier charges deducted</div></div>
+    <div class="pay-card"><div class="pay-label">Sales tax</div><div class="pay-value red">PKR {{ ledger.total_sales_tax|default(0, true)|format_currency }}</div><div class="pay-note">Sales tax recorded by DigiDokaan</div></div>
+    <div class="pay-card"><div class="pay-label">Income tax</div><div class="pay-value red">PKR {{ ledger.total_income_tax|default(0, true)|format_currency }}</div><div class="pay-note">Income tax recorded by DigiDokaan</div></div>
+  </div>
+
+  <section class="pay-panel">
+    <div class="pay-panel-head"><h2>Ready settlements</h2><span class="pay-count">{{ ready_rows|length }} records</span></div>
+    {% if ready_rows %}
+    <div class="pay-table-wrap"><table class="pay-table"><thead><tr><th>Cheque / settlement</th><th>Date</th><th>Amount</th><th>Status</th></tr></thead><tbody>
+      {% for row in ready_rows %}<tr><td>{{ row.cheque_no or row.settlement_id or '—' }}</td><td>{{ row.cheque_date or row.settlement_date or '—' }}</td><td class="money">PKR {{ row.amount|default(row.cheque_amount, true)|default(0, true)|format_currency }}</td><td><span class="status">{{ row.status or row.settlement_status or 'Ready' }}</span></td></tr>{% endfor %}
+    </tbody></table></div>
+    {% else %}<div class="empty">No payment batch has been assembled for settlement yet.</div>{% endif %}
+  </section>
+
+  <section class="pay-panel">
+    <div class="pay-panel-head"><h2>Order payment ledger</h2><span class="pay-count">{{ ledger_rows|length }} entries</span></div>
+    {% if ledger_rows %}
+    <div class="pay-table-wrap"><table class="pay-table"><thead><tr><th>Order</th><th>Reference</th><th>Tracking</th><th>Order date</th><th>Status</th><th>Entry</th><th>COD amount</th><th>Charge</th><th>Running balance</th></tr></thead><tbody>
+      {% for row in ledger_rows %}<tr>
+        <td><strong>{{ row.order_no or '—' }}</strong></td><td>{{ row.external_reference_no or '—' }}</td><td>{{ row.tracking_no or '—' }}</td><td>{{ row.order_date or '—' }}</td>
+        <td><span class="status">{{ row.order_status or '—' }}</span></td><td>{{ (row.payment_type or row.payment_mode or '—')|upper }}</td>
+        <td class="money">PKR {{ row.amount|default(0, true)|format_currency }}</td><td class="money">PKR {{ row.sub_amount|default(row.cheque_amount, true)|default(0, true)|format_currency }}</td><td class="money">PKR {{ row.balance|default(0, true)|format_currency }}</td>
+      </tr>{% endfor %}
+    </tbody></table></div>
+    {% else %}<div class="empty">No DigiDokaan payment ledger entries are available.</div>{% endif %}
+  </section>
+</div>
+{% endblock %}

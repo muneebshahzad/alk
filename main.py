@@ -35,6 +35,7 @@ from db import (
 )
 from token_manager import get_access_token, load_tokens, save_tokens
 from digidokaan import (
+    fetch_payments as fetch_digidokaan_payments,
     fetch_tracking_history as fetch_digidokaan_tracking_history,
     fetch_tracking_status as fetch_digidokaan_tracking_status,
 )
@@ -137,7 +138,15 @@ def format_number(value):
         return str(value or 0)
 
 
+def format_currency(value):
+    try:
+        return f"{float(value or 0):,.2f}"
+    except (TypeError, ValueError):
+        return "0.00"
+
+
 app.jinja_env.filters["format_number"] = format_number
+app.jinja_env.filters["format_currency"] = format_currency
 
 
 _TAG_STYLES = {
@@ -1645,6 +1654,22 @@ async def process_order(session, order):
 def pending_orders():
     all_orders, pending_items, summary = build_pending_items_table_data()
     return render_template('pending.html', all_orders=all_orders, pending_items=pending_items, summary=summary)
+
+
+@app.route('/payments')
+def payments_page():
+    try:
+        async def load_payments():
+            async with aiohttp.ClientSession() as client:
+                return await fetch_digidokaan_payments(client)
+
+        payments = asyncio.run(load_payments())
+        error = ""
+    except Exception as fetch_error:
+        print(f"Could not load DigiDokaan payments: {fetch_error}")
+        payments = {"balance": {}, "ready": {}, "ledger": {}}
+        error = str(fetch_error)
+    return render_template("payments.html", payments=payments, payments_error=error)
 
 
 async def getShopifyOrders():
