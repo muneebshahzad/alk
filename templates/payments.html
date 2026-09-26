@@ -18,6 +18,7 @@
   .pay-label { color:#8991a4; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.05em; }
   .pay-value { color:#252a3a; font-size:23px; font-weight:800; margin-top:7px; }
   .pay-value.green { color:#18875d; } .pay-value.red { color:#c84a42; }
+  .pay-card.primary { border-color:#cfd8ff; background:linear-gradient(145deg,#fff,#f7f9ff); }
   .pay-note { color:#949bad; font-size:11px; margin-top:5px; }
   .pay-panel { background:#fff; border:1px solid #e7eaf2; border-radius:13px; box-shadow:0 3px 12px rgba(34,48,84,.05); margin-bottom:18px; overflow:hidden; }
   .pay-panel-head { padding:15px 17px; display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #edf0f5; }
@@ -42,11 +43,11 @@
   </div>
   {% if payments_error %}<div class="pay-error">{{ payments_error }}</div>{% endif %}
   <div class="pay-grid">
-    <div class="pay-card"><div class="pay-label">Delivered payments</div><div class="pay-value green">PKR {{ balance.deliver_orders_payments|default(0, true)|format_currency }}</div><div class="pay-note">COD collected from delivered orders</div></div>
-    <div class="pay-card"><div class="pay-label">Ledger balance</div><div class="pay-value">PKR {{ ledger.total_balance|default(0, true)|format_currency }}</div><div class="pay-note">Current balance after ledger entries</div></div>
+    <div class="pay-card primary"><div class="pay-label">Payment received</div><div class="pay-value green">PKR {{ ledger.total_cod|default(0, true)|format_currency }}</div><div class="pay-note">COD collected for delivered shipments</div></div>
+    <div class="pay-card primary"><div class="pay-label">Payment to be received</div><div class="pay-value green">PKR {{ ledger.total_balance|default(0, true)|format_currency }}</div><div class="pay-note">Net courier balance after charges and taxes</div></div>
+    <div class="pay-card"><div class="pay-label">Ready for settlement</div><div class="pay-value">PKR {{ balance.deliver_orders_payments|default(0, true)|format_currency }}</div><div class="pay-note">Delivered COD currently eligible for payout</div></div>
     <div class="pay-card"><div class="pay-label">Pending order payment</div><div class="pay-value">PKR {{ balance.pending_orders_payment|default(0, true)|format_currency }}</div><div class="pay-note">Orders awaiting payment eligibility</div></div>
     <div class="pay-card"><div class="pay-label">Reserve amount</div><div class="pay-value">PKR {{ balance.total_reserve_amount|default(0, true)|format_currency }}</div><div class="pay-note">Amount currently held in reserve</div></div>
-    <div class="pay-card"><div class="pay-label">COD total</div><div class="pay-value">PKR {{ ledger.total_cod|default(0, true)|format_currency }}</div><div class="pay-note">Gross COD represented in ledger</div></div>
     <div class="pay-card"><div class="pay-label">Delivery charges</div><div class="pay-value red">PKR {{ ledger.total_delivery_charges|default(0, true)|format_currency }}</div><div class="pay-note">Courier charges deducted</div></div>
     <div class="pay-card"><div class="pay-label">Sales tax</div><div class="pay-value red">PKR {{ ledger.total_sales_tax|default(0, true)|format_currency }}</div><div class="pay-note">Sales tax recorded by DigiDokaan</div></div>
     <div class="pay-card"><div class="pay-label">Income tax</div><div class="pay-value red">PKR {{ ledger.total_income_tax|default(0, true)|format_currency }}</div><div class="pay-note">Income tax recorded by DigiDokaan</div></div>

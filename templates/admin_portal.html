@@ -412,7 +412,11 @@
         toolFrame.src = section.src;
         updateActiveTab(section.id);
         if (openCurrentToolBtn) {
-          openCurrentToolBtn.onclick = () => window.open(section.src, '_blank', 'noopener');
+          openCurrentToolBtn.onclick = () => {
+            const standaloneUrl = new URL(section.src, window.location.origin);
+            standaloneUrl.searchParams.delete('embedded');
+            window.open(standaloneUrl.href, '_blank', 'noopener');
+          };
         }
         if (persist) {
           localStorage.setItem('tbAdminPortalSection', section.id);

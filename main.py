@@ -2619,6 +2619,7 @@ def build_admin_mobile_sections():
         {"id": "pending", "label": "Pending", "icon": "Board", "src": "/pending?embedded=1"},
         {"id": "abandoned", "label": "Abandoned", "icon": "Cart", "src": "/abandoned?embedded=1"},
         {"id": "undelivered", "label": "Undelivered", "icon": "Truck", "src": "/undelivered?embedded=1"},
+        {"id": "payments", "label": "Payments", "icon": "PKR", "src": "/payments?embedded=1"},
         {"id": "product-costs", "label": "Product Costs", "icon": "Cost", "src": "/product-costs?embedded=1"},
     ]
 
