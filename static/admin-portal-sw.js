@@ -1,7 +1,8 @@
-const CACHE_NAME = 'alk-admin-portal-v2';
+const CACHE_NAME = 'alk-admin-portal-v3';
 const APP_SHELL = [
   '/admin_portal-manifest.webmanifest',
-  '/static/employee-portal-icon.svg'
+  '/static/admin-portal-icon-192.png',
+  '/static/admin-portal-icon-512.png'
 ];
 
 self.addEventListener('install', event => {

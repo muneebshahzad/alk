@@ -29,9 +29,26 @@ from db import (
     delete_order_status,
     get_app_setting,
     init_db,
+    load_admin_passkeys,
     load_order_statuses,
+    save_admin_passkey,
     set_app_setting,
+    update_admin_passkey_usage,
     upsert_order_status,
+)
+from webauthn import (
+    generate_authentication_options,
+    generate_registration_options,
+    options_to_json,
+    verify_authentication_response,
+    verify_registration_response,
+)
+from webauthn.helpers import base64url_to_bytes
+from webauthn.helpers.structs import (
+    AuthenticatorSelectionCriteria,
+    PublicKeyCredentialDescriptor,
+    ResidentKeyRequirement,
+    UserVerificationRequirement,
 )
 from token_manager import get_access_token, load_tokens, save_tokens
 from digidokaan import (
@@ -58,6 +75,9 @@ EMPLOYEE_PORTAL_SESSION_KEY = "employee_portal_authenticated"
 ADMIN_PORTAL_SESSION_KEY = "admin_portal_authenticated"
 EMPLOYEE_PORTAL_PASSWORD = os.getenv("EMPLOYEE_PORTAL_PASSWORD", "@@@t")
 ADMIN_PORTAL_PASSWORD = os.getenv("ADMIN_PORTAL_PASSWORD", "security")
+ADMIN_PORTAL_RP_ID = os.getenv("ADMIN_PORTAL_RP_ID", "dashboard.alkaramat.com").strip()
+ADMIN_PORTAL_ORIGIN = os.getenv("ADMIN_PORTAL_ORIGIN", "https://dashboard.alkaramat.com").rstrip("/")
+ADMIN_PASSKEY_CHALLENGE_KEY = "admin_passkey_challenge"
 PRODUCT_COSTS_SETTING_KEY = "product_cost_overrides_v1"
 ABANDONED_VIEWED_SETTING_KEY = "abandoned_checkout_viewed_v1"
 PAID_FINANCIAL_STATUSES = {"paid", "partially_paid", "partially refunded", "partially_refunded"}
@@ -963,6 +983,13 @@ def employee_portal_is_authenticated():
 
 def admin_portal_is_authenticated():
     return bool(session.get(ADMIN_PORTAL_SESSION_KEY))
+
+
+def _admin_passkey_descriptors(passkeys):
+    return [
+        PublicKeyCredentialDescriptor(id=bytes(passkey["credential_id"]))
+        for passkey in passkeys
+    ]
 
 
 def employee_portal_safe_next_url(candidate):
@@ -2989,11 +3016,110 @@ def admin_portal():
         submitted_password = (request.form.get("password") or "").strip()
         if submitted_password == ADMIN_PORTAL_PASSWORD:
             session[ADMIN_PORTAL_SESSION_KEY] = True
+            session.permanent = True
             return redirect(url_for("admin_portal", section=selected))
-        return render_template("admin_portal.html", view="login", login_error="Wrong password. Try again.", sections=sections, selected_section=selected), 401
+        return render_template("admin_portal.html", view="login", login_error="Wrong password. Try again.", sections=sections, selected_section=selected, passkey_available=bool(load_admin_passkeys())), 401
     if not admin_portal_is_authenticated():
-        return render_template("admin_portal.html", view="login", login_error="", sections=sections, selected_section=selected)
-    return render_template("admin_portal.html", view="portal", sections=sections, selected_section=selected, employee_approvals=build_employee_approval_items())
+        return render_template("admin_portal.html", view="login", login_error="", sections=sections, selected_section=selected, passkey_available=bool(load_admin_passkeys()))
+    return render_template("admin_portal.html", view="portal", sections=sections, selected_section=selected, employee_approvals=build_employee_approval_items(), passkey_available=bool(load_admin_passkeys()))
+
+
+@app.route("/admin_portal/passkeys/register/options", methods=["POST"])
+def admin_passkey_registration_options():
+    if not admin_portal_is_authenticated():
+        return jsonify({"success": False, "error": "Password login required."}), 401
+    passkeys = load_admin_passkeys()
+    options = generate_registration_options(
+        rp_id=ADMIN_PORTAL_RP_ID,
+        rp_name="Alkaramat Admin",
+        user_id=b"alkaramat-admin",
+        user_name="admin@alkaramat",
+        user_display_name="Alkaramat Admin",
+        exclude_credentials=_admin_passkey_descriptors(passkeys),
+        authenticator_selection=AuthenticatorSelectionCriteria(
+            resident_key=ResidentKeyRequirement.PREFERRED,
+            user_verification=UserVerificationRequirement.REQUIRED,
+        ),
+    )
+    session[ADMIN_PASSKEY_CHALLENGE_KEY] = base64.urlsafe_b64encode(options.challenge).decode().rstrip("=")
+    return app.response_class(options_to_json(options), mimetype="application/json")
+
+
+@app.route("/admin_portal/passkeys/register/verify", methods=["POST"])
+def admin_passkey_registration_verify():
+    if not admin_portal_is_authenticated():
+        return jsonify({"success": False, "error": "Password login required."}), 401
+    data = request.get_json(silent=True) or {}
+    challenge = session.pop(ADMIN_PASSKEY_CHALLENGE_KEY, "")
+    if not challenge or not data.get("credential"):
+        return jsonify({"success": False, "error": "Passkey setup expired. Please try again."}), 400
+    try:
+        verified = verify_registration_response(
+            credential=data["credential"],
+            expected_challenge=base64url_to_bytes(challenge),
+            expected_rp_id=ADMIN_PORTAL_RP_ID,
+            expected_origin=ADMIN_PORTAL_ORIGIN,
+            require_user_verification=True,
+        )
+        device_name = str(data.get("device_name") or "Mobile device").strip()[:80]
+        if not save_admin_passkey(
+            verified.credential_id,
+            verified.credential_public_key,
+            verified.sign_count,
+            device_name,
+        ):
+            raise RuntimeError("Could not save this passkey.")
+        return jsonify({"success": True, "message": "Face ID / fingerprint login is ready."})
+    except Exception as error:
+        print(f"Admin passkey registration failed: {error}")
+        return jsonify({"success": False, "error": "Passkey setup could not be verified."}), 400
+
+
+@app.route("/admin_portal/passkeys/login/options", methods=["POST"])
+def admin_passkey_login_options():
+    passkeys = load_admin_passkeys()
+    if not passkeys:
+        return jsonify({"success": False, "error": "Log in with the password once to enable Face ID or fingerprint."}), 404
+    options = generate_authentication_options(
+        rp_id=ADMIN_PORTAL_RP_ID,
+        allow_credentials=_admin_passkey_descriptors(passkeys),
+        user_verification=UserVerificationRequirement.REQUIRED,
+    )
+    session[ADMIN_PASSKEY_CHALLENGE_KEY] = base64.urlsafe_b64encode(options.challenge).decode().rstrip("=")
+    return app.response_class(options_to_json(options), mimetype="application/json")
+
+
+@app.route("/admin_portal/passkeys/login/verify", methods=["POST"])
+def admin_passkey_login_verify():
+    data = request.get_json(silent=True) or {}
+    credential = data.get("credential") or {}
+    challenge = session.pop(ADMIN_PASSKEY_CHALLENGE_KEY, "")
+    if not challenge or not credential.get("id"):
+        return jsonify({"success": False, "error": "Login expired. Please try again."}), 400
+    try:
+        credential_id = base64url_to_bytes(credential["id"])
+        passkey = next(
+            (row for row in load_admin_passkeys() if bytes(row["credential_id"]) == credential_id),
+            None,
+        )
+        if not passkey:
+            raise ValueError("Unknown passkey")
+        verified = verify_authentication_response(
+            credential=credential,
+            expected_challenge=base64url_to_bytes(challenge),
+            expected_rp_id=ADMIN_PORTAL_RP_ID,
+            expected_origin=ADMIN_PORTAL_ORIGIN,
+            credential_public_key=bytes(passkey["public_key"]),
+            credential_current_sign_count=int(passkey["sign_count"] or 0),
+            require_user_verification=True,
+        )
+        update_admin_passkey_usage(credential_id, verified.new_sign_count)
+        session[ADMIN_PORTAL_SESSION_KEY] = True
+        session.permanent = True
+        return jsonify({"success": True, "redirect": url_for("admin_portal")})
+    except Exception as error:
+        print(f"Admin passkey login failed: {error}")
+        return jsonify({"success": False, "error": "Face ID / fingerprint login was not verified."}), 401
 
 
 @app.route("/admin_portal/logout", methods=["POST"])

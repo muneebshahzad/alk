@@ -7,6 +7,10 @@
   <title>Alkaramat Admin Portal</title>
   <link rel="manifest" href="/admin_portal-manifest.webmanifest">
   <link rel="icon" href="/static/employee-portal-icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" sizes="192x192" href="/static/admin-portal-icon-192.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="ALK Admin">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
@@ -32,7 +36,8 @@
         radial-gradient(circle at top left, rgba(242, 182, 50, 0.24), transparent 30%),
         radial-gradient(circle at top right, rgba(38, 103, 255, 0.16), transparent 28%),
         linear-gradient(180deg, #fbf7f0 0%, #f4efe6 55%, #efe6da 100%);
-      padding: 14px 12px 20px;
+      padding: max(14px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) max(20px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
+      overscroll-behavior: none;
     }
     .shell {
       max-width: 760px;
@@ -154,6 +159,7 @@
       overflow: hidden;
       padding: 0;
     }
+    .bottom-nav { display:none; }
     .viewer-toolbar {
       padding: 10px 12px;
       border-bottom: 1px solid var(--line);
@@ -226,6 +232,19 @@
       color: var(--red);
       font-weight: 700;
     }
+    .login-actions { display:grid; gap:10px; }
+    .secondary-btn { background:#fff; color:var(--ink); border:1px solid var(--line); border-radius:14px; min-height:48px; padding:11px 14px; font:700 14px inherit; cursor:pointer; }
+    .login-divider { display:flex; align-items:center; gap:10px; color:var(--muted); font-size:12px; }
+    .login-divider::before, .login-divider::after { content:""; height:1px; background:var(--line); flex:1; }
+    .app-hint { font-size:12px; color:var(--muted); text-align:center; line-height:1.45; }
+    .app-dialog { border:0; border-radius:22px; width:min(92vw,420px); padding:0; color:var(--ink); box-shadow:0 24px 70px rgba(20,33,61,.28); }
+    .app-dialog::backdrop { background:rgba(20,33,61,.4); backdrop-filter:blur(4px); }
+    .dialog-body { padding:22px; display:grid; gap:12px; }
+    .dialog-body h2 { margin:0; font-size:22px; }
+    .dialog-body p { margin:0; color:var(--muted); line-height:1.5; }
+    .dialog-actions { display:flex; gap:8px; justify-content:flex-end; margin-top:4px; }
+    .app-toast { position:fixed; left:50%; bottom:max(20px,env(safe-area-inset-bottom)); transform:translate(-50%,20px); opacity:0; pointer-events:none; z-index:100; width:min(90vw,420px); background:var(--ink); color:#fff; border-radius:14px; padding:12px 16px; text-align:center; font-size:13px; font-weight:700; transition:.2s ease; }
+    .app-toast.show { opacity:1; transform:translate(-50%,0); }
     .menu-overlay {
       position: fixed;
       inset: 0;
@@ -304,26 +323,48 @@
       min-height: 44px;
       font-size: 13px;
     }
+    #setupPasskeyBtn { flex-basis:100%; }
+    .menu-actions { flex-wrap:wrap; }
     @media (max-width: 640px) {
-      .viewer-frame { height: calc(100vh - 146px); min-height: 500px; }
+      body { padding-bottom:max(82px,calc(68px + env(safe-area-inset-bottom))); }
+      .hero { top:max(6px,env(safe-area-inset-top)); }
+      .viewer-frame { height: calc(100dvh - 162px); min-height: 480px; }
       .menu-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .bottom-nav {
+        position:fixed; left:0; right:0; bottom:0; z-index:45;
+        display:grid; grid-template-columns:repeat(5,1fr);
+        padding:7px 8px max(7px,env(safe-area-inset-bottom));
+        background:rgba(255,252,247,.96); border-top:1px solid var(--line);
+        box-shadow:0 -10px 30px rgba(20,33,61,.1); backdrop-filter:blur(14px);
+      }
+      .bottom-nav button { min-width:0; min-height:48px; border-radius:12px; background:transparent; color:var(--muted); display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px; font-size:10px; font-weight:800; }
+      .bottom-nav button.active { color:var(--blue); background:rgba(38,103,255,.08); }
+      .bottom-nav .nav-glyph { font-size:18px; line-height:1; }
     }
   </style>
 </head>
 <body>
   <div class="shell">
     {% if view == 'login' %}
-      <form class="login-card card" method="post">
+      <form class="login-card card" method="post" id="passwordLoginForm">
         <a class="brand-lockup" href="#">
           <span>Alkaramat</span>
         </a>
         <h1>Admin mobile.</h1>
-        <p class="subcopy">Password-protected mobile admin access.</p>
+        <p class="subcopy">Secure mobile access to orders, tracking and payments.</p>
         {% if login_error %}
           <div class="error">{{ login_error }}</div>
         {% endif %}
         <input class="login-field" type="password" name="password" placeholder="Password" autocomplete="current-password" required>
-        <button class="primary-btn" type="submit">Enter Admin Portal</button>
+        <div class="login-actions">
+          <button class="primary-btn" type="submit">Log in with password</button>
+          {% if passkey_available %}
+            <div class="login-divider">or</div>
+            <button class="secondary-btn" type="button" id="passkeyLoginBtn">Use Face ID or fingerprint</button>
+          {% endif %}
+          <button class="secondary-btn" type="button" data-install-app>Install mobile app</button>
+        </div>
+        <div class="app-hint">Install directly from your browser. No App Store or Play Store is required.</div>
       </form>
     {% else %}
       <section class="hero card">
@@ -332,6 +373,7 @@
             <span>Alkaramat</span>
           </button>
           <div class="hero-actions">
+            <button class="icon-btn" type="button" data-install-app title="Install App" aria-label="Install App">↓</button>
             <button class="icon-btn" type="button" id="addOrderBtn" title="Add Order">＋</button>
             <button class="icon-btn" type="button" id="menuToggleBtn" title="Open Navigation">☰</button>
           </div>
@@ -341,6 +383,14 @@
       <section class="card iframe-card">
         <iframe id="toolFrame" class="viewer-frame" title="Admin portal tool view" src=""></iframe>
       </section>
+
+      <nav class="bottom-nav" aria-label="Primary navigation">
+        <button type="button" data-bottom-section="dashboard"><span class="nav-glyph">⌂</span><span>Home</span></button>
+        <button type="button" data-bottom-section="employee-orders"><span class="nav-glyph">☷</span><span>Orders</span></button>
+        <button type="button" data-bottom-section="scanner"><span class="nav-glyph">▣</span><span>Scan</span></button>
+        <button type="button" data-bottom-section="payments"><span class="nav-glyph">₨</span><span>Payments</span></button>
+        <button type="button" id="bottomMoreBtn"><span class="nav-glyph">•••</span><span>More</span></button>
+      </nav>
 
       <div class="menu-overlay" id="menuOverlay" aria-hidden="true">
         <aside class="menu-drawer" aria-label="Admin navigation">
@@ -363,6 +413,7 @@
             {% endfor %}
           </div>
           <div class="menu-actions">
+            <button class="text-btn" type="button" id="setupPasskeyBtn">{% if passkey_available %}Add Passkey{% else %}Enable Face ID{% endif %}</button>
             <button class="text-btn" type="button" id="openCurrentToolBtn">Open Tool</button>
             <form method="post" action="/admin_portal/logout" style="margin:0;flex:1;">
               <button class="primary-btn" type="submit" style="width:100%;">Logout</button>
@@ -372,6 +423,162 @@
       </div>
     {% endif %}
   </div>
+
+  <dialog class="app-dialog" id="installDialog">
+    <div class="dialog-body">
+      <h2>Install ALK Admin</h2>
+      <p id="installInstructions">Install this portal on your Home Screen for a full-screen app experience.</p>
+      <div class="dialog-actions">
+        <button class="secondary-btn" type="button" id="installCancelBtn">Close</button>
+        <button class="primary-btn" type="button" id="installConfirmBtn">Install</button>
+      </div>
+    </div>
+  </dialog>
+  <div class="app-toast" id="appToast" role="status" aria-live="polite"></div>
+
+  <script>
+    let deferredInstallPrompt = null;
+    const installDialog = document.getElementById('installDialog');
+    const installConfirmBtn = document.getElementById('installConfirmBtn');
+    const installInstructions = document.getElementById('installInstructions');
+    const appToast = document.getElementById('appToast');
+
+    function showAppToast(message) {
+      appToast.textContent = message;
+      appToast.classList.add('show');
+      window.setTimeout(() => appToast.classList.remove('show'), 3200);
+    }
+
+    function base64urlToBytes(value) {
+      const padding = '='.repeat((4 - value.length % 4) % 4);
+      const base64 = (value + padding).replace(/-/g, '+').replace(/_/g, '/');
+      return Uint8Array.from(atob(base64), char => char.charCodeAt(0));
+    }
+
+    function bytesToBase64url(value) {
+      const bytes = new Uint8Array(value);
+      let binary = '';
+      bytes.forEach(byte => { binary += String.fromCharCode(byte); });
+      return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    }
+
+    function serializeCredential(value) {
+      if (value instanceof ArrayBuffer) return bytesToBase64url(value);
+      if (ArrayBuffer.isView(value)) return bytesToBase64url(value.buffer);
+      if (Array.isArray(value)) return value.map(serializeCredential);
+      if (value && typeof value === 'object') {
+        const result = {};
+        for (const key in value) result[key] = serializeCredential(value[key]);
+        return result;
+      }
+      return value;
+    }
+
+    function publicKeyCredentialToJSON(credential) {
+      const response = credential.response;
+      const serializedResponse = {
+        clientDataJSON: bytesToBase64url(response.clientDataJSON)
+      };
+      if (response.attestationObject) serializedResponse.attestationObject = bytesToBase64url(response.attestationObject);
+      if (response.authenticatorData) serializedResponse.authenticatorData = bytesToBase64url(response.authenticatorData);
+      if (response.signature) serializedResponse.signature = bytesToBase64url(response.signature);
+      if (response.userHandle) serializedResponse.userHandle = bytesToBase64url(response.userHandle);
+      if (response.getTransports) serializedResponse.transports = response.getTransports();
+      return {
+        id: credential.id,
+        rawId: bytesToBase64url(credential.rawId),
+        type: credential.type,
+        response: serializedResponse,
+        clientExtensionResults: credential.getClientExtensionResults()
+      };
+    }
+
+    function prepareCreationOptions(options) {
+      options.challenge = base64urlToBytes(options.challenge);
+      options.user.id = base64urlToBytes(options.user.id);
+      (options.excludeCredentials || []).forEach(item => { item.id = base64urlToBytes(item.id); });
+      return options;
+    }
+
+    function prepareRequestOptions(options) {
+      options.challenge = base64urlToBytes(options.challenge);
+      (options.allowCredentials || []).forEach(item => { item.id = base64urlToBytes(item.id); });
+      return options;
+    }
+
+    async function responseJson(response) {
+      const result = await response.json();
+      if (!response.ok || result.success === false) throw new Error(result.error || 'Request failed.');
+      return result;
+    }
+
+    async function loginWithPasskey(button) {
+      if (!window.PublicKeyCredential) throw new Error('Passkeys are not supported by this browser.');
+      button.disabled = true;
+      try {
+        const options = await responseJson(await fetch('/admin_portal/passkeys/login/options', {method:'POST'}));
+        const credential = await navigator.credentials.get({publicKey:prepareRequestOptions(options)});
+        const result = await responseJson(await fetch('/admin_portal/passkeys/login/verify', {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({credential:publicKeyCredentialToJSON(credential)})
+        }));
+        window.location.assign(result.redirect || '/admin_portal');
+      } finally { button.disabled = false; }
+    }
+
+    async function registerPasskey(button) {
+      if (!window.PublicKeyCredential) throw new Error('Passkeys are not supported by this browser.');
+      button.disabled = true;
+      try {
+        const options = await responseJson(await fetch('/admin_portal/passkeys/register/options', {method:'POST'}));
+        const credential = await navigator.credentials.create({publicKey:prepareCreationOptions(options)});
+        const result = await responseJson(await fetch('/admin_portal/passkeys/register/verify', {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({credential:publicKeyCredentialToJSON(credential), device_name:navigator.platform || 'Mobile device'})
+        }));
+        button.textContent = 'Add Passkey';
+        showAppToast(result.message);
+      } finally { button.disabled = false; }
+    }
+
+    window.addEventListener('beforeinstallprompt', event => {
+      event.preventDefault();
+      deferredInstallPrompt = event;
+    });
+    window.addEventListener('appinstalled', () => {
+      deferredInstallPrompt = null;
+      installDialog?.close();
+      showAppToast('ALK Admin installed.');
+    });
+    document.querySelectorAll('[data-install-app]').forEach(button => button.addEventListener('click', () => {
+      const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+      const isStandalone = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone;
+      if (isStandalone) return showAppToast('ALK Admin is already installed.');
+      installInstructions.textContent = isIOS
+        ? 'In Safari, tap the Share button, choose “Add to Home Screen”, then tap Add.'
+        : deferredInstallPrompt
+          ? 'Tap Install to add ALK Admin to your Home Screen.'
+          : 'Open your browser menu and choose “Install app” or “Add to Home screen”.';
+      installConfirmBtn.hidden = isIOS || !deferredInstallPrompt;
+      installDialog.showModal();
+    }));
+    installConfirmBtn?.addEventListener('click', async () => {
+      if (!deferredInstallPrompt) return;
+      await deferredInstallPrompt.prompt();
+      deferredInstallPrompt = null;
+      installDialog.close();
+    });
+    document.getElementById('installCancelBtn')?.addEventListener('click', () => installDialog.close());
+    document.getElementById('passkeyLoginBtn')?.addEventListener('click', event => {
+      loginWithPasskey(event.currentTarget).catch(error => showAppToast(error.message));
+    });
+    document.getElementById('setupPasskeyBtn')?.addEventListener('click', event => {
+      registerPasskey(event.currentTarget).catch(error => showAppToast(error.message));
+    });
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/admin_portal-sw.js').catch(() => {});
+    }
+  </script>
 
   {% if view == 'portal' %}
     <script>
@@ -393,6 +600,9 @@
       function updateActiveTab(sectionId) {
         document.querySelectorAll('.menu-nav-btn').forEach(button => {
           button.classList.toggle('active', button.dataset.section === sectionId);
+        });
+        document.querySelectorAll('[data-bottom-section]').forEach(button => {
+          button.classList.toggle('active', button.dataset.bottomSection === sectionId);
         });
       }
 
@@ -429,10 +639,6 @@
         button.addEventListener('click', () => openSection(button.dataset.section));
       });
 
-      if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.register('/admin_portal-sw.js').catch(() => {});
-      }
-
       logoHomeBtn?.addEventListener('click', () => openSection('dashboard'));
       menuToggleBtn?.addEventListener('click', openMenu);
       menuCloseBtn?.addEventListener('click', closeMenu);
@@ -452,6 +658,10 @@
           toolFrame.src = '/employee_portal/orders?show_add_order=1';
         }, 40);
       });
+      document.querySelectorAll('[data-bottom-section]').forEach(button => {
+        button.addEventListener('click', () => openSection(button.dataset.bottomSection));
+      });
+      document.getElementById('bottomMoreBtn')?.addEventListener('click', openMenu);
 
       const remembered = localStorage.getItem('tbAdminPortalSection');
       openSection(remembered || defaultSection, false);

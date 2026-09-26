@@ -76,6 +76,21 @@ def _ensure_aghaje_order_item_cost_overrides_table(cur):
     )
 
 
+def _ensure_admin_passkeys_table(cur):
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS admin_passkeys (
+            credential_id BYTEA PRIMARY KEY,
+            public_key BYTEA NOT NULL,
+            sign_count BIGINT NOT NULL DEFAULT 0,
+            device_name TEXT NOT NULL DEFAULT 'Mobile device',
+            created_at TIMESTAMPTZ DEFAULT NOW(),
+            last_used_at TIMESTAMPTZ
+        )
+        """
+    )
+
+
 def get_conn():
     url = (
         os.getenv("DATABASE_URL", "")
@@ -128,6 +143,7 @@ def init_db():
                 _ensure_aghaje_order_overrides_table(cur)
                 _ensure_aghaje_item_cost_overrides_table(cur)
                 _ensure_aghaje_order_item_cost_overrides_table(cur)
+                _ensure_admin_passkeys_table(cur)
             conn.commit()
         _set_last_db_error("")
         print("DB initialized.")
@@ -220,6 +236,67 @@ def set_app_setting(key: str, value: str):
     except Exception as e:
         _set_last_db_error(str(e))
         print(f"DB set_app_setting error: {e}")
+        return False
+
+
+def load_admin_passkeys() -> list[dict]:
+    try:
+        with get_conn() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                _ensure_admin_passkeys_table(cur)
+                cur.execute(
+                    "SELECT credential_id, public_key, sign_count, device_name, created_at, last_used_at FROM admin_passkeys ORDER BY created_at"
+                )
+                rows = [dict(row) for row in cur.fetchall()]
+            conn.commit()
+        _set_last_db_error("")
+        return rows
+    except Exception as e:
+        _set_last_db_error(str(e))
+        print(f"DB load admin passkeys error: {e}")
+        return []
+
+
+def save_admin_passkey(credential_id: bytes, public_key: bytes, sign_count: int, device_name: str) -> bool:
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                _ensure_admin_passkeys_table(cur)
+                cur.execute(
+                    """
+                    INSERT INTO admin_passkeys (credential_id, public_key, sign_count, device_name)
+                    VALUES (%s, %s, %s, %s)
+                    ON CONFLICT (credential_id) DO UPDATE
+                        SET public_key = EXCLUDED.public_key,
+                            sign_count = EXCLUDED.sign_count,
+                            device_name = EXCLUDED.device_name
+                    """,
+                    (credential_id, public_key, sign_count, device_name),
+                )
+            conn.commit()
+        _set_last_db_error("")
+        return True
+    except Exception as e:
+        _set_last_db_error(str(e))
+        print(f"DB save admin passkey error: {e}")
+        return False
+
+
+def update_admin_passkey_usage(credential_id: bytes, sign_count: int) -> bool:
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                _ensure_admin_passkeys_table(cur)
+                cur.execute(
+                    "UPDATE admin_passkeys SET sign_count = %s, last_used_at = NOW() WHERE credential_id = %s",
+                    (sign_count, credential_id),
+                )
+            conn.commit()
+        _set_last_db_error("")
+        return True
+    except Exception as e:
+        _set_last_db_error(str(e))
+        print(f"DB update admin passkey error: {e}")
         return False
 
 
