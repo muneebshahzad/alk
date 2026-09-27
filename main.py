@@ -662,6 +662,25 @@ async def get_checkout_line_item_image(session, line_item, product_cache):
     return as_dict(product.get("image")).get("src") or ""
 
 
+async def preload_checkout_products(session, checkouts, product_cache):
+    product_ids = {
+        str(item.get("product_id"))
+        for checkout in checkouts
+        for item in ((checkout.get("line_items") or []) if isinstance(checkout.get("line_items") or [], list) else [])
+        if item.get("product_id") and not get_checkout_image_url(item)
+    }
+
+    async def load(product_id):
+        try:
+            product_data = await async_shopify_fetch(session, f"products/{product_id}.json")
+            product_cache[product_id] = as_dict(product_data.get("product") if product_data else {})
+        except Exception as error:
+            product_cache[product_id] = {}
+            print(f"Could not preload abandoned checkout product {product_id}: {error}")
+
+    await asyncio.gather(*(load(product_id) for product_id in product_ids))
+
+
 def build_abandoned_whatsapp_url(phone, customer_name):
     phone = "".join(ch for ch in str(phone or "") if ch.isdigit())
     if not phone:
@@ -834,7 +853,7 @@ def shopify_order_admin_link(order_id):
     return f"https://admin.shopify.com/store/alkaramat/orders/{order_id}"
 
 
-async def build_abandoned_checkouts_data(days=7, include_product_fallbacks=True):
+async def build_abandoned_checkouts_data(days=7):
     checkouts, recovery_orders = await asyncio.gather(
         fetch_shopify_abandoned_checkouts(days),
         fetch_recent_shopify_orders_for_recovery(max(days, 30)),
@@ -847,6 +866,7 @@ async def build_abandoned_checkouts_data(days=7, include_product_fallbacks=True)
     product_cache = {}
 
     async with aiohttp.ClientSession() as session:
+        await preload_checkout_products(session, checkouts, product_cache)
         for checkout in checkouts:
             checkout = as_dict(checkout)
             customer = as_dict(checkout.get("customer"))
@@ -879,10 +899,7 @@ async def build_abandoned_checkouts_data(days=7, include_product_fallbacks=True)
                         "quantity": quantity,
                         "unit_price": unit_price,
                         "line_total": round(unit_price * quantity, 2),
-                        "image": (
-                            await get_checkout_line_item_image(session, line_item, product_cache)
-                            if include_product_fallbacks else get_checkout_image_url(line_item)
-                        ),
+                        "image": await get_checkout_line_item_image(session, line_item, product_cache),
                     }
                 )
 
@@ -926,7 +943,7 @@ async def build_abandoned_checkouts_data(days=7, include_product_fallbacks=True)
                     "completed_at": completed_at or (recovered_order or {}).get("created_at", ""),
                     "items": items,
                     "created_date": str(created_at or "")[:10],
-                    "relative_age": relative_time_label(created_at),
+                    "relative_age": relative_time_label(checkout.get("updated_at") or created_at),
                     "whatsapp_url": build_abandoned_whatsapp_url(customer_phone, customer_name),
                     "is_today": parse_date_for_sort(created_at).date() == today,
                 }
@@ -953,7 +970,7 @@ async def build_abandoned_checkouts_summary(days=7):
         checkout for checkout in checkouts
         if str(checkout.get("token") or checkout.get("cart_token") or checkout.get("id")) not in viewed_tokens
     ]
-    newest_unviewed = max(unviewed, key=lambda row: parse_date_timestamp(row.get("created_at")), default=None)
+    newest_unviewed = max(unviewed, key=lambda row: parse_date_timestamp(row.get("updated_at") or row.get("created_at")), default=None)
     return {
         "last_7_days": len(checkouts),
         "today": sum(1 for checkout in checkouts if parse_date_for_sort(checkout.get("created_at")).date() == today),
@@ -961,7 +978,7 @@ async def build_abandoned_checkouts_summary(days=7):
         "open": sum(1 for checkout in checkouts if not checkout.get("completed_at")),
         "viewed": len(checkouts) - len(unviewed),
         "not_viewed": len(unviewed),
-        "newest_unviewed_age": relative_time_label(newest_unviewed.get("created_at")) if newest_unviewed else "",
+        "newest_unviewed_age": relative_time_label(newest_unviewed.get("updated_at") or newest_unviewed.get("created_at")) if newest_unviewed else "",
         "value": round(sum(parse_money(checkout.get("total_price", 0)) for checkout in checkouts), 2),
     }
 
@@ -2188,9 +2205,7 @@ def displayTracking(tracking_num):
 @app.route('/abandoned')
 def abandoned_orders():
     try:
-        abandoned_checkouts, summary = asyncio.run(build_abandoned_checkouts_data(
-            include_product_fallbacks=request.args.get("embedded") != "1"
-        ))
+        abandoned_checkouts, summary = asyncio.run(build_abandoned_checkouts_data())
         error = None
     except Exception as fetch_error:
         print(f"Could not build abandoned checkouts page: {fetch_error}")
@@ -2234,7 +2249,7 @@ def admin_notifications():
         abandoned, advice = asyncio.run(load_notifications())
         viewed_tokens = load_abandoned_viewed_tokens()
         abandoned_items = []
-        for checkout in sorted(abandoned, key=lambda row: parse_date_timestamp(row.get("created_at")), reverse=True):
+        for checkout in sorted(abandoned, key=lambda row: parse_date_timestamp(row.get("updated_at") or row.get("created_at")), reverse=True):
             token = str(checkout.get("token") or checkout.get("cart_token") or checkout.get("id") or "")
             if not token or token in viewed_tokens:
                 continue
@@ -2246,8 +2261,8 @@ def admin_notifications():
             abandoned_items.append({
                 "token": token,
                 "title": name,
-                "age": relative_time_label(checkout.get("created_at")),
-                "amount": format_currency_amount(checkout.get("total_price"), checkout.get("currency") or "PKR"),
+                "age": relative_time_label(checkout.get("updated_at") or checkout.get("created_at")),
+                "amount": format_currency_amount(checkout.get("total_price"), checkout.get("presentment_currency") or checkout.get("currency") or "PKR"),
             })
         advice_items = [{
             "tracking": str(item.get("tracking_no") or ""),
@@ -2760,7 +2775,7 @@ def split_customer_name(name):
     return parts[0], " ".join(parts[1:])
 
 
-def build_employee_invoice_payload(order_name, customer_name, phone, city, address, payment_method, delivery_method, catalog_items, custom_items, discount_amount, delivery_charges, advance_amount):
+def build_employee_invoice_payload(order_name, customer_name, phone, city, address, payment_method, payment_status, catalog_items, custom_items, discount_amount, delivery_charges):
     items = []
     subtotal = 0.0
     for item in catalog_items:
@@ -2776,7 +2791,8 @@ def build_employee_invoice_payload(order_name, customer_name, phone, city, addre
         subtotal += line_total
         items.append({"title": item.get("title") or "Custom product", "quantity": quantity, "image": item.get("image") or "", "unit_price": unit_price, "line_total": line_total})
     total = round(subtotal - discount_amount + delivery_charges, 2)
-    balance_due = round(max(total - advance_amount, 0), 2)
+    amount_paid = total if payment_status == "Paid" else 0.0
+    balance_due = round(max(total - amount_paid, 0), 2)
     return {
         "order_id": order_name,
         "customer_name": customer_name,
@@ -2790,7 +2806,7 @@ def build_employee_invoice_payload(order_name, customer_name, phone, city, addre
             "discount": round(discount_amount, 2),
             "delivery_charges": round(delivery_charges, 2),
             "total": round(total, 2),
-            "advance_paid": round(advance_amount, 2),
+            "advance_paid": round(amount_paid, 2),
             "balance_due": round(balance_due, 2),
         },
     }
@@ -2802,10 +2818,9 @@ def create_shopify_employee_order(payload):
     city = (payload.get("city") or "").strip()
     address = (payload.get("address") or "").strip()
     payment_method = (payload.get("payment_method") or "").strip()
-    delivery_method = (payload.get("delivery_method") or "").strip()
+    payment_status = (payload.get("payment_status") or "Unpaid").strip().title()
     discount_amount = parse_money(payload.get("discount_amount"))
     delivery_charges = parse_money(payload.get("delivery_charges"))
-    advance_amount = parse_money(payload.get("advance_amount"))
     catalog_items = payload.get("catalog_items") or []
     custom_items = payload.get("custom_items") or []
     extra_notes = (payload.get("notes") or "").strip()
@@ -2813,8 +2828,10 @@ def create_shopify_employee_order(payload):
         raise ValueError("Customer name is required.")
     if not phone:
         raise ValueError("Phone number is required.")
-    if payment_method.lower() == "partial" and advance_amount <= 0:
-        raise ValueError("Enter the advance paid amount for partial payment.")
+    if payment_method not in {"Cash on Delivery", "Bank Deposit"}:
+        raise ValueError("Choose Cash on Delivery or Bank Deposit.")
+    if payment_status not in {"Paid", "Unpaid"}:
+        raise ValueError("Choose Paid or Unpaid.")
 
     line_items = []
     normalized_custom_items = []
@@ -2842,7 +2859,7 @@ def create_shopify_employee_order(payload):
     note_lines = [
         "Created from Alkaramat employee portal.",
         f"Payment method: {payment_method or 'Not specified'}",
-        f"Delivery method: {delivery_method or 'Not specified'}",
+        f"Payment status: {payment_status}",
         f"Phone: {phone or 'Not provided'}",
     ]
     if extra_notes:
@@ -2850,7 +2867,7 @@ def create_shopify_employee_order(payload):
     draft_order = shopify.DraftOrder()
     draft_order.line_items = line_items
     draft_order.note = "\n".join(note_lines)
-    draft_order.tags = "Employee Portal"
+    draft_order.tags = f"Employee Portal, {payment_method}, {payment_status}"
     draft_order.shipping_address = {"first_name": first_name, "last_name": last_name or "Customer", "phone": phone, "address1": address, "city": city, "country": "Pakistan"}
     draft_order.billing_address = draft_order.shipping_address
     draft_order.customer = {"first_name": first_name, "last_name": last_name or "Customer", "phone": phone}
@@ -2860,7 +2877,9 @@ def create_shopify_employee_order(payload):
         draft_order.shipping_line = {"title": "Delivery Charges", "price": delivery_charges, "custom": True}
     if not draft_order.save():
         raise RuntimeError(json.dumps(getattr(draft_order, "errors", {}) or {"error": "Could not save draft order"}))
-    draft_order.complete({"payment_pending": True})
+    # Shopify treats payment_pending=False as paid. Only an explicit Paid
+    # selection may take that path; COD and bank-deposit orders default Unpaid.
+    draft_order.complete({"payment_pending": payment_status != "Paid"})
     refreshed = shopify.DraftOrder.find(draft_order.id)
     order_id = getattr(refreshed, "order_id", None) or getattr(draft_order, "order_id", None)
     order_name = getattr(refreshed, "name", "") or getattr(draft_order, "name", "") or ""
@@ -2870,7 +2889,7 @@ def create_shopify_employee_order(payload):
         "draft_order_id": getattr(draft_order, "id", None),
         "order_id": order_id,
         "order_name": order_name,
-        "invoice": build_employee_invoice_payload(order_name, customer_name, phone, city, address, payment_method, delivery_method, catalog_items, normalized_custom_items, discount_amount, delivery_charges, advance_amount),
+        "invoice": build_employee_invoice_payload(order_name, customer_name, phone, city, address, payment_method, payment_status, catalog_items, normalized_custom_items, discount_amount, delivery_charges),
     }
 
 

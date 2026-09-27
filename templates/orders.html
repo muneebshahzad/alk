@@ -713,6 +713,7 @@
     <section class="hero">
       {% if employee_portal_mode %}
         <div class="brand-lockup">
+          <img src="/static/alkaramat-logo.jpeg" alt="Alkaramat" style="width:72px;height:38px;object-fit:contain;border-radius:8px;background:#fff;">
           <span>Alkaramat</span>
         </div>
       {% endif %}
@@ -918,21 +919,17 @@
         <div class="field">
           <label for="draftPaymentMethod">Payment Method</label>
           <select id="draftPaymentMethod">
-            <option value="Full">Full</option>
-            <option value="Partial">Partial</option>
+            <option value="Cash on Delivery">Cash on Delivery</option>
+            <option value="Bank Deposit">Bank Deposit</option>
           </select>
-        </div>
-        <div class="field hidden" id="draftAdvanceWrap">
-          <label for="draftAdvanceAmount">Advance Paid</label>
-          <input id="draftAdvanceAmount" type="number" min="0" step="0.01" value="0">
-          <div class="inline-helper">Only enter what the customer has already paid.</div>
         </div>
         <div class="field">
-          <label for="draftDeliveryMethod">Delivery Method</label>
-          <select id="draftDeliveryMethod">
-            <option value="Home Delivery">Home Delivery</option>
-            <option value="Self Pickup">Self Pickup</option>
+          <label for="draftPaymentStatus">Payment Status</label>
+          <select id="draftPaymentStatus">
+            <option value="Unpaid" selected>Unpaid</option>
+            <option value="Paid">Paid</option>
           </select>
+          <div class="inline-helper">Unpaid orders always remain unpaid in Shopify.</div>
         </div>
         <div class="field span-2">
           <label for="draftNotes">Notes</label>
@@ -1291,18 +1288,24 @@
     }
 
     async function openAddOrderModal() {
+      openModal('addOrderModal');
+      const submitButton = document.getElementById('submitDraftOrderBtn');
+      submitButton.disabled = true;
+      submitButton.textContent = 'Loading products...';
       try {
         await loadActiveProducts();
         if (!document.getElementById('catalogLineList').children.length) {
           addCatalogLine();
         }
-        syncPaymentFields();
-        openModal('addOrderModal');
+        submitButton.disabled = false;
+        submitButton.textContent = 'Create Shopify Order';
         const firstSearch = document.querySelector('#catalogLineList .catalog-product-search');
         if (firstSearch && !firstSearch.value) {
           firstSearch.focus();
         }
       } catch (error) {
+        submitButton.disabled = false;
+        submitButton.textContent = 'Retry';
         showToast(error.message || 'Could not load products', false);
       }
     }
@@ -1326,14 +1329,6 @@
       })).filter((item) => item.title.trim());
     }
 
-    function syncPaymentFields() {
-      const isPartial = document.getElementById('draftPaymentMethod').value === 'Partial';
-      document.getElementById('draftAdvanceWrap').classList.toggle('hidden', !isPartial);
-      if (!isPartial) {
-        document.getElementById('draftAdvanceAmount').value = '0';
-      }
-    }
-
     async function submitDraftOrder() {
       const button = document.getElementById('submitDraftOrderBtn');
       button.disabled = true;
@@ -1346,8 +1341,7 @@
         discount_amount: document.getElementById('draftDiscount').value || 0,
         delivery_charges: document.getElementById('draftDeliveryCharges').value || 0,
         payment_method: document.getElementById('draftPaymentMethod').value,
-        advance_amount: document.getElementById('draftAdvanceAmount').value || 0,
-        delivery_method: document.getElementById('draftDeliveryMethod').value,
+        payment_status: document.getElementById('draftPaymentStatus').value,
         notes: document.getElementById('draftNotes').value.trim(),
         catalog_items: collectCatalogItems(),
         custom_items: collectCustomItems(),
@@ -1377,11 +1371,9 @@
         document.getElementById('draftAddress').value = '';
         document.getElementById('draftDiscount').value = '0';
         document.getElementById('draftDeliveryCharges').value = '0';
-        document.getElementById('draftPaymentMethod').value = 'Full';
-        document.getElementById('draftAdvanceAmount').value = '0';
-        document.getElementById('draftDeliveryMethod').value = 'Home Delivery';
+        document.getElementById('draftPaymentMethod').value = 'Cash on Delivery';
+        document.getElementById('draftPaymentStatus').value = 'Unpaid';
         document.getElementById('draftNotes').value = '';
-        syncPaymentFields();
       } catch (error) {
         showToast(error.message || 'Could not create Shopify order', false);
       } finally {
@@ -1679,8 +1671,6 @@
       document.getElementById('lahoreOnlyToggle').addEventListener('change', applyLahoreFilter);
       if (EMPLOYEE_PORTAL_MODE) {
         document.getElementById('addOrderBtn').addEventListener('click', openAddOrderModal);
-        document.getElementById('draftPaymentMethod').addEventListener('change', syncPaymentFields);
-        syncPaymentFields();
         document.addEventListener('click', (event) => {
           if (!event.target.closest('.product-search-wrap')) {
             document.querySelectorAll('.product-search-results').forEach((node) => node.classList.add('hidden'));
