@@ -2270,6 +2270,50 @@ def apply_bulk_tag():
     }), 200
 
 
+def _digits(value):
+    return "".join(character for character in str(value or "") if character.isdigit())
+
+
+def enrich_shipper_advice_orders(advice_rows, shopify_orders):
+    """Attach the matching Shopify order summary without trusting a single identifier."""
+    by_reference = {}
+    by_tracking = {}
+    for order in shopify_orders or []:
+        reference = _digits(order.get("order_num") or order.get("order_id"))
+        if reference:
+            by_reference[reference] = order
+        for item in order.get("line_items") or []:
+            tracking = _digits(item.get("tracking_number"))
+            if tracking and tracking != "0":
+                by_tracking[tracking] = order
+
+    enriched = []
+    for raw_advice in advice_rows or []:
+        advice = dict(raw_advice or {})
+        reference = _digits(advice.get("external_reference_no") or advice.get("order_id"))
+        tracking = _digits(advice.get("tracking_no"))
+        order = by_reference.get(reference) or by_tracking.get(tracking)
+        if order:
+            matching_items = [
+                item for item in (order.get("line_items") or [])
+                if not tracking or _digits(item.get("tracking_number")) == tracking
+            ] or list(order.get("line_items") or [])
+            advice["shopify_order"] = {
+                "order_num": order.get("order_num") or order.get("order_id") or reference,
+                "total": parse_money(order.get("total_price"), 0),
+                "display_total": format_currency_amount(order.get("total_price"), "PKR"),
+                "items": [{
+                    "title": item.get("product_title") or item.get("item_title") or "Product",
+                    "image": item.get("image_src") or item.get("item_image") or "",
+                    "quantity": parse_int(item.get("quantity"), 1),
+                } for item in matching_items],
+            }
+        else:
+            advice["shopify_order"] = None
+        enriched.append(advice)
+    return enriched
+
+
 @app.route("/")
 def tracking_home():
     global order_details
@@ -2279,7 +2323,7 @@ def tracking_home():
             async with aiohttp.ClientSession() as client:
                 return await fetch_pending_shipper_advice(client)
 
-        shipper_advice_orders = asyncio.run(load_shipper_advice())
+        shipper_advice_orders = enrich_shipper_advice_orders(asyncio.run(load_shipper_advice()), order_details)
     except Exception as advice_error:
         print(f"Could not load DigiDokaan shipper advice: {advice_error}")
         shipper_advice_orders = []
@@ -2486,15 +2530,19 @@ def admin_notifications():
                 part for part in (customer.get("first_name"), customer.get("last_name")) if part
             ) or checkout.get("email") or "Customer"
             abandoned_items.append({
+                "id": f"abandoned:{token}",
                 "token": token,
                 "title": name,
                 "age": relative_time_label(checkout.get("updated_at") or checkout.get("created_at")),
                 "amount": format_currency_amount(checkout.get("total_price"), checkout.get("presentment_currency") or checkout.get("currency") or "PKR"),
+                "url": "/admin_portal?section=abandoned",
             })
         advice_items = [{
+            "id": f"advice:{str(item.get('tracking_no') or '')}:{str(item.get('status_date') or item.get('advice_date') or '')}",
             "tracking": str(item.get("tracking_no") or ""),
             "title": item.get("customer_name") or item.get("consignee_name") or "Shipment",
             "reason": item.get("courier_status_reason") or "Shipper advice required",
+            "url": "/admin_portal?section=dashboard",
         } for item in advice]
         return jsonify({
             "success": True,

@@ -11,13 +11,16 @@ functions = [node for node in source.body if
              (isinstance(node, ast.AsyncFunctionDef)
               and node.name in {'fetch_tracking_data', 'process_line_item'})
              or (isinstance(node, ast.FunctionDef)
-                 and node.name in {'is_digidokaan_tracking_number', 'tracking_url_for_number'})]
+                 and node.name in {'is_digidokaan_tracking_number', 'tracking_url_for_number', '_digits', 'enrich_shipper_advice_orders'})]
 namespace = {
     'json': json,
     'ClientTimeout': lambda **kwargs: kwargs,
     'quote': __import__('urllib.parse', fromlist=['quote']).quote,
     'urlencode': __import__('urllib.parse', fromlist=['urlencode']).urlencode,
     'fetch_tracking_status': None,
+    'parse_money': lambda value, default=0: float(value or default),
+    'parse_int': lambda value, default=0: int(value or default),
+    'format_currency_amount': lambda value, currency='PKR': f"{currency} {float(value or 0):,.0f}",
 }
 exec(compile(ast.Module(body=functions, type_ignores=[]), 'main.py', 'exec'), namespace)
 
@@ -97,6 +100,20 @@ class TrackingTests(unittest.IsolatedAsyncioTestCase):
     def test_other_tracking_numbers_stay_on_portal(self):
         self.assertFalse(namespace['is_digidokaan_tracking_number']('123456789'))
         self.assertEqual(namespace['tracking_url_for_number']('123 456'), '/track/123%20456')
+
+    def test_shipper_advice_is_enriched_by_tracking_when_reference_differs(self):
+        orders = [{
+            'order_num': '981587500', 'total_price': '4899',
+            'line_items': [{
+                'tracking_number': '22317467960795', 'product_title': 'Ornate Floral Shawl',
+                'image_src': '/shawl.jpg', 'quantity': 1,
+            }],
+        }]
+        result = namespace['enrich_shipper_advice_orders'](
+            [{'external_reference_no': 'different', 'tracking_no': '22317-467960795'}], orders
+        )[0]
+        self.assertEqual(result['shopify_order']['display_total'], 'PKR 4,899')
+        self.assertEqual(result['shopify_order']['items'][0]['title'], 'Ornate Floral Shawl')
 
 
 if __name__ == '__main__':

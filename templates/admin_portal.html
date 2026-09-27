@@ -628,6 +628,34 @@
       const notificationBadge = document.getElementById('notificationBadge');
       const notificationContent = document.getElementById('notificationContent');
       let currentSectionId = defaultSection;
+      const DEVICE_NOTIFICATION_KEY = 'alkAdminDeviceNotificationsV1';
+
+      function notifiedEventIds() {
+        try { return new Set(JSON.parse(localStorage.getItem(DEVICE_NOTIFICATION_KEY) || '[]')); }
+        catch (_) { return new Set(); }
+      }
+
+      async function showDeviceNotifications(result) {
+        if (!('Notification' in window) || Notification.permission !== 'granted' || !('serviceWorker' in navigator)) return;
+        const seen = notifiedEventIds();
+        const events = [
+          ...(result.abandoned || []).map(item => ({...item, id:item.id || `abandoned:${item.token}`, body:`${item.amount} · abandoned ${item.age}`, tag:`abandoned-${item.token}`})),
+          ...(result.shipper_advice || []).map(item => ({...item, id:item.id || `advice:${item.tracking}`, body:`${item.reason} · ${item.tracking}`, tag:`advice-${item.tracking}`}))
+        ];
+        const registration = await navigator.serviceWorker.ready;
+        for (const event of events) {
+          if (seen.has(event.id)) continue;
+          await registration.showNotification(event.title, {
+            body: event.body,
+            icon: '/static/admin-portal-icon-v2-192.png',
+            badge: '/static/admin-portal-icon-v2-192.png',
+            tag: event.tag,
+            data: {url: event.url || '/admin_portal'},
+          });
+          seen.add(event.id);
+        }
+        localStorage.setItem(DEVICE_NOTIFICATION_KEY, JSON.stringify([...seen].slice(-200)));
+      }
 
       function getSectionById(id) {
         return sections.find(section => section.id === id) || sections[0];
@@ -674,6 +702,7 @@
           notificationContent.querySelectorAll('[data-advice]').forEach(button => button.addEventListener('click', () => {
             notificationPanel.classList.remove('open'); openSection('dashboard');
           }));
+          await showDeviceNotifications(result);
         } catch (error) {
           notificationContent.innerHTML = `<div class="notification-empty">${error.message}</div>`;
         }
@@ -704,10 +733,13 @@
 
       logoHomeBtn?.addEventListener('click', () => openSection('dashboard'));
       menuToggleBtn?.addEventListener('click', openMenu);
-      notificationBtn?.addEventListener('click', () => {
+      notificationBtn?.addEventListener('click', async () => {
         if (notificationPanel?.classList.contains('open')) {
           notificationPanel.classList.remove('open');
           return;
+        }
+        if ('Notification' in window && Notification.permission === 'default') {
+          try { await Notification.requestPermission(); } catch (_) {}
         }
         loadNotifications(true);
       });
@@ -742,8 +774,10 @@
       document.getElementById('bottomMoreBtn')?.addEventListener('click', openMenu);
 
       const remembered = localStorage.getItem('tbAdminPortalSection');
-      openSection(remembered || defaultSection, false);
+      const requestedSection = new URLSearchParams(window.location.search).get('section');
+      openSection(requestedSection || remembered || defaultSection, false);
       window.setTimeout(() => loadNotifications(false), 800);
+      window.setInterval(() => loadNotifications(false), 60000);
     </script>
   {% endif %}
 </body>
