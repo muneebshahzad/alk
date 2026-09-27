@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#14213d">
   <title>TB Employee Portal</title>
   <link rel="manifest" href="/employee_portal-manifest.webmanifest">
-  <link rel="icon" href="/static/employee-portal-icon.svg" type="image/svg+xml">
+  <link rel="icon" href="/static/admin-portal-icon-192.png" type="image/png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
@@ -508,23 +508,30 @@
       font-size: 12px;
       line-height: 1.45;
     }
+    .employee-bottom-nav { position:fixed;left:0;right:0;bottom:0;z-index:60;display:grid;grid-template-columns:repeat(3,1fr);padding:7px 10px max(7px,env(safe-area-inset-bottom));background:rgba(255,252,247,.97);border-top:1px solid var(--line);box-shadow:0 -10px 30px rgba(20,33,61,.1); }
+    .employee-bottom-nav a { min-height:48px;border-radius:12px;text-decoration:none;color:var(--muted);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;font-size:11px;font-weight:800; }
+    .employee-bottom-nav a.active { color:var(--blue);background:rgba(38,103,255,.08); }
+    .employee-bottom-nav strong { font-size:19px;line-height:1; }
+    body.auto-passkey .password-fallback { display:none; }
+    .scan-guide { display:none;padding:9px 12px;background:#eef4ff;color:#244d9a;font-size:12px;font-weight:750;text-align:center; }
+    .scan-guide.active { display:block; }
+    @media(max-width:640px){ body{padding-bottom:max(78px,calc(66px + env(safe-area-inset-bottom)));} }
     @media (min-width: 900px) {
       .desktop-note { display: block; }
     }
   </style>
 </head>
-<body>
+<body class="{% if view == 'login' and passkey_available and not login_error %}auto-passkey{% endif %}">
   {% if view == 'login' %}
     <div class="login-wrap">
       <section class="login-card">
         <div class="brand-lockup">
-          <img src="/static/alkaramat-logo.jpeg" alt="Alkaramat">
-          <span>Alkaramat</span>
+          <img src="/static/alkaramat-logo.png" alt="Alkaramat">
         </div>
         <div class="eyebrow">Alkaramat Employee Portal</div>
         <h1 class="login-title">Sign in.</h1>
         <p class="subcopy">Use the employee password to open the scanner, dispatch queue, return queue, and mobile orders view.</p>
-        <form class="login-form" method="post" action="/employee_portal">
+        <form class="login-form password-fallback" method="post" action="/employee_portal">
           <input type="hidden" name="next" value="{{ next_url or '/employee_portal' }}">
           {% if login_error %}
             <div class="login-error">{{ login_error }}</div>
@@ -534,6 +541,7 @@
           </label>
           <button class="login-btn" type="submit">Unlock Portal</button>
         </form>
+        {% if passkey_available %}<button class="utility-btn" type="button" id="employeePasskeyLoginBtn">Use fingerprint / Face ID</button>{% endif %}
         <div class="login-hint">This mobile tool is meant for staff use and opens as a standalone web app after install.</div>
       </section>
     </div>
@@ -543,14 +551,14 @@
 
       <section class="hero">
         <div class="brand-lockup">
-          <img src="/static/alkaramat-logo.jpeg" alt="Alkaramat">
-          <span>Alkaramat</span>
+          <img src="/static/alkaramat-logo.png" alt="Alkaramat">
         </div>
         <div class="eyebrow">Alkaramat Employee Portal</div>
         <h1>Scan, dispatch, return.</h1>
         <div class="toolbar-row">
           <button class="utility-btn" type="button" id="installBtn" hidden>Install App</button>
           <button class="utility-btn" type="button" id="notifyBtn">Enable Notifications</button>
+          <button class="utility-btn" type="button" id="employeePasskeySetupBtn">{% if passkey_available %}Add Passkey{% else %}Enable Fingerprint{% endif %}</button>
           <span class="status-pill" id="notifyStatus"><span class="dot"></span><span>Notifications off</span></span>
           <form method="post" action="/employee_portal/logout" style="margin:0 0 0 auto;">
             <button class="utility-btn" type="submit">Log Out</button>
@@ -574,6 +582,11 @@
           <button class="text-btn" onclick="window.location.href='/employee_portal/orders'">Orders List</button>
         </div>
       </section>
+      <nav class="employee-bottom-nav" aria-label="Employee navigation">
+        <a class="active" href="/employee_portal"><strong>▣</strong><span>Scan</span></a>
+        <a href="/employee_portal/orders"><strong>☷</strong><span>Orders</span></a>
+        <a href="/employee_portal/orders?show_add_order=1"><strong>＋</strong><span>Add order</span></a>
+      </nav>
 
       <section class="panel">
         <div class="input-row">
@@ -582,6 +595,7 @@
           <button class="icon-btn" onclick="submitScan()" aria-label="Submit scan">></button>
         </div>
         <div id="reader"></div>
+        <div class="scan-guide" id="scanGuide">Hold the barcode inside the wide frame. Keep the phone steady and move closer if the code is small.</div>
         <div class="camera-meta" id="cameraMeta">
           <div class="scan-count" id="scanCount">0 scanned</div>
           <button class="ghost-btn" type="button" id="hideCameraBtn" onclick="stopScanner()">Hide Camera</button>
@@ -665,19 +679,25 @@
       }
 
       function normalizeTerm(value) {
-        return (value || '').trim().toLowerCase().replaceAll('#', '');
+        return String(value || '').trim().toLowerCase().replaceAll('#', '').replace(/[^a-z0-9]/g, '');
+      }
+
+      function scanCandidates(value) {
+        const raw = String(value || '').trim();
+        const values = [raw, ...(raw.match(/\d{4,}/g) || [])];
+        return [...new Set(values.map(normalizeTerm).filter(Boolean))];
       }
 
       function findOrder(term) {
-        const normalized = normalizeTerm(term);
-        if (!normalized) return null;
+        const candidates = scanCandidates(term);
+        if (!candidates.length) return null;
 
         return ORDERS.find((order) => {
           const orderId = normalizeTerm(order.order_id);
-          if (normalized === orderId || orderId.endsWith(normalized)) {
+          if (candidates.some(candidate => candidate === orderId || orderId.endsWith(candidate))) {
             return true;
           }
-          return (order.items || []).some((item) => normalizeTerm(item.tracking_number) === normalized);
+          return (order.items || []).some((item) => candidates.includes(normalizeTerm(item.tracking_number)));
         }) || null;
       }
 
@@ -689,12 +709,22 @@
         processScan(term);
       }
 
-      function processScan(term) {
+      async function processScan(term) {
         if (term === lastScanValue) return;
         lastScanValue = term;
         setTimeout(() => { lastScanValue = ''; }, 1200);
 
-        const order = findOrder(term);
+        let order = findOrder(term);
+        if (!order) {
+          try {
+            const response = await fetch('/api/scan/order', {
+              method: 'POST', headers: {'Content-Type': 'application/json'},
+              body: JSON.stringify({scan_input: term})
+            });
+            const result = await response.json();
+            if (response.ok && result.success) order = result.order;
+          } catch (error) {}
+        }
         if (!order) {
           showToast('Order not found', false);
           return;
@@ -853,14 +883,33 @@
         const cameraMeta = document.getElementById('cameraMeta');
 
         try {
-          scanner = scanner || new Html5Qrcode('reader');
+          const formats = window.Html5QrcodeSupportedFormats ? [
+            Html5QrcodeSupportedFormats.CODE_128,
+            Html5QrcodeSupportedFormats.CODE_39,
+            Html5QrcodeSupportedFormats.EAN_13,
+            Html5QrcodeSupportedFormats.EAN_8,
+            Html5QrcodeSupportedFormats.QR_CODE,
+            Html5QrcodeSupportedFormats.DATA_MATRIX
+          ] : undefined;
+          scanner = scanner || new Html5Qrcode('reader', { formatsToSupport: formats, useBarCodeDetectorIfSupported: true, verbose: false });
           readerEl.classList.add('active');
           cameraMeta.classList.add('active');
+          document.getElementById('scanGuide').classList.add('active');
           await scanner.start(
             { facingMode: 'environment' },
-            { fps: 10, qrbox: { width: 220, height: 220 } },
+            {
+              fps: 20,
+              aspectRatio: 1.777778,
+              disableFlip: true,
+              qrbox: (width, height) => ({ width: Math.floor(width * 0.88), height: Math.min(170, Math.floor(height * 0.42)) })
+            },
             (decodedText) => processScan(decodedText)
           );
+          const videoTrack = readerEl.querySelector('video')?.srcObject?.getVideoTracks?.()[0];
+          const capabilities = videoTrack?.getCapabilities?.() || {};
+          if ((capabilities.focusMode || []).includes('continuous')) {
+            videoTrack.applyConstraints({ advanced: [{ focusMode: 'continuous' }] }).catch(() => {});
+          }
           scannerActive = true;
           button.textContent = currentMode === 'search' ? 'x' : '-';
           updateScanCount();
@@ -881,6 +930,7 @@
         scannerActive = false;
         readerEl.classList.remove('active');
         cameraMeta.classList.remove('active');
+        document.getElementById('scanGuide').classList.remove('active');
         button.textContent = '+';
       }
 
@@ -1030,8 +1080,8 @@
         if (registration && registration.showNotification) {
           registration.showNotification(title, {
             body,
-            icon: '/static/employee-portal-icon.svg',
-            badge: '/static/employee-portal-icon.svg',
+            icon: '/static/admin-portal-icon-192.png',
+            badge: '/static/admin-portal-icon-192.png',
             tag: 'alk-employee-orders'
           });
           return;
@@ -1101,5 +1151,74 @@
       window.setInterval(() => pollForNewOrders(false), 60000);
     </script>
   {% endif %}
+  <script>
+    function employeeBase64urlToBytes(value) {
+      const padding = '='.repeat((4 - value.length % 4) % 4);
+      const base64 = (value + padding).replace(/-/g, '+').replace(/_/g, '/');
+      return Uint8Array.from(atob(base64), char => char.charCodeAt(0));
+    }
+    function employeeBytesToBase64url(value) {
+      let binary = '';
+      new Uint8Array(value).forEach(byte => { binary += String.fromCharCode(byte); });
+      return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    }
+    function employeeCredentialToJSON(credential) {
+      const response = credential.response;
+      const serialized = {clientDataJSON: employeeBytesToBase64url(response.clientDataJSON)};
+      if (response.attestationObject) serialized.attestationObject = employeeBytesToBase64url(response.attestationObject);
+      if (response.authenticatorData) serialized.authenticatorData = employeeBytesToBase64url(response.authenticatorData);
+      if (response.signature) serialized.signature = employeeBytesToBase64url(response.signature);
+      if (response.userHandle) serialized.userHandle = employeeBytesToBase64url(response.userHandle);
+      if (response.getTransports) serialized.transports = response.getTransports();
+      return {id:credential.id, rawId:employeeBytesToBase64url(credential.rawId), type:credential.type, response:serialized, clientExtensionResults:credential.getClientExtensionResults()};
+    }
+    async function employeeResponseJson(response) {
+      const result = await response.json();
+      if (!response.ok || result.success === false) throw new Error(result.error || 'Request failed.');
+      return result;
+    }
+    async function employeePasskeyLogin(button) {
+      if (!window.PublicKeyCredential) throw new Error('Passkeys are not supported on this phone.');
+      button.disabled = true;
+      try {
+        const options = await employeeResponseJson(await fetch('/employee_portal/passkeys/login/options', {method:'POST'}));
+        options.challenge = employeeBase64urlToBytes(options.challenge);
+        (options.allowCredentials || []).forEach(item => { item.id = employeeBase64urlToBytes(item.id); });
+        const credential = await navigator.credentials.get({publicKey:options});
+        const result = await employeeResponseJson(await fetch('/employee_portal/passkeys/login/verify', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({credential:employeeCredentialToJSON(credential)})}));
+        window.location.assign(result.redirect || '/employee_portal');
+      } finally { button.disabled = false; }
+    }
+    async function employeePasskeyRegister(button) {
+      if (!window.PublicKeyCredential) throw new Error('Passkeys are not supported on this phone.');
+      button.disabled = true;
+      try {
+        const options = await employeeResponseJson(await fetch('/employee_portal/passkeys/register/options', {method:'POST'}));
+        options.challenge = employeeBase64urlToBytes(options.challenge);
+        options.user.id = employeeBase64urlToBytes(options.user.id);
+        (options.excludeCredentials || []).forEach(item => { item.id = employeeBase64urlToBytes(item.id); });
+        const credential = await navigator.credentials.create({publicKey:options});
+        const result = await employeeResponseJson(await fetch('/employee_portal/passkeys/register/verify', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({credential:employeeCredentialToJSON(credential), device_name:navigator.platform || 'Employee phone'})}));
+        button.textContent = 'Add Passkey';
+        if (typeof showToast === 'function') showToast(result.message, true);
+      } finally { button.disabled = false; }
+    }
+    const employeeLoginButton = document.getElementById('employeePasskeyLoginBtn');
+    employeeLoginButton?.addEventListener('click', () => employeePasskeyLogin(employeeLoginButton).catch(error => {
+      document.body.classList.remove('auto-passkey');
+      window.alert(error.message);
+    }));
+    if (employeeLoginButton && !sessionStorage.getItem('alkEmployeePasskeyAttempted')) {
+      sessionStorage.setItem('alkEmployeePasskeyAttempted', '1');
+      window.setTimeout(() => employeePasskeyLogin(employeeLoginButton).catch(() => {
+        document.body.classList.remove('auto-passkey');
+        employeeLoginButton.focus();
+      }), 250);
+    }
+    const employeeSetupButton = document.getElementById('employeePasskeySetupBtn');
+    employeeSetupButton?.addEventListener('click', () => employeePasskeyRegister(employeeSetupButton).catch(error => {
+      if (typeof showToast === 'function') showToast(error.message, false); else window.alert(error.message);
+    }));
+  </script>
 </body>
 </html>

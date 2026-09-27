@@ -1,9 +1,11 @@
-const CACHE_NAME = 'alk-employee-portal-v1';
+const CACHE_NAME = 'alk-employee-portal-v2';
 const CORE_URLS = [
   '/employee_portal',
   '/employee_portal/orders',
   '/static/html5-qrcode.min.js',
-  '/static/employee-portal-icon.svg'
+  '/static/admin-portal-icon-192.png',
+  '/static/admin-portal-icon-512.png',
+  '/static/alkaramat-logo.png'
 ];
 
 self.addEventListener('install', (event) => {

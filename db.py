@@ -91,6 +91,21 @@ def _ensure_admin_passkeys_table(cur):
     )
 
 
+def _ensure_employee_passkeys_table(cur):
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS employee_passkeys (
+            credential_id BYTEA PRIMARY KEY,
+            public_key BYTEA NOT NULL,
+            sign_count BIGINT NOT NULL DEFAULT 0,
+            device_name TEXT NOT NULL DEFAULT 'Mobile device',
+            created_at TIMESTAMPTZ DEFAULT NOW(),
+            last_used_at TIMESTAMPTZ
+        )
+        """
+    )
+
+
 def get_conn():
     url = (
         os.getenv("DATABASE_URL", "")
@@ -144,6 +159,7 @@ def init_db():
                 _ensure_aghaje_item_cost_overrides_table(cur)
                 _ensure_aghaje_order_item_cost_overrides_table(cur)
                 _ensure_admin_passkeys_table(cur)
+                _ensure_employee_passkeys_table(cur)
             conn.commit()
         _set_last_db_error("")
         print("DB initialized.")
@@ -297,6 +313,51 @@ def update_admin_passkey_usage(credential_id: bytes, sign_count: int) -> bool:
     except Exception as e:
         _set_last_db_error(str(e))
         print(f"DB update admin passkey error: {e}")
+        return False
+
+
+def load_employee_passkeys() -> list[dict]:
+    try:
+        with get_conn() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                _ensure_employee_passkeys_table(cur)
+                cur.execute("SELECT credential_id, public_key, sign_count, device_name FROM employee_passkeys ORDER BY created_at")
+                rows = [dict(row) for row in cur.fetchall()]
+            conn.commit()
+        return rows
+    except Exception as e:
+        print(f"DB load employee passkeys error: {e}")
+        return []
+
+
+def save_employee_passkey(credential_id: bytes, public_key: bytes, sign_count: int, device_name: str) -> bool:
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                _ensure_employee_passkeys_table(cur)
+                cur.execute(
+                    """INSERT INTO employee_passkeys (credential_id, public_key, sign_count, device_name)
+                    VALUES (%s, %s, %s, %s)
+                    ON CONFLICT (credential_id) DO UPDATE SET public_key=EXCLUDED.public_key, sign_count=EXCLUDED.sign_count, device_name=EXCLUDED.device_name""",
+                    (credential_id, public_key, sign_count, device_name),
+                )
+            conn.commit()
+        return True
+    except Exception as e:
+        print(f"DB save employee passkey error: {e}")
+        return False
+
+
+def update_employee_passkey_usage(credential_id: bytes, sign_count: int) -> bool:
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                _ensure_employee_passkeys_table(cur)
+                cur.execute("UPDATE employee_passkeys SET sign_count=%s, last_used_at=NOW() WHERE credential_id=%s", (sign_count, credential_id))
+            conn.commit()
+        return True
+    except Exception as e:
+        print(f"DB update employee passkey error: {e}")
         return False
 
 

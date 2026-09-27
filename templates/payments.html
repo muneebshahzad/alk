@@ -55,13 +55,26 @@
   </div>
   {% if payments_error %}<div class="pay-error">{{ payments_error }}</div>{% endif %}
   <div class="pay-grid">
-    <div class="pay-card primary"><div class="pay-label">Total orders value</div><div class="pay-value green">PKR {{ payment_stats.total_orders_value|format_currency }}</div><div class="pay-note">{{ payment_stats.shipment_count|format_number }} shipments represented in the ledger</div></div>
-    <div class="pay-card primary"><div class="pay-label">Payment to be received</div><div class="pay-value green">PKR {{ ledger.total_balance|default(0, true)|format_currency }}</div><div class="pay-note">Expected net COD after all deductions</div></div>
+    <div class="pay-card primary"><div class="pay-label">Dispatched COD value</div><div class="pay-value green">PKR {{ operational_metrics_by_key.dispatched_cod.value|format_currency }}</div><div class="pay-note">{{ operational_metrics_by_key.dispatched_cod.count|format_number }} unpaid dispatched Shopify orders</div></div>
+    <div class="pay-card primary"><div class="pay-label">Orders dispatched</div><div class="pay-value green">{{ operational_metrics_by_key.dispatched.count|format_number }}</div><div class="pay-note">PKR {{ operational_metrics_by_key.dispatched.value|format_currency }} total order value</div></div>
     <div class="pay-card"><div class="pay-label">Ready for payout</div><div class="pay-value">PKR {{ balance.deliver_orders_payments|default(0, true)|format_currency }}</div><div class="pay-note">Delivered COD eligible for settlement</div></div>
     <div class="pay-card"><div class="pay-label">Payment received</div><div class="pay-value">PKR {{ ledger.total_paid|default(balance.payment_received, true)|default(0, true)|format_currency }}</div><div class="pay-note">Settlements marked paid by DigiDokaan</div></div>
     <div class="pay-card"><div class="pay-label">Pending settlement</div><div class="pay-value">PKR {{ balance.pending_orders_payment|default(0, true)|format_currency }}</div><div class="pay-note">Orders still awaiting payout eligibility</div></div>
     <div class="pay-card"><div class="pay-label">Courier deductions</div><div class="pay-value red">PKR {{ payment_stats.courier_deductions|format_currency }}</div><div class="pay-note">Delivery charges and all courier taxes combined</div></div>
   </div>
+
+  <section class="pay-panel">
+    <div class="pay-panel-head"><h2>Available Shopify metrics</h2><span class="pay-count">Choose the cards you want</span></div>
+    <div class="pay-grid" style="padding:12px;margin:0;">
+      {% for metric in operational_metrics %}
+      <div class="pay-card">
+        <div class="pay-label">{{ metric.label }}</div>
+        <div class="pay-value">PKR {{ metric.value|format_currency }}</div>
+        <div class="pay-note">{{ metric.count|format_number }} orders · {{ metric.description }}</div>
+      </div>
+      {% endfor %}
+    </div>
+  </section>
 
   <section class="pay-panel">
     <div class="pay-panel-head"><h2>Ready settlements</h2><span class="pay-count">{{ ready_rows|length }} records</span></div>

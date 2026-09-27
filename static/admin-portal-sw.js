@@ -1,9 +1,9 @@
-const CACHE_NAME = 'alk-admin-portal-v5';
+const CACHE_NAME = 'alk-admin-portal-v6';
 const APP_SHELL = [
   '/admin_portal-manifest.webmanifest',
   '/static/admin-portal-icon-192.png',
   '/static/admin-portal-icon-512.png',
-  '/static/alkaramat-logo.jpeg'
+  '/static/alkaramat-logo.png'
 ];
 
 self.addEventListener('install', event => {

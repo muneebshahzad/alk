@@ -10,6 +10,7 @@ import threading
 import time
 import json
 import random
+import re
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from flask import Flask, render_template, jsonify, request, flash, redirect, url_for, abort, session, send_from_directory, has_request_context
@@ -30,10 +31,13 @@ from db import (
     get_app_setting,
     init_db,
     load_admin_passkeys,
+    load_employee_passkeys,
     load_order_statuses,
     save_admin_passkey,
+    save_employee_passkey,
     set_app_setting,
     update_admin_passkey_usage,
+    update_employee_passkey_usage,
     upsert_order_status,
 )
 from webauthn import (
@@ -79,6 +83,7 @@ ADMIN_PORTAL_PASSWORD = os.getenv("ADMIN_PORTAL_PASSWORD", "security")
 ADMIN_PORTAL_RP_ID = os.getenv("ADMIN_PORTAL_RP_ID", "dashboard.alkaramat.com").strip()
 ADMIN_PORTAL_ORIGIN = os.getenv("ADMIN_PORTAL_ORIGIN", "https://dashboard.alkaramat.com").rstrip("/")
 ADMIN_PASSKEY_CHALLENGE_KEY = "admin_passkey_challenge"
+EMPLOYEE_PASSKEY_CHALLENGE_KEY = "employee_passkey_challenge"
 PRODUCT_COSTS_SETTING_KEY = "product_cost_overrides_v1"
 ABANDONED_VIEWED_SETTING_KEY = "abandoned_checkout_viewed_v1"
 PAID_FINANCIAL_STATUSES = {"paid", "partially_paid", "partially refunded", "partially_refunded"}
@@ -94,7 +99,17 @@ DARAZ_MAX_PAGES_PER_STATUS = max(int(os.getenv("DARAZ_MAX_PAGES_PER_STATUS", "1"
 
 
 def normalize_scan_term(term):
-    return (term or "").strip().lower().replace("#", "")
+    return re.sub(r"[^a-z0-9]", "", str(term or "").strip().lower().replace("#", ""))
+
+
+def scan_term_candidates(term):
+    raw = str(term or "").strip()
+    candidates = []
+    for value in [raw, *re.findall(r"\d{4,}", raw)]:
+        normalized = normalize_scan_term(value)
+        if normalized and normalized not in candidates:
+            candidates.append(normalized)
+    return candidates
 
 
 def parse_money(value, default=0.0):
@@ -1766,7 +1781,56 @@ def payments_page():
         "total_orders_value": parse_money(ledger.get("total_cod"), 0),
         "courier_deductions": courier_deductions,
     }
-    return render_template("payments.html", payments=payments, payment_stats=payment_stats, payments_error=error)
+    operational_metrics = build_payment_operational_metrics()
+    return render_template("payments.html", payments=payments, payment_stats=payment_stats, operational_metrics=operational_metrics, operational_metrics_by_key={item["key"]: item for item in operational_metrics}, payments_error=error)
+
+
+def build_payment_operational_metrics():
+    buckets = {
+        "all": [], "dispatched": [], "in_transit": [], "delivered": [],
+        "attention": [], "unbooked": [], "paid": [], "unpaid": [],
+    }
+    for order in order_details:
+        statuses = {normalize_status_bucket(item.get("status")) for item in order.get("line_items", [])}
+        financial_status = str(order.get("financial_status") or "").strip().lower()
+        buckets["all"].append(order)
+        if statuses and statuses != {"Un-Booked"}:
+            buckets["dispatched"].append(order)
+        if statuses & {"Booked", "Picked From Shipper", "Out For Delivery"}:
+            buckets["in_transit"].append(order)
+        if "Delivered" in statuses:
+            buckets["delivered"].append(order)
+        if statuses & {"Undelivered", "Being Return", "Partially Delivered", "RETURNED TO SHIPPER"}:
+            buckets["attention"].append(order)
+        if not statuses or statuses == {"Un-Booked"}:
+            buckets["unbooked"].append(order)
+        buckets["paid" if financial_status in PAID_FINANCIAL_STATUSES else "unpaid"].append(order)
+
+    def metric(key, label, description):
+        orders = buckets[key]
+        return {
+            "key": key,
+            "label": label,
+            "count": len(orders),
+            "value": round(sum(parse_money(order.get("total_price"), 0) for order in orders), 2),
+            "description": description,
+        }
+
+    dispatched_unpaid = [
+        order for order in buckets["dispatched"]
+        if str(order.get("financial_status") or "").strip().lower() not in PAID_FINANCIAL_STATUSES
+    ]
+    return [
+        metric("all", "Loaded Shopify orders", "All Shopify orders currently loaded in the dashboard."),
+        metric("dispatched", "Dispatched orders", "Orders with a courier booking or later tracking status."),
+        {"key": "dispatched_cod", "label": "Dispatched COD", "count": len(dispatched_unpaid), "value": round(sum(parse_money(order.get("total_price"), 0) for order in dispatched_unpaid), 2), "description": "Unpaid dispatched orders; this is the expected COD price."},
+        metric("in_transit", "In transit", "Booked, picked-up, or out-for-delivery orders."),
+        metric("delivered", "Delivered", "Orders with at least one delivered shipment."),
+        metric("attention", "Needs attention", "Undelivered, returning, returned, or partially delivered orders."),
+        metric("unbooked", "Not dispatched", "Orders without an active courier booking."),
+        metric("paid", "Shopify paid", "Orders Shopify currently reports as paid or partially paid."),
+        metric("unpaid", "Shopify unpaid", "Orders Shopify currently reports as unpaid."),
+    ]
 
 
 @app.route('/api/shipper-advice', methods=['POST'])
@@ -2471,14 +2535,16 @@ def build_employee_portal_orders():
 
 
 def find_employee_portal_order(term):
-    normalized = normalize_scan_term(term)
-    if not normalized:
+    candidates = set(scan_term_candidates(term))
+    if not candidates:
         return None
     for order in build_employee_portal_orders():
-        if normalize_scan_term(order.get("order_id")) == normalized:
+        order_id = normalize_scan_term(order.get("order_id"))
+        if order_id in candidates or any(order_id.endswith(candidate) for candidate in candidates):
             return order
         for item in order.get("items", []):
-            if normalize_scan_term(item.get("tracking_number")) == normalized:
+            tracking = normalize_scan_term(item.get("tracking_number"))
+            if tracking in candidates:
                 return order
     return None
 
@@ -2905,11 +2971,69 @@ def employee_portal():
         submitted_password = (request.form.get("password") or "").strip()
         if submitted_password == EMPLOYEE_PORTAL_PASSWORD:
             session[EMPLOYEE_PORTAL_SESSION_KEY] = True
+            session.permanent = True
             return redirect(next_url)
-        return render_template("employee_portal.html", view="login", login_error="Wrong password. Try again.", next_url=next_url), 401
+        return render_template("employee_portal.html", view="login", login_error="Wrong password. Try again.", next_url=next_url, passkey_available=bool(load_employee_passkeys())), 401
     if not employee_portal_is_authenticated():
-        return render_template("employee_portal.html", view="login", login_error="", next_url=next_url)
-    return render_template("employee_portal.html", view="portal", employee_orders=build_employee_portal_orders())
+        return render_template("employee_portal.html", view="login", login_error="", next_url=next_url, passkey_available=bool(load_employee_passkeys()))
+    return render_template("employee_portal.html", view="portal", employee_orders=build_employee_portal_orders(), passkey_available=bool(load_employee_passkeys()))
+
+
+@app.route("/employee_portal/passkeys/register/options", methods=["POST"])
+def employee_passkey_registration_options():
+    if not employee_portal_is_authenticated():
+        return jsonify({"success": False, "error": "Password login required."}), 401
+    options = generate_registration_options(
+        rp_id=ADMIN_PORTAL_RP_ID, rp_name="Alkaramat Employee",
+        user_id=b"alkaramat-employee", user_name="employee@alkaramat", user_display_name="Alkaramat Employee",
+        exclude_credentials=_admin_passkey_descriptors(load_employee_passkeys()),
+        authenticator_selection=AuthenticatorSelectionCriteria(resident_key=ResidentKeyRequirement.PREFERRED, user_verification=UserVerificationRequirement.REQUIRED),
+    )
+    session[EMPLOYEE_PASSKEY_CHALLENGE_KEY] = base64.urlsafe_b64encode(options.challenge).decode().rstrip("=")
+    return app.response_class(options_to_json(options), mimetype="application/json")
+
+
+@app.route("/employee_portal/passkeys/register/verify", methods=["POST"])
+def employee_passkey_registration_verify():
+    if not employee_portal_is_authenticated():
+        return jsonify({"success": False, "error": "Password login required."}), 401
+    data = request.get_json(silent=True) or {}
+    challenge = session.pop(EMPLOYEE_PASSKEY_CHALLENGE_KEY, "")
+    try:
+        verified = verify_registration_response(credential=data.get("credential"), expected_challenge=base64url_to_bytes(challenge), expected_rp_id=ADMIN_PORTAL_RP_ID, expected_origin=ADMIN_PORTAL_ORIGIN, require_user_verification=True)
+        if not save_employee_passkey(verified.credential_id, verified.credential_public_key, verified.sign_count, str(data.get("device_name") or "Mobile device")[:80]):
+            raise RuntimeError("Could not save passkey")
+        return jsonify({"success": True, "message": "Fingerprint login is ready."})
+    except Exception as error:
+        print(f"Employee passkey registration failed: {error}")
+        return jsonify({"success": False, "error": "Passkey setup could not be verified."}), 400
+
+
+@app.route("/employee_portal/passkeys/login/options", methods=["POST"])
+def employee_passkey_login_options():
+    passkeys = load_employee_passkeys()
+    if not passkeys:
+        return jsonify({"success": False, "error": "Log in with the password once to enable fingerprint login."}), 404
+    options = generate_authentication_options(rp_id=ADMIN_PORTAL_RP_ID, allow_credentials=_admin_passkey_descriptors(passkeys), user_verification=UserVerificationRequirement.REQUIRED)
+    session[EMPLOYEE_PASSKEY_CHALLENGE_KEY] = base64.urlsafe_b64encode(options.challenge).decode().rstrip("=")
+    return app.response_class(options_to_json(options), mimetype="application/json")
+
+
+@app.route("/employee_portal/passkeys/login/verify", methods=["POST"])
+def employee_passkey_login_verify():
+    data = request.get_json(silent=True) or {}; credential = data.get("credential") or {}
+    challenge = session.pop(EMPLOYEE_PASSKEY_CHALLENGE_KEY, "")
+    try:
+        credential_id = base64url_to_bytes(credential.get("id") or "")
+        passkey = next((row for row in load_employee_passkeys() if bytes(row["credential_id"]) == credential_id), None)
+        if not passkey: raise ValueError("Unknown passkey")
+        verified = verify_authentication_response(credential=credential, expected_challenge=base64url_to_bytes(challenge), expected_rp_id=ADMIN_PORTAL_RP_ID, expected_origin=ADMIN_PORTAL_ORIGIN, credential_public_key=bytes(passkey["public_key"]), credential_current_sign_count=int(passkey["sign_count"] or 0), require_user_verification=True)
+        update_employee_passkey_usage(credential_id, verified.new_sign_count)
+        session[EMPLOYEE_PORTAL_SESSION_KEY] = True; session.permanent = True
+        return jsonify({"success": True, "redirect": url_for("employee_portal")})
+    except Exception as error:
+        print(f"Employee passkey login failed: {error}")
+        return jsonify({"success": False, "error": "Fingerprint login was not verified."}), 401
 
 
 @app.route("/employee_portal/orders")
@@ -3289,6 +3413,7 @@ def scan_single_order():
         ]
         return jsonify({
             'success': True,
+            'order': found_order,
             'order_num': found_order.get('order_id'),
             'source': found_order.get('source'),
             'items': items_list,

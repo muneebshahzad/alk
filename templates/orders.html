@@ -43,6 +43,10 @@
       flex-direction: column;
       gap: 14px;
     }
+    .employee-bottom-nav { position:fixed;left:0;right:0;bottom:0;z-index:60;display:grid;grid-template-columns:repeat(3,1fr);padding:7px 10px max(7px,env(safe-area-inset-bottom));background:rgba(255,252,247,.97);border-top:1px solid var(--line);box-shadow:0 -10px 30px rgba(20,33,61,.1); }
+    .employee-bottom-nav a { min-height:48px;border-radius:12px;text-decoration:none;color:#778197;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;font-size:11px;font-weight:800; }
+    .employee-bottom-nav a.active { color:var(--blue);background:rgba(38,103,255,.08); }
+    .employee-bottom-nav strong { font-size:19px;line-height:1; }
     .card, .hero, .order-card {
       background: var(--panel);
       border: 1px solid var(--line);
@@ -713,8 +717,7 @@
     <section class="hero">
       {% if employee_portal_mode %}
         <div class="brand-lockup">
-          <img src="/static/alkaramat-logo.jpeg" alt="Alkaramat" style="width:72px;height:38px;object-fit:contain;border-radius:8px;background:#fff;">
-          <span>Alkaramat</span>
+          <img src="/static/alkaramat-logo.png" alt="Alkaramat" style="width:72px;height:38px;object-fit:contain;border-radius:8px;background:#fff;">
         </div>
       {% endif %}
       <div class="eyebrow">{% if employee_portal_mode %}Alkaramat Employee Portal{% else %}Alkaramat Orders{% endif %}</div>
@@ -843,6 +846,14 @@
       {% endfor %}
     </section>
   </div>
+
+  {% if employee_portal_mode %}
+  <nav class="employee-bottom-nav" aria-label="Employee navigation">
+    <a href="/employee_portal"><strong>▣</strong><span>Scan</span></a>
+    <a class="active" href="/employee_portal/orders"><strong>☷</strong><span>Orders</span></a>
+    <a href="/employee_portal/orders?show_add_order=1"><strong>＋</strong><span>Add order</span></a>
+  </nav>
+  {% endif %}
 
   <div class="toast" id="toast"></div>
 
