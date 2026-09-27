@@ -1,12 +1,6 @@
 {% extends "base.html" %}
 {% block title %}DigiDokaan Payments{% endblock %}
 {% block content %}
-{% set balance = payments.balance or {} %}
-{% set ledger = payments.ledger or {} %}
-{% set ready = payments.ready or {} %}
-{% set ledger_rows = (ledger.data or []) if ledger.data is iterable else [] %}
-{% set ready_page = ready.data or {} %}
-{% set ready_rows = (ready_page.data or []) if ready_page is mapping else [] %}
 <style>
   .pay-wrap { padding: 22px; width:100%; min-width:0; max-width:1500px; margin:0 auto; overflow:hidden; }
   .pay-head { display:flex; justify-content:space-between; align-items:flex-end; gap:16px; margin-bottom:18px; }
@@ -31,6 +25,7 @@
   .pay-table tr:hover td { background:#fbfcff; }
   .money { font-weight:700; white-space:nowrap; } .muted { color:#8c95a8; }
   .status { display:inline-block; padding:4px 8px; border-radius:999px; background:#eef2ff; color:#3c4ca3; font-weight:700; white-space:nowrap; }
+  .status.paid { background:#e8f7ef;color:#168252; }.status.unpaid { background:#fff0ed;color:#b64036; }.status.pending { background:#fff6df;color:#916713; }
   .pay-error { background:#fff1f0; color:#a83a34; border:1px solid #f5c7c3; padding:13px 15px; border-radius:10px; margin-bottom:16px; }
   .empty { text-align:center; padding:30px; color:#9098a9; }
   @media(max-width:1000px){.pay-grid{grid-template-columns:repeat(2,minmax(0,1fr));}}
@@ -55,47 +50,37 @@
   </div>
   {% if payments_error %}<div class="pay-error">{{ payments_error }}</div>{% endif %}
   <div class="pay-grid">
-    <div class="pay-card primary"><div class="pay-label">Dispatched COD value</div><div class="pay-value green">PKR {{ operational_metrics_by_key.dispatched_cod.value|format_currency }}</div><div class="pay-note">{{ operational_metrics_by_key.dispatched_cod.count|format_number }} unpaid dispatched Shopify orders</div></div>
-    <div class="pay-card primary"><div class="pay-label">Orders dispatched</div><div class="pay-value green">{{ operational_metrics_by_key.dispatched.count|format_number }}</div><div class="pay-note">PKR {{ operational_metrics_by_key.dispatched.value|format_currency }} total order value</div></div>
-    <div class="pay-card"><div class="pay-label">Ready for payout</div><div class="pay-value">PKR {{ balance.deliver_orders_payments|default(0, true)|format_currency }}</div><div class="pay-note">Delivered COD eligible for settlement</div></div>
-    <div class="pay-card"><div class="pay-label">Payment received</div><div class="pay-value">PKR {{ ledger.total_paid|default(balance.payment_received, true)|default(0, true)|format_currency }}</div><div class="pay-note">Settlements marked paid by DigiDokaan</div></div>
-    <div class="pay-card"><div class="pay-label">Pending settlement</div><div class="pay-value">PKR {{ balance.pending_orders_payment|default(0, true)|format_currency }}</div><div class="pay-note">Orders still awaiting payout eligibility</div></div>
-    <div class="pay-card"><div class="pay-label">Courier deductions</div><div class="pay-value red">PKR {{ payment_stats.courier_deductions|format_currency }}</div><div class="pay-note">Delivery charges and all courier taxes combined</div></div>
+    {% for card in payment_dashboard.cards %}
+      <div class="pay-card {% if loop.index <= 2 %}primary{% endif %}">
+        <div class="pay-label">{{ card.label }}</div>
+        <div class="pay-value {% if loop.index <= 5 %}green{% endif %}{% if card.label == 'Courier deductions' %} red{% endif %}">{% if card.percent %}{{ '%.2f'|format(card.value) }}%{% elif card.count_primary %}{{ card.value|format_number }}{% else %}PKR {{ card.value|format_currency }}{% endif %}</div>
+        <div class="pay-note">{{ card.count|format_number }} {{ card.note }}</div>
+      </div>
+    {% endfor %}
   </div>
 
   <section class="pay-panel">
-    <div class="pay-panel-head"><h2>Available Shopify metrics</h2><span class="pay-count">Choose the cards you want</span></div>
-    <div class="pay-grid" style="padding:12px;margin:0;">
-      {% for metric in operational_metrics %}
-      <div class="pay-card">
-        <div class="pay-label">{{ metric.label }}</div>
-        <div class="pay-value">PKR {{ metric.value|format_currency }}</div>
-        <div class="pay-note">{{ metric.count|format_number }} orders · {{ metric.description }}</div>
-      </div>
-      {% endfor %}
-    </div>
-  </section>
-
-  <section class="pay-panel">
-    <div class="pay-panel-head"><h2>Ready settlements</h2><span class="pay-count">{{ ready_rows|length }} records</span></div>
-    {% if ready_rows %}
+    <div class="pay-panel-head"><h2>Cheques and settlements</h2><span class="pay-count">{{ payment_dashboard.cheques|length }} records</span></div>
+    {% if payment_dashboard.cheques %}
     <div class="pay-table-wrap"><table class="pay-table"><thead><tr><th>Cheque / settlement</th><th>Date</th><th>Amount</th><th>Status</th></tr></thead><tbody>
-      {% for row in ready_rows %}<tr><td data-label="Settlement">{{ row.cheque_no or row.settlement_id or '—' }}</td><td data-label="Date">{{ row.cheque_date or row.settlement_date or '—' }}</td><td data-label="Amount" class="money">PKR {{ row.amount|default(row.cheque_amount, true)|default(0, true)|format_currency }}</td><td data-label="Status"><span class="status">{{ row.status or row.settlement_status or 'Ready' }}</span></td></tr>{% endfor %}
+      {% for row in payment_dashboard.cheques %}{% set cheque_status = (row.status or row.settlement_status or '')|lower %}<tr><td data-label="Settlement">{{ row.cheque_no or row.cheque_number or row.settlement_id or row.payment_id or '—' }}</td><td data-label="Date">{{ row.cheque_date or row.settlement_date or row.payment_date or row.created_at or '—' }}</td><td data-label="Amount" class="money">PKR {{ row.amount|default(row.cheque_amount, true)|default(row.settlement_amount, true)|default(0, true)|format_currency }}</td><td data-label="Status"><span class="status {% if ((' paid' in (' ' ~ cheque_status)) or 'clear' in cheque_status or 'complete' in cheque_status) and 'unpaid' not in cheque_status and 'not paid' not in cheque_status %}paid{% else %}pending{% endif %}">{{ row.status or row.settlement_status or 'Ready for payment' }}</span></td></tr>{% endfor %}
     </tbody></table></div>
-    {% else %}<div class="empty">No payment batch has been assembled for settlement yet.</div>{% endif %}
+    {% else %}<div class="empty">No cheque or settlement records are currently available from DigiDokaan.</div>{% endif %}
   </section>
 
   <section class="pay-panel">
-    <div class="pay-panel-head"><h2>Order payment ledger</h2><span class="pay-count">{{ ledger_rows|length }} entries</span></div>
-    {% if ledger_rows %}
-    <div class="pay-table-wrap"><table class="pay-table"><thead><tr><th>Order</th><th>Reference</th><th>Tracking</th><th>Order date</th><th>Status</th><th>Entry</th><th>COD amount</th><th>Charge</th><th>Running balance</th></tr></thead><tbody>
-      {% for row in ledger_rows %}<tr>
-        <td data-label="Order"><strong>{{ row.order_no or '—' }}</strong></td><td data-label="Reference">{{ row.external_reference_no or '—' }}</td><td data-label="Tracking">{{ row.tracking_no or '—' }}</td><td data-label="Date">{{ row.order_date or '—' }}</td>
-        <td data-label="Status"><span class="status">{{ row.order_status or '—' }}</span></td><td data-label="Entry">{{ (row.payment_type or row.payment_mode or '—')|upper }}</td>
-        <td data-label="COD" class="money">PKR {{ row.amount|default(0, true)|format_currency }}</td><td data-label="Charge" class="money">PKR {{ row.sub_amount|default(row.cheque_amount, true)|default(0, true)|format_currency }}</td><td data-label="Balance" class="money">PKR {{ row.balance|default(0, true)|format_currency }}</td>
+    <div class="pay-panel-head"><h2>Shipment payment ledger</h2><span class="pay-count">{{ payment_dashboard.shipments|length }} shipments</span></div>
+    {% if payment_dashboard.shipments %}
+    <div class="pay-table-wrap"><table class="pay-table"><thead><tr><th>Order</th><th>Reference</th><th>Tracking</th><th>Order date</th><th>Courier status</th><th>Payment status</th><th>Cheque</th><th>COD</th><th>Deductions</th><th>Net balance</th></tr></thead><tbody>
+      {% for row in payment_dashboard.shipments %}<tr>
+        <td data-label="Order"><strong>{{ row.order_no or '—' }}</strong></td><td data-label="Reference">{{ row.reference or '—' }}</td><td data-label="Tracking">{{ row.tracking_no or '—' }}</td><td data-label="Date">{{ row.order_date or '—' }}</td>
+        <td data-label="Courier status"><span class="status">{{ row.order_status or '—' }}</span></td>
+        <td data-label="Payment status"><span class="status {% if row.payment_status == 'Paid' %}paid{% elif row.payment_status == 'Pending cheque' %}pending{% else %}unpaid{% endif %}">{{ row.payment_status }}</span></td>
+        <td data-label="Cheque">{{ row.cheque_no or '—' }}{% if row.cheque_status %}<div class="muted">{{ row.cheque_status }}</div>{% endif %}</td>
+        <td data-label="COD" class="money">PKR {{ row.cod|format_currency }}</td><td data-label="Deductions" class="money">PKR {{ row.deductions|format_currency }}</td><td data-label="Net balance" class="money">PKR {{ row.net|format_currency }}</td>
       </tr>{% endfor %}
     </tbody></table></div>
-    {% else %}<div class="empty">No DigiDokaan payment ledger entries are available.</div>{% endif %}
+    {% else %}<div class="empty">No DigiDokaan shipment ledger entries are available.</div>{% endif %}
   </section>
 </div>
 {% endblock %}

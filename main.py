@@ -1766,23 +1766,157 @@ def payments_page():
         print(f"Could not load DigiDokaan payments: {fetch_error}")
         payments = {"balance": {}, "ready": {}, "ledger": {}}
         error = str(fetch_error)
+    dashboard = build_digidokaan_payment_dashboard(payments)
+    return render_template("payments.html", payments=payments, payment_dashboard=dashboard, payments_error=error)
+
+
+def _digidokaan_rows(payload):
+    data = (payload or {}).get("data") if isinstance(payload, dict) else None
+    if isinstance(data, list):
+        return data
+    if isinstance(data, dict) and isinstance(data.get("data"), list):
+        return data["data"]
+    return []
+
+
+def _payment_identifier(row, keys):
+    for key in keys:
+        value = str((row or {}).get(key) or "").strip()
+        if value:
+            return value
+    return ""
+
+
+def build_digidokaan_payment_dashboard(payments):
+    balance = payments.get("balance") or {}
     ledger = payments.get("ledger") or {}
-    ledger_rows = ledger.get("data") if isinstance(ledger.get("data"), list) else []
-    shipment_keys = {
-        str(row.get("tracking_no") or row.get("order_no") or "").strip()
-        for row in ledger_rows if row.get("tracking_no") or row.get("order_no")
-    }
-    courier_deductions = round(sum(
-        parse_money(ledger.get(key), 0)
-        for key in ("total_delivery_charges", "total_sales_tax", "total_income_tax")
-    ), 2)
-    payment_stats = {
-        "shipment_count": len(shipment_keys),
-        "total_orders_value": parse_money(ledger.get("total_cod"), 0),
-        "courier_deductions": courier_deductions,
-    }
-    operational_metrics = build_payment_operational_metrics()
-    return render_template("payments.html", payments=payments, payment_stats=payment_stats, operational_metrics=operational_metrics, operational_metrics_by_key={item["key"]: item for item in operational_metrics}, payments_error=error)
+    ledger_rows = _digidokaan_rows(ledger)
+    cheque_rows = _digidokaan_rows(payments.get("ready") or {})
+    shipment_keys = ("tracking_no", "tracking_number", "consignment_no", "order_no", "external_reference_no", "reference_no")
+    cheque_keys = ("cheque_no", "cheque_number", "settlement_id", "payment_id", "batch_id")
+
+    cheque_by_id = {}
+    cheque_by_shipment = {}
+    for cheque in cheque_rows:
+        cheque_id = _payment_identifier(cheque, cheque_keys)
+        if cheque_id:
+            cheque_by_id[cheque_id.casefold()] = cheque
+        for key in shipment_keys:
+            value = str(cheque.get(key) or "").strip()
+            if value:
+                cheque_by_shipment[value.casefold()] = cheque
+
+    grouped = {}
+    for index, row in enumerate(ledger_rows):
+        tracking = _payment_identifier(row, ("tracking_no", "tracking_number", "consignment_no"))
+        order_no = _payment_identifier(row, ("order_no", "external_reference_no", "reference_no"))
+        key = tracking or order_no or f"ledger-{index}"
+        group = grouped.setdefault(key, {
+            "order_no": order_no, "reference": str(row.get("external_reference_no") or "").strip(),
+            "tracking_no": tracking, "order_date": str(row.get("order_date") or "").strip(),
+            "order_status": str(row.get("order_status") or "").strip(), "rows": [],
+        })
+        group["rows"].append(row)
+        for field, value in (("tracking_no", tracking), ("order_no", order_no), ("reference", str(row.get("external_reference_no") or "").strip()), ("order_date", str(row.get("order_date") or "").strip()), ("order_status", str(row.get("order_status") or "").strip())):
+            if value:
+                group[field] = value
+
+    paid_words = ("cleared", "completed", "disbursed", "transferred", "success")
+    pending_words = ("pending", "ready", "processing", "generated", "issued", "scheduled")
+    shipments = []
+    for group in grouped.values():
+        cod = 0.0
+        deductions = 0.0
+        linked_cheque = None
+        cheque_id = ""
+        ledger_cheque_status = ""
+        entry_types = []
+        for row in group.pop("rows"):
+            entry_type = str(row.get("payment_type") or row.get("payment_mode") or "").strip().upper()
+            if entry_type and entry_type not in entry_types:
+                entry_types.append(entry_type)
+            amount = parse_money(row.get("amount"), 0)
+            charge = parse_money(row.get("sub_amount"), 0)
+            if "COD" in entry_type:
+                cod += amount
+            elif amount < 0 and not charge:
+                deductions += abs(amount)
+            deductions += abs(charge)
+            row_cheque_id = _payment_identifier(row, cheque_keys)
+            if row_cheque_id:
+                cheque_id = row_cheque_id
+                linked_cheque = cheque_by_id.get(row_cheque_id.casefold()) or linked_cheque
+                ledger_cheque_status = str(row.get("cheque_status") or row.get("settlement_status") or row.get("payment_status") or "").strip() or ledger_cheque_status
+        if not linked_cheque:
+            for value in (group.get("tracking_no"), group.get("order_no"), group.get("reference")):
+                if value and value.casefold() in cheque_by_shipment:
+                    linked_cheque = cheque_by_shipment[value.casefold()]
+                    cheque_id = _payment_identifier(linked_cheque, cheque_keys)
+                    break
+        settlement_status = str((linked_cheque or {}).get("status") or (linked_cheque or {}).get("settlement_status") or ledger_cheque_status).strip()
+        normalized_status = settlement_status.casefold()
+        explicitly_paid = bool(re.search(r"\bpaid\b", normalized_status)) or any(word in normalized_status for word in paid_words)
+        explicitly_unpaid = "unpaid" in normalized_status or "not paid" in normalized_status
+        if explicitly_unpaid:
+            payment_status = "Not paid"
+        elif (linked_cheque or cheque_id) and explicitly_paid:
+            payment_status = "Paid"
+        elif linked_cheque or cheque_id:
+            payment_status = "Pending cheque" if not normalized_status or any(word in normalized_status for word in pending_words) else "Unconfirmed"
+        else:
+            payment_status = "Not paid"
+        group.update({
+            "cod": round(cod, 2), "deductions": round(deductions, 2),
+            "net": round(cod - deductions, 2), "entry_types": ", ".join(entry_types),
+            "cheque_no": cheque_id, "cheque_status": settlement_status,
+            "payment_status": payment_status,
+        })
+        shipments.append(group)
+
+    total_cod = parse_money(ledger.get("total_cod"), sum(row["cod"] for row in shipments))
+    deduction_keys = ("total_delivery_charges", "total_sales_tax", "total_income_tax")
+    total_deductions = round(
+        sum(parse_money(ledger.get(key), 0) for key in deduction_keys)
+        if any(ledger.get(key) is not None for key in deduction_keys)
+        else sum(row["deductions"] for row in shipments),
+        2,
+    )
+    paid_shipments = [row for row in shipments if row["payment_status"] == "Paid"]
+    unpaid_shipments = [row for row in shipments if row["payment_status"] != "Paid"]
+    delivered_shipments = [row for row in shipments if "deliver" in row.get("order_status", "").casefold() and "undeliver" not in row.get("order_status", "").casefold()]
+    deducted_shipments = [row for row in shipments if row["deductions"] > 0]
+    if ledger.get("total_paid") is not None:
+        received = parse_money(ledger.get("total_paid"), 0)
+    elif balance.get("payment_received") is not None:
+        received = parse_money(balance.get("payment_received"), 0)
+    else:
+        received = round(sum(max(row["net"], 0) for row in paid_shipments), 2)
+    outstanding = parse_money(ledger.get("total_balance"), sum(max(row["net"], 0) for row in unpaid_shipments))
+    combined_cheques = [dict(row) for row in cheque_rows]
+    known_cheques = {_payment_identifier(row, cheque_keys).casefold() for row in combined_cheques if _payment_identifier(row, cheque_keys)}
+    for row in ledger_rows:
+        cheque_id = _payment_identifier(row, cheque_keys)
+        if cheque_id and cheque_id.casefold() not in known_cheques:
+            combined_cheques.append({
+                "cheque_no": cheque_id,
+                "cheque_date": row.get("cheque_date") or row.get("settlement_date") or row.get("payment_date"),
+                "cheque_amount": row.get("cheque_amount") or row.get("settlement_amount"),
+                "status": row.get("cheque_status") or row.get("settlement_status") or row.get("payment_status") or "Unconfirmed",
+            })
+            known_cheques.add(cheque_id.casefold())
+
+    cards = [
+        {"label": "Total COD", "value": total_cod, "count": len(shipments), "note": "shipments in DigiDokaan ledger"},
+        {"label": "Total shipments", "value": len(shipments), "count": len(shipments), "note": f"PKR {total_cod:,.2f} combined gross COD", "count_primary": True},
+        {"label": "Payment received", "value": received, "count": len(paid_shipments), "note": "shipments explicitly linked to paid cheques"},
+        {"label": "Outstanding payment", "value": outstanding, "count": len(unpaid_shipments), "note": "shipments not confirmed paid"},
+        {"label": "Ready for payout", "value": parse_money(balance.get("deliver_orders_payments"), 0), "count": len(cheque_rows), "note": "ready payment records"},
+        {"label": "Courier deductions", "value": total_deductions, "count": len(deducted_shipments), "note": "shipments with recorded deductions"},
+        {"label": "Effective deduction", "value": (total_deductions / total_cod * 100) if total_cod else 0, "count": len(deducted_shipments), "note": "percent of gross COD", "percent": True},
+        {"label": "Delivered COD", "value": round(sum(row["cod"] for row in delivered_shipments), 2), "count": len(delivered_shipments), "note": "delivered shipments"},
+        {"label": "Ledger balance", "value": parse_money(ledger.get("total_balance"), outstanding), "count": len(unpaid_shipments), "note": "DigiDokaan current net balance"},
+    ]
+    return {"cards": cards, "shipments": shipments, "cheques": combined_cheques}
 
 
 def build_payment_operational_metrics():

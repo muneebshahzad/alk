@@ -5,7 +5,10 @@ import unittest
 
 
 tree = ast.parse((Path(__file__).resolve().parents[1] / "main.py").read_text())
-wanted = {"normalize_scan_term", "scan_term_candidates", "build_payment_operational_metrics"}
+wanted = {
+    "normalize_scan_term", "scan_term_candidates", "build_payment_operational_metrics",
+    "_digidokaan_rows", "_payment_identifier", "build_digidokaan_payment_dashboard",
+}
 functions = [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name in wanted]
 
 
@@ -46,6 +49,38 @@ class MobilePortalMetricsTests(unittest.TestCase):
         self.assertEqual(metrics["dispatched"]["value"], 10400)
         self.assertEqual(metrics["dispatched_cod"]["count"], 1)
         self.assertEqual(metrics["dispatched_cod"]["value"], 7900)
+
+    def test_payment_ledger_merges_entries_and_only_marks_explicit_paid_cheque(self):
+        payments = {
+            "balance": {"deliver_orders_payments": 1200},
+            "ledger": {
+                "total_cod": 5000, "total_balance": 4600,
+                "total_delivery_charges": 300, "total_sales_tax": 50, "total_income_tax": 50,
+                "data": [
+                    {"tracking_no": "T1", "order_no": "O1", "payment_type": "COD", "amount": 3000, "sub_amount": 0, "cheque_no": "C1"},
+                    {"tracking_no": "T1", "order_no": "O1", "payment_type": "DC", "amount": 0, "sub_amount": 200, "cheque_no": "C1"},
+                    {"tracking_no": "T2", "order_no": "O2", "payment_type": "COD", "amount": 2000, "sub_amount": 0},
+                    {"tracking_no": "T2", "order_no": "O2", "payment_type": "DC", "amount": 0, "sub_amount": 200},
+                ],
+            },
+            "ready": {"data": {"data": [{"cheque_no": "C1", "status": "Paid", "amount": 2800}]}},
+        }
+        dashboard = namespace["build_digidokaan_payment_dashboard"](payments)
+        shipments = {row["tracking_no"]: row for row in dashboard["shipments"]}
+        self.assertEqual(len(shipments), 2)
+        self.assertEqual(shipments["T1"]["net"], 2800)
+        self.assertEqual(shipments["T1"]["payment_status"], "Paid")
+        self.assertEqual(shipments["T2"]["net"], 1800)
+        self.assertEqual(shipments["T2"]["payment_status"], "Not paid")
+
+    def test_unpaid_cheque_status_is_never_classified_as_paid(self):
+        payments = {
+            "balance": {},
+            "ledger": {"data": [{"tracking_no": "T1", "payment_type": "COD", "amount": 1000, "cheque_no": "C1"}]},
+            "ready": {"data": {"data": [{"cheque_no": "C1", "status": "Unpaid"}]}},
+        }
+        shipment = namespace["build_digidokaan_payment_dashboard"](payments)["shipments"][0]
+        self.assertNotEqual(shipment["payment_status"], "Paid")
 
 
 if __name__ == "__main__":
