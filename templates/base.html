@@ -24,7 +24,7 @@
     /* ── Sidebar brand ── */
     .sb-brand { height: 56px; display: flex; align-items: center; padding: 0 16px; gap: 10px; border-bottom: 1px solid rgba(255,255,255,0.1); cursor: pointer; flex-shrink: 0; }
     #sidebar.collapsed .sb-brand { padding: 0 12px; justify-content: center; }
-    .sb-logo { width: 38px; height: 32px; border-radius: 8px; background: #fff; display:flex; align-items:center; justify-content:center; overflow:hidden; flex-shrink:0; }
+    .sb-logo { width: 38px; height: 32px; border-radius: 0; background: transparent; display:flex; align-items:center; justify-content:center; overflow:hidden; flex-shrink:0; }
     .sb-logo img { width:100%; height:100%; object-fit:contain; }
     .sb-name { font-size: 14px; font-weight: 700; color: #fff; white-space: nowrap; }
     #sidebar.collapsed .sb-name { display: none; }
@@ -137,7 +137,7 @@
   <!-- ── Sidebar ── -->
   <div id="sidebar">
     <div class="sb-brand" onclick="toggleSidebar()">
-      <div class="sb-logo"><img src="/static/alkaramat-logo.png" alt="Alkaramat"></div>
+      <div class="sb-logo"><img src="/static/alkaramat-logo-v2.png" alt="Alkaramat"></div>
     </div>
     <nav class="sb-nav">
       <a href="/" class="sb-item {% if request.path == '/' %}active{% endif %}"><span class="sb-icon">🏠</span><span class="sb-item-label">Dashboard</span></a>

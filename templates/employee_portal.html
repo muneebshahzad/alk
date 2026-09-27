@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#14213d">
   <title>TB Employee Portal</title>
   <link rel="manifest" href="/employee_portal-manifest.webmanifest">
-  <link rel="icon" href="/static/admin-portal-icon-192.png" type="image/png">
+  <link rel="icon" href="/static/admin-portal-icon-v2-192.png" type="image/png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
@@ -83,7 +83,7 @@
       display: block;
       margin: 0 0 10px;
     }
-    .brand-lockup img { width:76px; height:40px; object-fit:contain; border-radius:8px; background:#fff; }
+    .brand-lockup img { width:76px; height:40px; object-fit:contain; border-radius:0; background:transparent; }
     .brand-lockup span {
       display: block;
       color: var(--ink);
@@ -526,7 +526,7 @@
     <div class="login-wrap">
       <section class="login-card">
         <div class="brand-lockup">
-          <img src="/static/alkaramat-logo.png" alt="Alkaramat">
+          <img src="/static/alkaramat-logo-v2.png" alt="Alkaramat">
         </div>
         <div class="eyebrow">Alkaramat Employee Portal</div>
         <h1 class="login-title">Sign in.</h1>
@@ -551,7 +551,7 @@
 
       <section class="hero">
         <div class="brand-lockup">
-          <img src="/static/alkaramat-logo.png" alt="Alkaramat">
+          <img src="/static/alkaramat-logo-v2.png" alt="Alkaramat">
         </div>
         <div class="eyebrow">Alkaramat Employee Portal</div>
         <h1>Scan, dispatch, return.</h1>
@@ -1080,8 +1080,8 @@
         if (registration && registration.showNotification) {
           registration.showNotification(title, {
             body,
-            icon: '/static/admin-portal-icon-192.png',
-            badge: '/static/admin-portal-icon-192.png',
+            icon: '/static/admin-portal-icon-v2-192.png',
+            badge: '/static/admin-portal-icon-v2-192.png',
             tag: 'alk-employee-orders'
           });
           return;
