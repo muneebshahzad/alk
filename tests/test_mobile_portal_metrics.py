@@ -97,16 +97,15 @@ class MobilePortalMetricsTests(unittest.TestCase):
             "cheques": [{
                 "cheque_no": "C1", "status": "Paid", "amount": 800,
                 "shipments": {"data": [
-                    {"tracking_no": "T1", "order_no": "O1", "payment_type": "COD", "amount": 1000, "sub_amount": 0},
+                    {"tracking_no": "T1", "order_no": "O1", "payment_type": "COD", "price": 9000, "amount": 1000, "sub_amount": 0},
                     {"tracking_no": "T1", "order_no": "O1", "payment_type": "DC", "amount": 0, "sub_amount": 200},
                 ]},
             }],
         }
-        metrics = {"dispatched": {"count": 4, "value": 9000}}
-        dashboard = namespace["build_digidokaan_payment_dashboard"](payments, metrics)
+        dashboard = namespace["build_digidokaan_payment_dashboard"](payments)
         self.assertEqual(dashboard["cards"][0]["label"], "Gross COD")
         self.assertEqual(dashboard["cards"][0]["value"], 9000)
-        self.assertEqual(dashboard["cards"][0]["count"], 4)
+        self.assertEqual(dashboard["cards"][0]["count"], 1)
         self.assertEqual(dashboard["shipments"][0]["payment_status"], "Paid")
         self.assertEqual(dashboard["shipments"][0]["net"], 800)
 

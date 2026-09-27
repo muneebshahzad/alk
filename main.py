@@ -1766,8 +1766,7 @@ def payments_page():
         print(f"Could not load DigiDokaan payments: {fetch_error}")
         payments = {"balance": {}, "ready": {}, "ledger": {}}
         error = str(fetch_error)
-    operational_metrics = {item["key"]: item for item in build_payment_operational_metrics()}
-    dashboard = build_digidokaan_payment_dashboard(payments, operational_metrics)
+    dashboard = build_digidokaan_payment_dashboard(payments)
     return render_template("payments.html", payments=payments, payment_dashboard=dashboard, payments_error=error)
 
 
@@ -1835,9 +1834,10 @@ def build_digidokaan_payment_dashboard(payments, operational_metrics=None):
         group = grouped.setdefault(key, {
             "order_no": order_no, "reference": str(row.get("external_reference_no") or "").strip(),
             "tracking_no": tracking, "order_date": str(row.get("order_date") or "").strip(),
-            "order_status": str(row.get("order_status") or "").strip(), "rows": [],
+            "order_status": str(row.get("order_status") or "").strip(), "price": 0.0, "rows": [],
         })
         group["rows"].append(row)
+        group["price"] = max(group["price"], parse_money(row.get("price"), 0))
         for field, value in (("tracking_no", tracking), ("order_no", order_no), ("reference", str(row.get("external_reference_no") or "").strip()), ("order_date", str(row.get("order_date") or "").strip()), ("order_status", str(row.get("order_status") or "").strip())):
             if value:
                 group[field] = value
@@ -1929,10 +1929,10 @@ def build_digidokaan_payment_dashboard(payments, operational_metrics=None):
             })
             known_cheques.add(cheque_id.casefold())
 
-    dispatched = (operational_metrics or {}).get("dispatched") or {}
-    gross_cod = parse_money(dispatched.get("value"), total_cod)
-    dispatched_count = parse_int(dispatched.get("count"), len(shipments))
-    gross_count = dispatched_count
+    gross_shipments = [row for row in shipments if row.get("price", 0) > 0 or row.get("cod", 0) > 0]
+    gross_cod = round(sum(row.get("price", 0) or row.get("cod", 0) for row in gross_shipments), 2)
+    dispatched_count = len(shipments)
+    gross_count = len(gross_shipments)
     ready_shipments = [row for row in delivered_shipments if row["payment_status"] != "Paid"]
     cards = [
         {"label": "Gross COD", "value": gross_cod, "count": gross_count, "note": "dispatched shipments"},
