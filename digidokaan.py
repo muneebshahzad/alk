@@ -1,5 +1,7 @@
 import asyncio
+import html
 import os
+import re
 import ssl
 import time
 
@@ -29,6 +31,7 @@ def configuration():
         "phone": (os.getenv("DIGIDOKAAN_PHONE") or "").strip(),
         "password": os.getenv("DIGIDOKAAN_PASSWORD") or "",
         "gateway_id": str(os.getenv("DIGIDOKAAN_GATEWAY_ID") or "5").strip(),
+        "web_url": (os.getenv("DIGIDOKAAN_WEB_URL") or "https://web.digidokaan.pk").rstrip("/"),
     }
     if not values["phone"] or not values["password"]:
         return None
@@ -284,10 +287,100 @@ async def fetch_payments(session):
         post("settlements/ledger_ready_for_payments"),
         post("settlements/ledger_single_cheque_detail"),
     )
-    result = {"balance": balance, "ready": ready, "ledger": ledger}
+    try:
+        cheques = await _fetch_cheque_history(session, config, headers)
+    except Exception as error:
+        print(f"DigiDokaan cheque history unavailable: {error}")
+        cheques = []
+    result = {"balance": balance, "ready": ready, "ledger": ledger, "cheques": cheques}
     _payments_cache = result
     _payments_cache_expires_at = time.monotonic() + _OPERATIONS_REFRESH_SECONDS
     return result
+
+
+def _money_from_text(value):
+    matches = re.findall(r"-?\d[\d,]*(?:\.\d+)?", str(value or ""))
+    cleaned = matches[-1].replace(",", "") if matches else ""
+    try:
+        return round(float(cleaned or 0), 2)
+    except ValueError:
+        return 0.0
+
+
+def _plain_html(value):
+    return " ".join(html.unescape(re.sub(r"<[^>]+>", " ", value or "")).split())
+
+
+async def _fetch_cheque_history(session, config, api_headers):
+    """Fetch the merchant cheque list and each cheque's shipment detail.
+
+    DigiDokaan's settlement API exposes cheque detail by cheque number but does
+    not expose the cheque-number list. The merchant ledger page is therefore
+    read once per six-hour payment refresh to discover those identifiers.
+    """
+    timeout = ClientTimeout(total=30)
+    async with session.get(config["web_url"] + "/", timeout=timeout, ssl=_SSL_CONTEXT) as response:
+        login_html = await response.text()
+    csrf_match = re.search(r'<meta[^>]+name=["\']csrf-token["\'][^>]+content=["\']([^"\']+)', login_html, re.I)
+    if not csrf_match:
+        csrf_match = re.search(r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+name=["\']csrf-token["\']', login_html, re.I)
+    if not csrf_match:
+        raise RuntimeError("DigiDokaan web login token was not found")
+    csrf = html.unescape(csrf_match.group(1))
+    digits = re.sub(r"\D", "", config["phone"])
+    number = digits[2:] if digits.startswith("92") else digits.lstrip("0")
+    web_headers = {"Accept": "application/json", "X-CSRF-TOKEN": csrf, "X-Requested-With": "XMLHttpRequest"}
+    async with session.post(
+        config["web_url"] + "/user/send-otp",
+        data={"country_code": "+92", "number": number}, headers=web_headers,
+        timeout=timeout, ssl=_SSL_CONTEXT,
+    ) as response:
+        login_step = await response.json(content_type=None)
+    if login_step.get("code") != 201:
+        raise RuntimeError("DigiDokaan web account requires an interactive login")
+    async with session.post(
+        config["web_url"] + "/user/login-new-password",
+        data={"password": config["password"], "number": "+92" + number}, headers=web_headers,
+        timeout=timeout, ssl=_SSL_CONTEXT,
+    ) as response:
+        login_result = await response.json(content_type=None)
+    if login_result.get("code") != 200:
+        raise RuntimeError("DigiDokaan web payment login failed")
+    # The web app finalizes the authenticated merchant session when it follows
+    # the successful login redirect through the root dashboard route.
+    async with session.get(config["web_url"] + "/", timeout=timeout, ssl=_SSL_CONTEXT) as response:
+        await response.read()
+    async with session.get(
+        config["web_url"] + "/manage/merchant-payment-ledger",
+        timeout=timeout, ssl=_SSL_CONTEXT,
+    ) as response:
+        ledger_html = await response.text()
+
+    cheques = []
+    row_pattern = re.compile(r"<tr[^>]*class=[\"'][^\"']*\bcheque\b[^\"']*[\"'][^>]*>(.*?)</tr>", re.I | re.S)
+    for row_html in row_pattern.findall(ledger_html):
+        id_match = re.search(r"merchant-ledger/([0-9a-f-]{20,})", row_html, re.I)
+        if not id_match:
+            continue
+        cells = [_plain_html(cell) for cell in re.findall(r"<td[^>]*>(.*?)</td>", row_html, re.I | re.S)]
+        cheque_no = id_match.group(1)
+        cheque = {
+            "cheque_no": cheque_no,
+            "cheque_date": cells[0] if cells else "",
+            "bank": cells[2] if len(cells) > 2 else "",
+            "amount": _money_from_text(cells[3] if len(cells) > 3 else ""),
+            "balance": _money_from_text(cells[4] if len(cells) > 4 else ""),
+            "status": "Paid",
+        }
+        async with session.post(
+            config["base_url"] + "/api/settlements/ledger_single_cheque_detail",
+            json={"phone": config["phone"], "cheque_no": cheque_no},
+            headers=api_headers, timeout=timeout, ssl=_SSL_CONTEXT,
+        ) as response:
+            detail = await response.json(content_type=None)
+        cheque["shipments"] = detail if response.status == 200 and detail.get("code") == 200 else {"data": []}
+        cheques.append(cheque)
+    return cheques
 
 
 async def fetch_pending_shipper_advice(session):

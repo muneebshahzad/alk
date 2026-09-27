@@ -60,6 +60,10 @@ class DigiDokaanTrackingTests(IsolatedAsyncioTestCase):
             "Undelivered - Consignee Refused",
         )
 
+    def test_web_ledger_money_parser_ignores_currency_period(self):
+        self.assertEqual(digidokaan._money_from_text("Rs.15,472"), 15472)
+        self.assertEqual(digidokaan._money_from_text("Rs.-18,227"), -18227)
+
     async def test_concurrent_requests_are_deduplicated_and_cached(self):
         async def delayed_status(*args):
             await asyncio.sleep(0)

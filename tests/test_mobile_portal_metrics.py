@@ -19,6 +19,13 @@ def parse_money(value, default=0.0):
         return round(float(default), 2)
 
 
+def parse_int(value, default=0):
+    try:
+        return int(float(value or default))
+    except (TypeError, ValueError):
+        return int(default)
+
+
 def normalize_status_bucket(value):
     return value or "Un-Booked"
 
@@ -26,6 +33,7 @@ def normalize_status_bucket(value):
 namespace = {
     "re": re,
     "parse_money": parse_money,
+    "parse_int": parse_int,
     "normalize_status_bucket": normalize_status_bucket,
     "PAID_FINANCIAL_STATUSES": {"paid", "partially_paid"},
     "order_details": [],
@@ -63,7 +71,7 @@ class MobilePortalMetricsTests(unittest.TestCase):
                     {"tracking_no": "T2", "order_no": "O2", "payment_type": "DC", "amount": 0, "sub_amount": 200},
                 ],
             },
-            "ready": {"data": {"data": [{"cheque_no": "C1", "status": "Paid", "amount": 2800}]}},
+            "cheques": [{"cheque_no": "C1", "status": "Paid", "amount": 2800, "shipments": {"data": []}}],
         }
         dashboard = namespace["build_digidokaan_payment_dashboard"](payments)
         shipments = {row["tracking_no"]: row for row in dashboard["shipments"]}
@@ -77,10 +85,30 @@ class MobilePortalMetricsTests(unittest.TestCase):
         payments = {
             "balance": {},
             "ledger": {"data": [{"tracking_no": "T1", "payment_type": "COD", "amount": 1000, "cheque_no": "C1"}]},
-            "ready": {"data": {"data": [{"cheque_no": "C1", "status": "Unpaid"}]}},
+            "cheques": [{"cheque_no": "C1", "status": "Unpaid", "shipments": {"data": []}}],
         }
         shipment = namespace["build_digidokaan_payment_dashboard"](payments)["shipments"][0]
         self.assertNotEqual(shipment["payment_status"], "Paid")
+
+    def test_cheque_details_add_paid_shipments_and_gross_cod_uses_dispatched_metric(self):
+        payments = {
+            "balance": {},
+            "ledger": {"total_order_price": 1000, "data": []},
+            "cheques": [{
+                "cheque_no": "C1", "status": "Paid", "amount": 800,
+                "shipments": {"data": [
+                    {"tracking_no": "T1", "order_no": "O1", "payment_type": "COD", "amount": 1000, "sub_amount": 0},
+                    {"tracking_no": "T1", "order_no": "O1", "payment_type": "DC", "amount": 0, "sub_amount": 200},
+                ]},
+            }],
+        }
+        metrics = {"dispatched": {"count": 4, "value": 9000}}
+        dashboard = namespace["build_digidokaan_payment_dashboard"](payments, metrics)
+        self.assertEqual(dashboard["cards"][0]["label"], "Gross COD")
+        self.assertEqual(dashboard["cards"][0]["value"], 9000)
+        self.assertEqual(dashboard["cards"][0]["count"], 4)
+        self.assertEqual(dashboard["shipments"][0]["payment_status"], "Paid")
+        self.assertEqual(dashboard["shipments"][0]["net"], 800)
 
 
 if __name__ == "__main__":
