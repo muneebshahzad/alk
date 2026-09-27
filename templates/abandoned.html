@@ -88,7 +88,7 @@
     .preview-layout { grid-template-columns:1fr; }
     .preview-customer { grid-template-columns:1fr; }
   }
-  @media (max-width: 560px) {
+  @media (max-width: 760px) {
     .abandoned-page { height:100dvh; }
     .topbar { height:auto; min-height:52px; padding:10px 12px; display:grid; grid-template-columns:1fr; gap:8px; }
     .topbar-title { width:100%; font-size:17px; }
@@ -120,11 +120,88 @@
     .info-lbl { width:auto; }
     .orders-chip { padding:4px 8px; font-size:10px; }
     .orders-chip strong { font-size:12px; }
-    .preview-backdrop { padding:0; align-items:flex-end; }
-    .preview-modal { width:100%; max-height:94dvh; border-radius:22px 22px 0 0; }
-    .preview-shot { padding:16px; }
-    .preview-img { height:300px; }
+    .preview-backdrop { padding:8px; align-items:center; }
+    .preview-modal { width:100%; max-height:calc(100dvh - 16px); border-radius:18px; overflow:hidden; display:flex; flex-direction:column; }
+    .preview-shot { padding:12px; overflow:auto; flex:1; }
+    .preview-brand { margin-bottom:8px; }
+    .preview-chip { padding:5px 9px; font-size:9px; }
+    .preview-layout { gap:9px; }
+    .preview-grid { grid-template-columns:repeat(2,minmax(0,1fr)); gap:7px; }
+    .preview-grid.single { grid-template-columns:1fr; }
+    .preview-img, .preview-grid:not(.single) .preview-img { height:118px; }
+    .preview-grid.single .preview-img { height:190px; }
+    .preview-product { border-radius:13px; }
+    .preview-product-info { padding:7px 9px 8px; }
+    .preview-product-title { font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .preview-product-meta { margin-top:4px; font-size:10px; }
+    .preview-side { gap:7px; }
+    .preview-head { padding-bottom:7px; margin-bottom:0; }
+    .preview-kicker { font-size:8px; margin-bottom:3px; }
+    .preview-title { font-size:21px; line-height:1.08; }
+    .preview-sub { font-size:10px; margin-top:3px; }
+    .preview-total-caption { display:inline; margin:0 7px 0 0; font-size:8px; }
+    .preview-total { display:inline; font-size:22px; }
+    .preview-totals { grid-template-columns:repeat(3,minmax(0,1fr)); gap:6px; }
+    .preview-total-box { padding:7px 8px; border-radius:10px; }
+    .preview-label { font-size:8px; margin-bottom:2px; }
+    .preview-value { font-size:10px; }
+    .preview-customer { grid-template-columns:repeat(2,minmax(0,1fr)); gap:7px 10px; padding:9px; border-radius:12px; }
+    .preview-actions { padding:8px 10px; }
+    .preview-close { padding:7px 11px; font-size:11px; }
   }
+
+  /* The admin app always embeds this tool; keep that surface app-sized even
+     when a mobile browser exposes a wider CSS viewport. */
+  body.embedded .topbar { height:auto; min-height:52px; padding:10px 12px; display:grid; grid-template-columns:1fr; gap:8px; }
+  body.embedded .topbar > div[style="flex:1"] { display:none; }
+  body.embedded .topbar .search-box, body.embedded .topbar .search-box input { width:100% !important; min-width:0; }
+  body.embedded .toolbar { padding:8px 10px; }
+  body.embedded .toolbar .btn { display:none; }
+  body.embedded .abandoned-scroll { padding:9px; }
+  body.embedded .metric-row { display:flex; gap:7px; overflow-x:auto; padding-bottom:4px; scrollbar-width:none; }
+  body.embedded .metric-card { padding:9px 10px; flex:0 0 126px; min-width:126px; }
+  body.embedded .metric-label { font-size:8px; min-height:20px; }
+  body.embedded .metric-value { font-size:17px; }
+  body.embedded .checkout-head { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:7px; padding:10px; }
+  body.embedded .checkout-spacer { display:none; }
+  body.embedded .checkout-amount { grid-column:2; grid-row:1; font-size:13px; }
+  body.embedded .view-btn { grid-column:2; grid-row:2; padding:6px 10px; }
+  body.embedded .recovery-badge, body.embedded .view-state { justify-self:start; font-size:9px; padding:4px 7px; }
+  body.embedded .checkout-body { flex-direction:column; padding:9px 10px 11px; gap:9px; }
+  body.embedded .products { flex-wrap:nowrap; width:100%; max-width:100%; overflow-x:auto; }
+  body.embedded .product, body.embedded .product-img { width:64px; }
+  body.embedded .product { flex:0 0 64px; }
+  body.embedded .product-img { height:64px; }
+  body.embedded .info-block { grid-template-columns:1fr; width:100%; gap:5px; border-top:1px solid #eef0f5; padding-top:9px; }
+  body.embedded .info-row { display:grid; grid-template-columns:70px minmax(0,1fr); font-size:11px; }
+  body.embedded .info-lbl { width:auto; }
+  body.embedded .preview-backdrop { padding:8px; align-items:center; }
+  body.embedded .preview-modal { width:100%; max-height:calc(100dvh - 16px); border-radius:18px; overflow:hidden; display:flex; flex-direction:column; }
+  body.embedded .preview-shot { padding:12px; overflow:auto; flex:1; }
+  body.embedded .preview-brand { margin-bottom:8px; }
+  body.embedded .preview-layout { grid-template-columns:1fr; gap:8px; }
+  body.embedded .preview-grid { grid-template-columns:repeat(2,minmax(0,1fr)); gap:7px; }
+  body.embedded .preview-grid.single { grid-template-columns:1fr; }
+  body.embedded .preview-img, body.embedded .preview-grid:not(.single) .preview-img { height:112px; }
+  body.embedded .preview-grid.single .preview-img { height:180px; }
+  body.embedded .preview-product { border-radius:13px; }
+  body.embedded .preview-product-info { padding:7px 9px; }
+  body.embedded .preview-product-title { font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  body.embedded .preview-product-meta { margin-top:4px; font-size:10px; }
+  body.embedded .preview-side { gap:7px; }
+  body.embedded .preview-head { padding-bottom:7px; margin-bottom:0; }
+  body.embedded .preview-kicker { font-size:8px; margin-bottom:3px; }
+  body.embedded .preview-title { font-size:21px; }
+  body.embedded .preview-sub { font-size:10px; margin-top:3px; }
+  body.embedded .preview-total-caption { display:inline; margin:0 7px 0 0; font-size:8px; }
+  body.embedded .preview-total { display:inline; font-size:22px; }
+  body.embedded .preview-totals { grid-template-columns:repeat(3,minmax(0,1fr)); gap:6px; }
+  body.embedded .preview-total-box { padding:7px 8px; border-radius:10px; }
+  body.embedded .preview-label { font-size:8px; margin-bottom:2px; }
+  body.embedded .preview-value { font-size:10px; }
+  body.embedded .preview-customer { grid-template-columns:repeat(2,minmax(0,1fr)); gap:7px 10px; padding:9px; border-radius:12px; }
+  body.embedded .preview-actions { padding:8px 10px; }
+  body.embedded .preview-close { padding:7px 11px; font-size:11px; }
 </style>
 
 <div class="abandoned-page">
