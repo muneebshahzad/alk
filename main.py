@@ -2397,6 +2397,7 @@ def refresh_data():
 def refresh_data_status():
     with tracking_refresh_lock:
         state = dict(tracking_refresh_state)
+    state["auto_refresh_seconds"] = TRACKING_AUTO_REFRESH_SECONDS
     state["status"] = "running" if state["running"] else ("failed" if state["error"] else "complete")
     state["message"] = (
         "Refreshing tracking data"
