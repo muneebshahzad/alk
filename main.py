@@ -74,7 +74,8 @@ daraz_refresh_attempted = False
 daraz_last_error = ""
 product_display_cache = {}
 tracking_refresh_lock = threading.Lock()
-tracking_refresh_state = {"running": False, "error": "", "shopify_count": 0, "daraz_count": 0}
+tracking_refresh_state = {"running": False, "error": "", "shopify_count": 0, "daraz_count": 0, "updated_at": 0}
+TRACKING_AUTO_REFRESH_SECONDS = max(5 * 60, int(os.getenv("TRACKING_AUTO_REFRESH_SECONDS", "900")))
 abandoned_checkout_cache = {"rows": None, "expires_at": 0.0}
 EMPLOYEE_PORTAL_SESSION_KEY = "employee_portal_authenticated"
 ADMIN_PORTAL_SESSION_KEY = "admin_portal_authenticated"
@@ -2362,11 +2363,23 @@ def refresh_tracking_in_background():
                 error="",
                 shopify_count=len(order_details),
                 daraz_count=len(daraz_rows),
+                updated_at=int(time.time()),
             )
     except Exception as error:
         print(f"Error refreshing data: {error}")
         with tracking_refresh_lock:
             tracking_refresh_state.update(running=False, error=str(error))
+
+
+def automatic_tracking_refresh_loop():
+    """Refresh courier statuses periodically; the lock prevents overlapping runs."""
+    while True:
+        time.sleep(TRACKING_AUTO_REFRESH_SECONDS)
+        with tracking_refresh_lock:
+            if tracking_refresh_state["running"]:
+                continue
+            tracking_refresh_state.update(running=True, error="")
+        refresh_tracking_in_background()
 
 
 @app.route('/refresh', methods=['POST'])
@@ -3647,6 +3660,8 @@ with tracking_refresh_lock:
     tracking_refresh_state.update(running=True, error="")
 initial_refresh_worker = threading.Thread(target=refresh_tracking_in_background, daemon=True)
 initial_refresh_worker.start()
+automatic_refresh_worker = threading.Thread(target=automatic_tracking_refresh_loop, daemon=True)
+automatic_refresh_worker.start()
 
 if __name__ == "__main__":
     app.run(port=5001)

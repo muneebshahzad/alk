@@ -1251,6 +1251,20 @@ async function refreshTracking() {
   }
 }
 
+// Keep an open dashboard in sync with the server's scheduled courier refresh.
+const trackingPageOpenedAt = Math.floor(Date.now() / 1000);
+window.setInterval(async () => {
+  if (document.hidden) return;
+  try {
+    const response = await fetch('/refresh/status', {cache:'no-store'});
+    const state = await response.json();
+    const userIsEditing = document.activeElement && /^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement.tagName);
+    if (!state.running && Number(state.updated_at || 0) > trackingPageOpenedAt && !userIsEditing) {
+      location.reload();
+    }
+  } catch (_) {}
+}, 60000);
+
 // ── Dropdowns ──
 function toggleDD(e, id) {
   e.stopPropagation();
