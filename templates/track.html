@@ -257,7 +257,7 @@
   <!-- Stats strip -->
   <div class="stats-strip" id="statsStrip"></div>
 
-  <a class="abandoned-link-card" href="/abandoned?embedded=1">
+  <a class="abandoned-link-card" href="/abandoned{% if embedded_mode %}?embedded=1{% endif %}">
     <div>
       <div class="abandoned-card-title">Abandoned checkouts</div>
       {% if abandoned_summary and abandoned_summary.not_viewed %}
