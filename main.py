@@ -23,6 +23,7 @@ import lazop
 from tenacity import retry, stop_after_attempt, wait_exponential
 from aiohttp import ClientTimeout, ClientSession, ClientError, BasicAuth
 import pytz
+import requests
 from flask import send_file, make_response
 import io
 import functools
@@ -58,6 +59,8 @@ from shopify_protected_data import (
     create_oauth_state,
     exchange_oauth_code_for_token,
     fetch_protected_order_details,
+    get_graphql_endpoint,
+    get_graphql_token,
     get_install_url,
     get_protected_data_config_status,
     get_shop_domain,
@@ -695,6 +698,151 @@ def as_dict(value):
     return value if isinstance(value, dict) else {}
 
 
+def graphql_money_amount_and_currency(money_bag):
+    money_bag = as_dict(money_bag)
+    money = as_dict(money_bag.get("presentmentMoney")) or as_dict(money_bag.get("shopMoney"))
+    return parse_money(money.get("amount"), 0), (money.get("currencyCode") or "PKR")
+
+
+def graphql_checkout_address(address):
+    address = as_dict(address)
+    name = address.get("name") or " ".join(
+        str(value).strip() for value in (address.get("firstName"), address.get("lastName")) if str(value or "").strip()
+    )
+    return {
+        "name": name,
+        "address1": address.get("address1") or "",
+        "address2": address.get("address2") or "",
+        "city": address.get("city") or "",
+        "country": address.get("country") or "",
+        "country_code": address.get("countryCodeV2") or address.get("countryCode") or "",
+        "phone": address.get("phone") or "",
+    }
+
+
+def graphql_checkout_line_item(line_item):
+    line_item = as_dict(line_item)
+    unit_price, _ = graphql_money_amount_and_currency(
+        line_item.get("discountedUnitPriceSet") or line_item.get("originalUnitPriceSet")
+    )
+    product = as_dict(line_item.get("product"))
+    variant = as_dict(line_item.get("variant"))
+    image = as_dict(line_item.get("image"))
+    return {
+        "id": line_item.get("id"),
+        "title": line_item.get("title") or product.get("title") or "Product",
+        "variant_title": line_item.get("variantTitle") or variant.get("title") or "",
+        "quantity": line_item.get("quantity") or 0,
+        "price": unit_price,
+        "image_url": image.get("url") or image.get("src") or "",
+        "product_id": product.get("legacyResourceId"),
+        "variant_id": variant.get("legacyResourceId"),
+    }
+
+
+def graphql_abandoned_checkout_to_rest(node):
+    node = as_dict(node)
+    customer = as_dict(node.get("customer"))
+    email = as_dict(customer.get("defaultEmailAddress")).get("emailAddress") or ""
+    phone = as_dict(customer.get("defaultPhoneNumber")).get("phoneNumber") or ""
+    default_address = graphql_checkout_address(customer.get("defaultAddress"))
+    total_price, currency = graphql_money_amount_and_currency(node.get("totalPriceSet"))
+    subtotal_price, subtotal_currency = graphql_money_amount_and_currency(
+        node.get("subtotalPriceSet") or node.get("totalLineItemsPriceSet")
+    )
+    return {
+        "id": node.get("id"),
+        "token": node.get("name") or node.get("id"),
+        "cart_token": node.get("defaultCursor") or "",
+        "created_at": node.get("createdAt") or "",
+        "updated_at": node.get("updatedAt") or "",
+        "completed_at": node.get("completedAt") or "",
+        "abandoned_checkout_url": node.get("abandonedCheckoutUrl") or "",
+        "email": email,
+        "phone": phone,
+        "customer": {
+            "first_name": customer.get("firstName") or "",
+            "last_name": customer.get("lastName") or "",
+            "email": email,
+            "phone": phone,
+            "number_of_orders": customer.get("numberOfOrders"),
+            "default_address": default_address,
+        },
+        "shipping_address": graphql_checkout_address(node.get("shippingAddress")),
+        "billing_address": graphql_checkout_address(node.get("billingAddress")),
+        "line_items": [
+            graphql_checkout_line_item(item)
+            for item in (as_dict(node.get("lineItems")).get("nodes") or [])
+        ],
+        "total_price": total_price,
+        "subtotal_price": subtotal_price,
+        "total_line_items_price": subtotal_price,
+        "currency": currency or subtotal_currency or "PKR",
+        "presentment_currency": currency or subtotal_currency or "PKR",
+    }
+
+
+def fetch_shopify_abandoned_checkouts_graphql(days=7):
+    token = get_graphql_token()
+    endpoint = get_graphql_endpoint()
+    if not token or not endpoint:
+        return []
+    query_text = f"created_at:>={get_abandoned_created_at_min(days)}"
+    query = """
+    query AbandonedCheckouts($first: Int!, $after: String, $query: String) {
+      abandonedCheckouts(first: $first, after: $after, query: $query, sortKey: CREATED_AT, reverse: true) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          id name defaultCursor abandonedCheckoutUrl completedAt createdAt updatedAt
+          customer {
+            firstName lastName numberOfOrders
+            defaultEmailAddress { emailAddress }
+            defaultPhoneNumber { phoneNumber }
+            defaultAddress { name address1 address2 city country countryCodeV2 phone }
+          }
+          shippingAddress { name address1 address2 city country countryCodeV2 phone }
+          billingAddress { name address1 address2 city country countryCodeV2 phone }
+          subtotalPriceSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } }
+          totalLineItemsPriceSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } }
+          totalPriceSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } }
+          lineItems(first: 50) {
+            nodes {
+              id title variantTitle quantity image { url }
+              discountedUnitPriceSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } }
+              originalUnitPriceSet { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } }
+              product { legacyResourceId title }
+              variant { legacyResourceId title }
+            }
+          }
+        }
+      }
+    }
+    """
+    headers = {"Content-Type": "application/json", "X-Shopify-Access-Token": token}
+    rows, after = [], None
+    for _ in range(10):
+        response = requests.post(
+            endpoint,
+            json={"query": query, "variables": {"first": 100, "after": after, "query": query_text}},
+            headers=headers,
+            timeout=30,
+        )
+        response.raise_for_status()
+        payload = response.json()
+        errors = payload.get("errors") or []
+        if errors:
+            raise RuntimeError("; ".join(error.get("message", "Unknown Shopify GraphQL error") for error in errors))
+        connection = as_dict(as_dict(payload.get("data")).get("abandonedCheckouts"))
+        rows.extend(graphql_abandoned_checkout_to_rest(node) for node in (connection.get("nodes") or []))
+        page_info = as_dict(connection.get("pageInfo"))
+        if not page_info.get("hasNextPage"):
+            break
+        after = page_info.get("endCursor")
+        if not after:
+            break
+    return rows
+
+
 def get_checkout_image_url(line_item):
     image = line_item.get("image_url") or line_item.get("image") or ""
     if isinstance(image, dict):
@@ -819,6 +967,15 @@ def relative_time_label(value):
 async def fetch_shopify_abandoned_checkouts(days=7):
     if days == 7 and abandoned_checkout_cache["rows"] is not None and abandoned_checkout_cache["expires_at"] > time.monotonic():
         return abandoned_checkout_cache["rows"]
+    try:
+        rows = fetch_shopify_abandoned_checkouts_graphql(days)
+        if rows:
+            if days == 7:
+                abandoned_checkout_cache["rows"] = rows
+                abandoned_checkout_cache["expires_at"] = time.monotonic() + 5 * 60
+            return rows
+    except Exception as error:
+        print(f"Could not fetch abandoned checkouts through Shopify GraphQL: {error}")
     created_at_min = get_abandoned_created_at_min(days)
     seen = {}
     async with aiohttp.ClientSession() as session:
