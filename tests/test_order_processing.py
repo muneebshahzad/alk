@@ -9,6 +9,11 @@ function = next(
     node for node in source.body
     if isinstance(node, ast.AsyncFunctionDef) and node.name == "safe_process_order"
 )
+customer_functions = [
+    node for node in source.body
+    if isinstance(node, ast.FunctionDef)
+    and node.name in {"get_order_attr", "get_resource_value", "build_shopify_customer_details"}
+]
 
 
 class OrderProcessingTests(unittest.TestCase):
@@ -35,6 +40,63 @@ class OrderProcessingTests(unittest.TestCase):
         self.assertEqual(first, list(range(12)))
         self.assertEqual(second, list(range(100, 112)))
         self.assertEqual(len(processed), 24)
+
+    def test_customer_details_fall_back_to_customer_default_address(self):
+        namespace = {}
+        exec(compile(ast.Module(body=customer_functions, type_ignores=[]), "main.py", "exec"), namespace)
+        order = type("Order", (), {
+            "shipping_address": None,
+            "billing_address": None,
+            "phone": "",
+            "email": "order@example.com",
+            "customer": {
+                "id": 12,
+                "first_name": "Hina",
+                "last_name": "Ali",
+                "default_address": {
+                    "address1": "Street 5",
+                    "city": "Lahore",
+                    "phone": "03001234567",
+                },
+            },
+        })()
+
+        details = namespace["build_shopify_customer_details"](order)
+
+        self.assertEqual(details["name"], "Hina Ali")
+        self.assertEqual(details["address"], "Street 5")
+        self.assertEqual(details["city"], "Lahore")
+        self.assertEqual(details["phone"], "03001234567")
+        self.assertEqual(details["email"], "order@example.com")
+
+    def test_customer_details_never_return_whitespace_placeholders(self):
+        namespace = {}
+        exec(compile(ast.Module(body=customer_functions, type_ignores=[]), "main.py", "exec"), namespace)
+        order = type("Order", (), {
+            "shipping_address": {"name": " ", "address1": "  ", "city": " ", "phone": " "},
+            "billing_address": None,
+            "customer": None,
+        })()
+        details = namespace["build_shopify_customer_details"](order)
+        self.assertEqual(details["name"], "")
+        self.assertEqual(details["address"], "")
+        self.assertEqual(details["city"], "")
+        self.assertEqual(details["phone"], "")
+
+    def test_employee_order_note_recovers_missing_customer_fields(self):
+        namespace = {}
+        exec(compile(ast.Module(body=customer_functions, type_ignores=[]), "main.py", "exec"), namespace)
+        order = type("Order", (), {
+            "shipping_address": None,
+            "billing_address": None,
+            "customer": None,
+            "note": "Customer: Sara Khan\nPhone: 03210000000\nCity: Karachi\nAddress: Block 2",
+        })()
+        details = namespace["build_shopify_customer_details"](order)
+        self.assertEqual(details["name"], "Sara Khan")
+        self.assertEqual(details["phone"], "03210000000")
+        self.assertEqual(details["city"], "Karachi")
+        self.assertEqual(details["address"], "Block 2")
 
 
 if __name__ == "__main__":

@@ -157,6 +157,52 @@ def get_order_attr(order, name, default=None):
     return getattr(order, name, default)
 
 
+def get_resource_value(resource, name, default=""):
+    if resource is None:
+        return default
+    if isinstance(resource, dict):
+        return resource.get(name, default)
+    return getattr(resource, name, default)
+
+
+def build_shopify_customer_details(order):
+    customer = get_order_attr(order, "customer")
+    shipping = get_order_attr(order, "shipping_address")
+    billing = get_order_attr(order, "billing_address")
+    default_address = get_resource_value(customer, "default_address", None)
+    sources = (shipping, billing, default_address, customer, order)
+
+    def first_value(*names):
+        for source in sources:
+            for name in names:
+                value = str(get_resource_value(source, name, "") or "").strip()
+                if value:
+                    return value
+        return ""
+
+    name = first_value("name")
+    if not name:
+        first_name = first_value("first_name")
+        last_name = first_value("last_name")
+        name = " ".join(part for part in (first_name, last_name) if part)
+    address = " ".join(part for part in (
+        first_value("address1"), first_value("address2")
+    ) if part)
+    note_fields = {}
+    for line in str(get_order_attr(order, "note", "") or "").splitlines():
+        key, separator, value = line.partition(":")
+        if separator and value.strip():
+            note_fields[key.strip().casefold()] = value.strip()
+    return {
+        "id": str(get_resource_value(customer, "id", "") or "").strip(),
+        "name": name or note_fields.get("customer", ""),
+        "address": address or note_fields.get("address", ""),
+        "city": first_value("city") or note_fields.get("city", ""),
+        "phone": first_value("phone") or note_fields.get("phone", ""),
+        "email": first_value("email"),
+    }
+
+
 def get_shopify_order_shipping_total(order):
     shipping_set = get_order_attr(order, "total_shipping_price_set")
     shipping_total = extract_shopify_money(shipping_set, 0)
@@ -1707,13 +1753,7 @@ async def process_order(session, order):
             'line_items': [],
             'financial_status': order.financial_status.title(),
             'fulfillment_status': order.fulfillment_status or "Unfulfilled",
-            'customer_details': {
-                "id": getattr(order.customer, "id", "") if hasattr(order, 'customer') else "", # <--- NEW LINE
-                "name": getattr(order.shipping_address, "name", " "),
-                "address": getattr(order.shipping_address, "address1", " "),
-                "city": getattr(order.shipping_address, "city", " "),
-                "phone": getattr(order.shipping_address, "phone", " ")
-            },
+            'customer_details': build_shopify_customer_details(order),
             'tags': order.tags.split(", ") if order.tags else []
         }
 
@@ -3149,6 +3189,9 @@ def create_shopify_employee_order(payload):
     first_name, last_name = split_customer_name(customer_name)
     note_lines = [
         "Created from Alkaramat employee portal.",
+        f"Customer: {customer_name}",
+        f"City: {city or 'Not provided'}",
+        f"Address: {address or 'Not provided'}",
         f"Payment method: {payment_method or 'Not specified'}",
         f"Payment status: {payment_status}",
         f"Phone: {phone or 'Not provided'}",
