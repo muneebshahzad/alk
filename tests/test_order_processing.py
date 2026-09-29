@@ -1,5 +1,6 @@
 import ast
 import asyncio
+import time
 from pathlib import Path
 import unittest
 
@@ -103,6 +104,7 @@ class OrderProcessingTests(unittest.TestCase):
         exec(compile(ast.Module(body=customer_functions, type_ignores=[]), "main.py", "exec"), namespace)
         order = type("Order", (), {
             "name": "#981596200",
+            "created_at": "2099-09-29T12:00:00+00:00",
             "shipping_address": None,
             "billing_address": None,
             "customer": None,
@@ -120,10 +122,11 @@ class OrderProcessingTests(unittest.TestCase):
                 "default_address": {"address1": "Street 5", "city": "Lahore"},
             }}
 
-        namespace = {"async_shopify_fetch": fetch_customer}
+        namespace = {"async_shopify_fetch": fetch_customer, "parse_date_timestamp": lambda _: time.time(), "time": time}
         exec(compile(ast.Module(body=customer_functions, type_ignores=[]), "main.py", "exec"), namespace)
         order = type("Order", (), {
             "name": "#981596200",
+            "created_at": "2099-09-29T12:00:00+00:00",
             "shipping_address": None,
             "billing_address": None,
             "customer": {"id": 12},

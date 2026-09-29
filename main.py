@@ -211,7 +211,9 @@ async def load_shopify_customer_details(session, order):
     needs_customer_lookup = not details.get("name") or (
         not details.get("phone") and not details.get("address")
     )
-    if not customer_id or not needs_customer_lookup:
+    created_at = get_order_attr(order, "created_at", "")
+    is_recent_order = parse_date_timestamp(created_at) >= time.time() - (7 * 24 * 60 * 60)
+    if not customer_id or not needs_customer_lookup or not is_recent_order:
         return details
     try:
         payload = await async_shopify_fetch(session, f"customers/{customer_id}.json")
