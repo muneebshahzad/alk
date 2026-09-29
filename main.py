@@ -54,6 +54,16 @@ from webauthn.helpers.structs import (
     ResidentKeyRequirement,
     UserVerificationRequirement,
 )
+from shopify_protected_data import (
+    create_oauth_state,
+    exchange_oauth_code_for_token,
+    fetch_protected_order_details,
+    get_install_url,
+    get_protected_data_config_status,
+    get_shop_domain,
+    save_offline_token,
+    verify_oauth_hmac,
+)
 from token_manager import get_access_token, load_tokens, save_tokens
 from digidokaan import (
     fetch_pending_shipper_advice,
@@ -85,6 +95,7 @@ ADMIN_PORTAL_RP_ID = os.getenv("ADMIN_PORTAL_RP_ID", "dashboard.alkaramat.com").
 ADMIN_PORTAL_ORIGIN = os.getenv("ADMIN_PORTAL_ORIGIN", "https://dashboard.alkaramat.com").rstrip("/")
 ADMIN_PASSKEY_CHALLENGE_KEY = "admin_passkey_challenge"
 EMPLOYEE_PASSKEY_CHALLENGE_KEY = "employee_passkey_challenge"
+SHOPIFY_OAUTH_STATE_SESSION_KEY = "shopify_oauth_state"
 PRODUCT_COSTS_SETTING_KEY = "product_cost_overrides_v1"
 ABANDONED_VIEWED_SETTING_KEY = "abandoned_checkout_viewed_v1"
 PAID_FINANCIAL_STATUSES = {"paid", "partially_paid", "partially refunded", "partially_refunded"}
@@ -206,45 +217,27 @@ def build_shopify_customer_details(order, customer_override=None):
 
 
 async def load_shopify_customer_details(session, order):
-    details = build_shopify_customer_details(order)
-    needs_customer_lookup = not details.get("name") or (
-        not details.get("phone") and not details.get("address")
-    )
-    created_at = get_order_attr(order, "created_at", "")
-    is_recent_order = parse_date_timestamp(created_at) >= time.time() - (7 * 24 * 60 * 60)
-    if not needs_customer_lookup or not is_recent_order:
-        return details
+    return build_shopify_customer_details(order)
 
-    order_id = str(get_order_attr(order, "id", "") or "").strip()
+
+def enrich_orders_with_protected_customer_data(orders):
+    if not orders:
+        return orders
     try:
-        if order_id:
-            payload = await async_shopify_fetch(
-                session,
-                f"orders/{order_id}.json?fields=id,email,phone,customer,shipping_address,billing_address,note,created_at",
-            )
-            full_order = payload.get("order") if isinstance(payload, dict) else None
-            if full_order:
-                full_details = build_shopify_customer_details(full_order)
-                for field in ("id", "name", "phone", "address", "city", "email"):
-                    if not details.get(field) and full_details.get(field):
-                        details[field] = full_details[field]
-
-        customer_id = details.get("id")
-        still_incomplete = not details.get("name") or (
-            not details.get("phone") and not details.get("address")
-        )
-        if not customer_id or not still_incomplete:
-            return details
-        payload = await async_shopify_fetch(session, f"customers/{customer_id}.json")
-        remote_customer = payload.get("customer") if isinstance(payload, dict) else None
-        if remote_customer:
-            remote_details = build_shopify_customer_details(order, remote_customer)
-            for field in ("name", "phone", "address", "city", "email"):
-                if not details.get(field) and remote_details.get(field):
-                    details[field] = remote_details[field]
+        protected, errors = fetch_protected_order_details([order.get("id") for order in orders if order.get("id")])
     except Exception as error:
-        print(f"Could not load complete Shopify customer details for order {order_id}: {error}")
-    return details
+        print(f"Could not load Shopify protected customer data: {error}")
+        return orders
+    for error in errors:
+        print(f"Shopify protected data warning: {error}")
+    for order in orders:
+        details = protected.get(str(order.get("id") or ""))
+        if not details:
+            continue
+        customer = order.setdefault("customer_details", {})
+        for field in ("name", "phone", "address", "city"):
+            customer[field] = details.get(field) or customer.get(field, "")
+    return orders
 
 
 def get_shopify_order_shipping_total(order):
@@ -2154,6 +2147,7 @@ async def getShopifyOrders():
                 print(f"Error fetching next page: {e}")
                 break
 
+    order_details = enrich_orders_with_protected_customer_data(order_details)
     total_end_time = time.time()
     print(f"Processed {len(order_details)} orders in {total_end_time - total_start_time:.2f} seconds")
     return order_details
@@ -2203,7 +2197,7 @@ async def getShopifyOrderswithDates(start_date: str, end_date: str):
                 print(f"Error fetching next page: {e}")
                 break
 
-    return order_details
+    return enrich_orders_with_protected_customer_data(order_details)
 
 
 @app.route('/fetch-orders', methods=['POST'])
@@ -2490,6 +2484,42 @@ def refresh_data_status():
         else ("Tracking refresh failed" if state["error"] else "Data refreshed successfully")
     )
     return jsonify(state)
+
+
+@app.route("/shopify/protected-data/status")
+def shopify_protected_data_status():
+    return jsonify(get_protected_data_config_status())
+
+
+@app.route("/shopify/install")
+def shopify_install():
+    state = create_oauth_state()
+    session[SHOPIFY_OAUTH_STATE_SESSION_KEY] = state
+    return redirect(get_install_url(state))
+
+
+@app.route("/shopify/callback")
+def shopify_callback():
+    shop = (request.args.get("shop") or "").strip()
+    code = (request.args.get("code") or "").strip()
+    state = (request.args.get("state") or "").strip()
+    saved_state = session.get(SHOPIFY_OAUTH_STATE_SESSION_KEY, "")
+    if not state or not saved_state or not secrets.compare_digest(state, saved_state):
+        return jsonify({"success": False, "error": "Invalid Shopify callback state"}), 400
+    if not verify_oauth_hmac(request.query_string):
+        return jsonify({"success": False, "error": "Invalid Shopify callback signature"}), 400
+    if shop != get_shop_domain() or not code:
+        return jsonify({"success": False, "error": "Invalid Shopify store or missing authorization code"}), 400
+    try:
+        save_offline_token(shop, exchange_oauth_code_for_token(shop, code))
+        session.pop(SHOPIFY_OAUTH_STATE_SESSION_KEY, None)
+        with tracking_refresh_lock:
+            if not tracking_refresh_state["running"]:
+                tracking_refresh_state.update(running=True, error="")
+                threading.Thread(target=refresh_tracking_in_background, daemon=True).start()
+        return redirect("/shopify/protected-data/status?connected=1")
+    except Exception as error:
+        return jsonify({"success": False, "error": f"Shopify token exchange failed: {error}"}), 500
 
 
 @app.route('/daraz')

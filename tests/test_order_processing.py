@@ -111,59 +111,16 @@ class OrderProcessingTests(unittest.TestCase):
         })()
         self.assertEqual(namespace["build_shopify_customer_details"](order)["name"], "")
 
-    def test_missing_fields_are_hydrated_from_shopify_customer(self):
-        async def fetch_customer(_session, path):
-            self.assertEqual(path, "customers/12.json")
-            return {"customer": {
-                "id": 12,
-                "first_name": "Hina",
-                "last_name": "Ali",
-                "phone": "03001234567",
-                "default_address": {"address1": "Street 5", "city": "Lahore"},
-            }}
-
-        namespace = {"async_shopify_fetch": fetch_customer, "parse_date_timestamp": lambda _: time.time(), "time": time}
+    def test_missing_fields_do_not_trigger_restricted_rest_requests(self):
+        namespace = {}
         exec(compile(ast.Module(body=customer_functions, type_ignores=[]), "main.py", "exec"), namespace)
         order = type("Order", (), {
-            "name": "#981596200",
-            "created_at": "2099-09-29T12:00:00+00:00",
-            "shipping_address": None,
-            "billing_address": None,
-            "customer": {"id": 12},
+            "id": 99, "name": "#981596200", "shipping_address": None,
+            "billing_address": None, "customer": {"id": 12},
         })()
         details = asyncio.run(namespace["load_shopify_customer_details"](None, order))
-        self.assertEqual(details["name"], "Hina Ali")
-        self.assertEqual(details["phone"], "03001234567")
-        self.assertEqual(details["address"], "Street 5")
-        self.assertEqual(details["city"], "Lahore")
-
-    def test_recent_incomplete_list_order_is_hydrated_from_individual_order(self):
-        async def fetch_order(_session, path):
-            self.assertTrue(path.startswith("orders/99.json?fields="))
-            return {"order": {
-                "id": 99,
-                "created_at": "2099-09-29T12:00:00+00:00",
-                "shipping_address": {
-                    "name": "Sara Khan", "phone": "03210000000",
-                    "address1": "Block 2", "city": "Karachi",
-                },
-            }}
-
-        namespace = {"async_shopify_fetch": fetch_order, "parse_date_timestamp": lambda _: time.time(), "time": time}
-        exec(compile(ast.Module(body=customer_functions, type_ignores=[]), "main.py", "exec"), namespace)
-        list_order = type("Order", (), {
-            "id": 99,
-            "name": "#981596200",
-            "created_at": "2099-09-29T12:00:00+00:00",
-            "shipping_address": None,
-            "billing_address": None,
-            "customer": None,
-        })()
-        details = asyncio.run(namespace["load_shopify_customer_details"](None, list_order))
-        self.assertEqual(details["name"], "Sara Khan")
-        self.assertEqual(details["phone"], "03210000000")
-        self.assertEqual(details["address"], "Block 2")
-        self.assertEqual(details["city"], "Karachi")
+        self.assertEqual(details["id"], "12")
+        self.assertEqual(details["name"], "")
 
 
 if __name__ == "__main__":
