@@ -207,15 +207,34 @@ def build_shopify_customer_details(order, customer_override=None):
 
 async def load_shopify_customer_details(session, order):
     details = build_shopify_customer_details(order)
-    customer_id = details.get("id")
     needs_customer_lookup = not details.get("name") or (
         not details.get("phone") and not details.get("address")
     )
     created_at = get_order_attr(order, "created_at", "")
     is_recent_order = parse_date_timestamp(created_at) >= time.time() - (7 * 24 * 60 * 60)
-    if not customer_id or not needs_customer_lookup or not is_recent_order:
+    if not needs_customer_lookup or not is_recent_order:
         return details
+
+    order_id = str(get_order_attr(order, "id", "") or "").strip()
     try:
+        if order_id:
+            payload = await async_shopify_fetch(
+                session,
+                f"orders/{order_id}.json?fields=id,email,phone,customer,shipping_address,billing_address,note,created_at",
+            )
+            full_order = payload.get("order") if isinstance(payload, dict) else None
+            if full_order:
+                full_details = build_shopify_customer_details(full_order)
+                for field in ("id", "name", "phone", "address", "city", "email"):
+                    if not details.get(field) and full_details.get(field):
+                        details[field] = full_details[field]
+
+        customer_id = details.get("id")
+        still_incomplete = not details.get("name") or (
+            not details.get("phone") and not details.get("address")
+        )
+        if not customer_id or not still_incomplete:
+            return details
         payload = await async_shopify_fetch(session, f"customers/{customer_id}.json")
         remote_customer = payload.get("customer") if isinstance(payload, dict) else None
         if remote_customer:
@@ -224,7 +243,7 @@ async def load_shopify_customer_details(session, order):
                 if not details.get(field) and remote_details.get(field):
                     details[field] = remote_details[field]
     except Exception as error:
-        print(f"Could not load Shopify customer {customer_id}: {error}")
+        print(f"Could not load complete Shopify customer details for order {order_id}: {error}")
     return details
 
 

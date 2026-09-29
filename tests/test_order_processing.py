@@ -137,6 +137,34 @@ class OrderProcessingTests(unittest.TestCase):
         self.assertEqual(details["address"], "Street 5")
         self.assertEqual(details["city"], "Lahore")
 
+    def test_recent_incomplete_list_order_is_hydrated_from_individual_order(self):
+        async def fetch_order(_session, path):
+            self.assertTrue(path.startswith("orders/99.json?fields="))
+            return {"order": {
+                "id": 99,
+                "created_at": "2099-09-29T12:00:00+00:00",
+                "shipping_address": {
+                    "name": "Sara Khan", "phone": "03210000000",
+                    "address1": "Block 2", "city": "Karachi",
+                },
+            }}
+
+        namespace = {"async_shopify_fetch": fetch_order, "parse_date_timestamp": lambda _: time.time(), "time": time}
+        exec(compile(ast.Module(body=customer_functions, type_ignores=[]), "main.py", "exec"), namespace)
+        list_order = type("Order", (), {
+            "id": 99,
+            "name": "#981596200",
+            "created_at": "2099-09-29T12:00:00+00:00",
+            "shipping_address": None,
+            "billing_address": None,
+            "customer": None,
+        })()
+        details = asyncio.run(namespace["load_shopify_customer_details"](None, list_order))
+        self.assertEqual(details["name"], "Sara Khan")
+        self.assertEqual(details["phone"], "03210000000")
+        self.assertEqual(details["address"], "Block 2")
+        self.assertEqual(details["city"], "Karachi")
+
 
 if __name__ == "__main__":
     unittest.main()
