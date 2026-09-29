@@ -11,8 +11,8 @@ function = next(
 )
 customer_functions = [
     node for node in source.body
-    if isinstance(node, ast.FunctionDef)
-    and node.name in {"get_order_attr", "get_resource_value", "build_shopify_customer_details"}
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    and node.name in {"get_order_attr", "get_resource_value", "build_shopify_customer_details", "load_shopify_customer_details"}
 ]
 
 
@@ -97,6 +97,42 @@ class OrderProcessingTests(unittest.TestCase):
         self.assertEqual(details["phone"], "03210000000")
         self.assertEqual(details["city"], "Karachi")
         self.assertEqual(details["address"], "Block 2")
+
+    def test_order_number_is_never_used_as_customer_name(self):
+        namespace = {"async_shopify_fetch": None}
+        exec(compile(ast.Module(body=customer_functions, type_ignores=[]), "main.py", "exec"), namespace)
+        order = type("Order", (), {
+            "name": "#981596200",
+            "shipping_address": None,
+            "billing_address": None,
+            "customer": None,
+        })()
+        self.assertEqual(namespace["build_shopify_customer_details"](order)["name"], "")
+
+    def test_missing_fields_are_hydrated_from_shopify_customer(self):
+        async def fetch_customer(_session, path):
+            self.assertEqual(path, "customers/12.json")
+            return {"customer": {
+                "id": 12,
+                "first_name": "Hina",
+                "last_name": "Ali",
+                "phone": "03001234567",
+                "default_address": {"address1": "Street 5", "city": "Lahore"},
+            }}
+
+        namespace = {"async_shopify_fetch": fetch_customer}
+        exec(compile(ast.Module(body=customer_functions, type_ignores=[]), "main.py", "exec"), namespace)
+        order = type("Order", (), {
+            "name": "#981596200",
+            "shipping_address": None,
+            "billing_address": None,
+            "customer": {"id": 12},
+        })()
+        details = asyncio.run(namespace["load_shopify_customer_details"](None, order))
+        self.assertEqual(details["name"], "Hina Ali")
+        self.assertEqual(details["phone"], "03001234567")
+        self.assertEqual(details["address"], "Street 5")
+        self.assertEqual(details["city"], "Lahore")
 
 
 if __name__ == "__main__":

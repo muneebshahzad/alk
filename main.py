@@ -165,12 +165,12 @@ def get_resource_value(resource, name, default=""):
     return getattr(resource, name, default)
 
 
-def build_shopify_customer_details(order):
-    customer = get_order_attr(order, "customer")
+def build_shopify_customer_details(order, customer_override=None):
+    customer = customer_override or get_order_attr(order, "customer")
     shipping = get_order_attr(order, "shipping_address")
     billing = get_order_attr(order, "billing_address")
     default_address = get_resource_value(customer, "default_address", None)
-    sources = (shipping, billing, default_address, customer, order)
+    sources = (shipping, billing, default_address, customer)
 
     def first_value(*names):
         for source in sources:
@@ -193,14 +193,34 @@ def build_shopify_customer_details(order):
         key, separator, value = line.partition(":")
         if separator and value.strip():
             note_fields[key.strip().casefold()] = value.strip()
+    order_phone = str(get_order_attr(order, "phone", "") or "").strip()
+    order_email = str(get_order_attr(order, "email", "") or "").strip()
     return {
         "id": str(get_resource_value(customer, "id", "") or "").strip(),
         "name": name or note_fields.get("customer", ""),
         "address": address or note_fields.get("address", ""),
         "city": first_value("city") or note_fields.get("city", ""),
-        "phone": first_value("phone") or note_fields.get("phone", ""),
-        "email": first_value("email"),
+        "phone": first_value("phone") or order_phone or note_fields.get("phone", ""),
+        "email": first_value("email") or order_email,
     }
+
+
+async def load_shopify_customer_details(session, order):
+    details = build_shopify_customer_details(order)
+    customer_id = details.get("id")
+    if not customer_id or all(details.get(field) for field in ("name", "phone", "address", "city")):
+        return details
+    try:
+        payload = await async_shopify_fetch(session, f"customers/{customer_id}.json")
+        remote_customer = payload.get("customer") if isinstance(payload, dict) else None
+        if remote_customer:
+            remote_details = build_shopify_customer_details(order, remote_customer)
+            for field in ("name", "phone", "address", "city", "email"):
+                if not details.get(field) and remote_details.get(field):
+                    details[field] = remote_details[field]
+    except Exception as error:
+        print(f"Could not load Shopify customer {customer_id}: {error}")
+    return details
 
 
 def get_shopify_order_shipping_total(order):
@@ -1735,6 +1755,7 @@ async def process_order(session, order):
         subtotal_price = parse_money(getattr(order, "current_subtotal_price", None) or getattr(order, "subtotal_price", 0))
         total_price = parse_money(getattr(order, "current_total_price", None) or getattr(order, "total_price", subtotal_price))
         shipping_charges = get_shopify_order_shipping_total(order)
+        customer_details = await load_shopify_customer_details(session, order)
 
         order_info = {
             'order_link': "https://admin.shopify.com/store/alkaramat/orders/" + str(order.id),
@@ -1753,7 +1774,7 @@ async def process_order(session, order):
             'line_items': [],
             'financial_status': order.financial_status.title(),
             'fulfillment_status': order.fulfillment_status or "Unfulfilled",
-            'customer_details': build_shopify_customer_details(order),
+            'customer_details': customer_details,
             'tags': order.tags.split(", ") if order.tags else []
         }
 
