@@ -208,7 +208,10 @@ def build_shopify_customer_details(order, customer_override=None):
 async def load_shopify_customer_details(session, order):
     details = build_shopify_customer_details(order)
     customer_id = details.get("id")
-    if not customer_id or all(details.get(field) for field in ("name", "phone", "address", "city")):
+    needs_customer_lookup = not details.get("name") or (
+        not details.get("phone") and not details.get("address")
+    )
+    if not customer_id or not needs_customer_lookup:
         return details
     try:
         payload = await async_shopify_fetch(session, f"customers/{customer_id}.json")
