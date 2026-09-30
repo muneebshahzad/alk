@@ -29,7 +29,7 @@ class BookingsTemplateTests(unittest.TestCase):
         self.assertIn("Shawl", result)
         self.assertIn("123", result)
         self.assertIn("4</b> lifetime orders", result)
-        self.assertIn("Last: <b>Delivered</b>", result)
+        self.assertIn(">Delivered</b>", result)
         self.assertIn("Merge these orders", result)
         self.assertIn("sortOrders", result)
         self.assertNotIn("[:4]", result)

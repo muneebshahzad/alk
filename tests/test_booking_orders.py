@@ -54,6 +54,18 @@ class BookingOrderTests(unittest.TestCase):
         self.assertIn("marked Replacement", rows[2]["replacement_reason"])
         self.assertNotEqual(rows[0].get("duplicate_group"), rows[1].get("duplicate_group"))
 
+    def test_existing_customer_without_accessible_previous_record_is_not_called_first_order(self):
+        namespace["order_details"] = [{
+            "id": "1", "order_num": "1", "customer_details": {
+                "name": "Customer", "phone": "03001234567", "address": "House 1", "city": "Lahore",
+                "order_count": 3, "recent_orders": [{"id": "1", "name": "#1", "fulfillment_status": "UNFULFILLED", "tags": []}],
+            },
+            "line_items": [{"line_item_id": "10", "fulfillable_quantity": 1, "quantity": 1, "tracking_number": "N/A", "product_title": "Shawl"}],
+            "total_price": 1000, "financial_status": "Pending", "tags": [],
+        }]
+        row = namespace["build_trax_booking_orders"]([{"id": "1", "name": "Lahore", "services": ["OVERNIGHT"]}])[0]
+        self.assertEqual(row["last_order_status"], "History unavailable")
+
 
 if __name__ == "__main__":
     unittest.main()

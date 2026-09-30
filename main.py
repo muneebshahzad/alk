@@ -1768,7 +1768,8 @@ def build_trax_booking_orders(cities):
         city = match_trax_city(customer.get("city"), cities)
         current_id = str(order.get("id") or order.get("shopify_id") or "")
         previous = next((recent for recent in customer.get("recent_orders") or [] if str(recent.get("id")) != current_id), None)
-        previous_status = "No previous order"
+        customer_order_count = int(customer.get("order_count") or 0)
+        previous_status = "First order" if customer_order_count <= 1 else "History unavailable"
         if previous:
             status_text = " ".join([str(previous.get("fulfillment_status") or ""), " ".join(previous.get("tags") or [])]).casefold()
             if previous.get("cancelled") or "return" in status_text or "restock" in status_text:
@@ -1795,7 +1796,7 @@ def build_trax_booking_orders(cities):
             "total": total,
             "cod": 0 if str(order.get("financial_status", "")).casefold() in PAID_FINANCIAL_STATUSES else total,
             "financial_status": order.get("financial_status", ""),
-            "customer_order_count": int(customer.get("order_count") or 0),
+            "customer_order_count": customer_order_count,
             "last_order_status": previous_status,
             "last_order_name": (previous or {}).get("name", ""),
             "customer_identity": identity,
