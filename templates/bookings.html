@@ -13,12 +13,12 @@
     <datalist id="cityList">{% for city in cities %}<option value="{{ city.name }}"></option>{% endfor %}</datalist>
     <div class="booking-list">
     {% for order in booking_orders %}
-      <article class="booking-row" data-order-id="{{ order.id }}" data-search="{{ order.number }} {{ order.customer.name }} {{ order.customer.phone }} {% for i in order.items %}{{ i.product_title }} {% endfor %}">
+      <article class="booking-row" data-order-id="{{ order.id }}" data-search="{{ order.number }} {{ order.customer.name }} {{ order.customer.phone }} {% for i in order['items'] %}{{ i.product_title }} {% endfor %}">
         <div class="row-main">
           <input class="order-select" type="checkbox">
           <div><span class="order-no">#{{ order.number }}</span><div class="muted">{{ order.date }}</div></div>
           <div class="customer"><strong>{{ order.customer.name or 'Customer details needed' }}</strong><span class="muted">{{ order.customer.phone }}</span></div>
-          <div class="product-summary"><strong>{{ order.items|length }} product{{ '' if order.items|length == 1 else 's' }}</strong><span class="muted">{% for i in order.items %}{{ i.product_title }}{% if not loop.last %}, {% endif %}{% endfor %}</span></div>
+          <div class="product-summary"><strong>{{ order['items']|length }} product{{ '' if order['items']|length == 1 else 's' }}</strong><span class="muted">{% for i in order['items'] %}{{ i.product_title }}{% if not loop.last %}, {% endif %}{% endfor %}</span></div>
           <div><span class="muted">Courier city</span><strong class="city-label">{{ order.city_match.name if order.city_match else 'Choose city' }}</strong></div>
           <div class="money">COD {{ '%.0f'|format(order.cod) }}</div><button class="expand" aria-label="Edit booking">⌄</button>
         </div>
@@ -32,17 +32,17 @@
           <div class="field"><label>Weight (kg)</label><input class="weight" type="number" min="0.1" step="0.1" value="0.5"></div>
           <div class="field"><label>COD amount</label><input class="cod" type="number" min="0" step="1" value="{{ order.cod }}"></div>
           <div class="field"><label>Parcel value</label><input class="parcel-value" type="number" min="0" value="{{ order.total }}"></div>
-          <div class="field wide"><label>Product description</label><input class="product-name" value="{% for i in order.items %}{{ i.product_title }}{% if not loop.last %}, {% endif %}{% endfor %}"></div>
+          <div class="field wide"><label>Product description</label><input class="product-name" value="{% for i in order['items'] %}{{ i.product_title }}{% if not loop.last %}, {% endif %}{% endfor %}"></div>
           <div class="field wide"><label>Special instructions</label><textarea class="instructions"></textarea></div>
           <div class="item-picker"><strong>Select items and quantities</strong>
-            {% for item in order.items %}<label class="item-line"><input class="item-select" type="checkbox" checked data-line-item-id="{{ item.line_item_id }}"><img src="{{ item.image_src }}" alt=""><span><strong>{{ item.product_title }}</strong><small class="muted">{{ item.sku }}</small></span><input class="item-qty" type="number" min="1" max="{{ item.fulfillable_quantity or item.quantity }}" value="{{ item.fulfillable_quantity or item.quantity }}"></label>{% endfor %}
+            {% for item in order['items'] %}<label class="item-line"><input class="item-select" type="checkbox" checked data-line-item-id="{{ item.line_item_id }}"><img src="{{ item.image_src }}" alt=""><span><strong>{{ item.product_title }}</strong><small class="muted">{{ item.sku }}</small></span><input class="item-qty" type="number" min="1" max="{{ item.fulfillable_quantity or item.quantity }}" value="{{ item.fulfillable_quantity or item.quantity }}"></label>{% endfor %}
           </div>
         </div></div>
       </article>
     {% else %}<div class="booking-row">No unfulfilled Shopify orders are ready to book.</div>{% endfor %}
     </div>
   </section>
-  <section id="logsPanel" class="hidden"><div class="log-wrap"><table class="log-table"><thead><tr><th>Booked</th><th>Order</th><th>Customer / items</th><th>Tracking</th><th>COD</th><th>Shopify</th><th>Label</th></tr></thead><tbody>{% for log in booking_logs %}<tr><td>{{ log.booked_at|replace('T',' ') }}</td><td>#{{ log.order_number }}<br><span class="muted">DD {{ log.order_no }}</span></td><td>{{ log.customer_name }}<br><span class="muted">{% for i in log.items %}{{ i.title }} ×{{ i.quantity }}{% if not loop.last %}, {% endif %}{% endfor %}</span></td><td><a href="{{ log.tracking_url }}" target="_blank">{{ log.tracking_no }}</a><br><span class="muted">{{ log.city }} · {{ log.service_type|title }}</span></td><td>PKR {{ log.cod_amount }}</td><td>{% if log.shopify_fulfilled %}<span class="ok">Fulfilled</span>{% else %}<span class="bad">Action needed</span><br><button class="btn btn-outline retry" data-tracking="{{ log.tracking_no }}">Retry</button>{% endif %}</td><td><a class="btn btn-outline" href="/bookings/label/{{ log.tracking_no }}" target="_blank">Print / reprint</a></td></tr>{% else %}<tr><td colspan="7">No bookings yet.</td></tr>{% endfor %}</tbody></table></div></section>
+  <section id="logsPanel" class="hidden"><div class="log-wrap"><table class="log-table"><thead><tr><th>Booked</th><th>Order</th><th>Customer / items</th><th>Tracking</th><th>COD</th><th>Shopify</th><th>Label</th></tr></thead><tbody>{% for log in booking_logs %}<tr><td>{{ log.booked_at|replace('T',' ') }}</td><td>#{{ log.order_number }}<br><span class="muted">DD {{ log.order_no }}</span></td><td>{{ log.customer_name }}<br><span class="muted">{% for i in log['items'] %}{{ i.title }} ×{{ i.quantity }}{% if not loop.last %}, {% endif %}{% endfor %}</span></td><td><a href="{{ log.tracking_url }}" target="_blank">{{ log.tracking_no }}</a><br><span class="muted">{{ log.city }} · {{ log.service_type|title }}</span></td><td>PKR {{ log.cod_amount }}</td><td>{% if log.shopify_fulfilled %}<span class="ok">Fulfilled</span>{% else %}<span class="bad">Action needed</span><br><button class="btn btn-outline retry" data-tracking="{{ log.tracking_no }}">Retry</button>{% endif %}</td><td><a class="btn btn-outline" href="/bookings/label/{{ log.tracking_no }}" target="_blank">Print / reprint</a></td></tr>{% else %}<tr><td colspan="7">No bookings yet.</td></tr>{% endfor %}</tbody></table></div></section>
 </main>
 <script>
 const cities={{ cities|tojson }}; const cityMap=new Map(cities.map(c=>[c.name.toLowerCase(),c]));
