@@ -22,7 +22,12 @@ def money(value):
 
 def build_entry(kind, amount, cash_account="bank", category=None, destination=None, deduction=0, foreign_amount=0):
     amount = money(amount)
-    deduction_amount = Decimal("0.00") if not deduction else money(deduction)
+    try:
+        deduction_amount = Decimal(str(deduction or "0")).quantize(MONEY, rounding=ROUND_HALF_UP)
+    except (InvalidOperation, ValueError):
+        raise ValueError("Enter a valid courier deduction.")
+    if deduction_amount < 0:
+        raise ValueError("Courier deductions cannot be negative.")
     if kind == "income":
         lines = [(cash_account, amount, 0), (category or "sales_revenue", 0, amount)]
     elif kind == "expense":

@@ -61,8 +61,19 @@ def test_courier_deduction_cannot_consume_settlement():
 
 
 def test_payoneer_keeps_usd_amount_and_pkr_ledger_value():
-    lines = build_entry("expense", "27950", cash_account="payoneer_usd", category="advertising", foreign_amount="100")
+    lines = build_entry("expense", "27950", cash_account="payoneer_usd", category="advertising", foreign_amount="100", deduction="0")
     assert lines == [
         ("advertising", Decimal("27950.00"), 0, 0, 0),
         ("payoneer_usd", 0, Decimal("27950.00"), 0, Decimal("100.00")),
+    ]
+
+
+def test_shopify_income_to_payoneer_accepts_hidden_zero_deduction():
+    lines = build_entry(
+        "income", "30411.00", cash_account="payoneer_usd",
+        category="sales_revenue", foreign_amount="109", deduction="0",
+    )
+    assert lines == [
+        ("payoneer_usd", Decimal("30411.00"), 0, Decimal("109.00"), 0),
+        ("sales_revenue", 0, Decimal("30411.00"), 0, 0),
     ]
