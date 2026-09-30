@@ -4076,9 +4076,20 @@ def finance_create_transaction():
             deduction=request.form.get("deduction") or 0,
             foreign_amount=foreign_amount,
         )
+        default_descriptions = {
+            "income": "Income received",
+            "expense": "Expense paid",
+            "digidokaan_cheque": "DigiDokaan cheque",
+            "call_courier_invoice": "Call Courier invoice",
+            "owner_contribution": "Owner contribution",
+            "owner_drawing": "Owner drawing",
+            "transfer": "Account transfer",
+            "supplier_bill": "Supplier bill",
+            "supplier_payment": "Supplier payment",
+        }
         public_id = post_journal(
             request.form.get("transaction_date") or datetime.now().date(),
-            request.form.get("description"),
+            (request.form.get("description") or "").strip() or default_descriptions.get(kind, "Finance transaction"),
             request.form.get("reference"),
             lines,
         )
