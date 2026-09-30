@@ -38,6 +38,22 @@ class BookingOrderTests(unittest.TestCase):
         self.assertEqual(rows[0]["last_order_status"], "Delivered")
         self.assertEqual(rows[0]["last_order_name"], "#9")
 
+    def test_zero_value_and_replacement_tag_orders_are_separated_at_end(self):
+        customer = {"name": "Customer", "phone": "03001234567", "address": "House 1", "city": "Lahore"}
+        item = {"line_item_id": "10", "fulfillable_quantity": 1, "quantity": 1, "tracking_number": "N/A", "product_title": "Shawl"}
+        namespace["order_details"] = [
+            {"id": "1", "order_num": "1", "customer_details": customer, "line_items": [item], "total_price": 1000, "financial_status": "Pending", "tags": []},
+            {"id": "2", "order_num": "2", "customer_details": customer, "line_items": [dict(item, line_item_id="20")], "total_price": 0, "financial_status": "Paid", "tags": []},
+            {"id": "3", "order_num": "3", "customer_details": customer, "line_items": [dict(item, line_item_id="30")], "total_price": 500, "financial_status": "Pending", "tags": ["Replacement"]},
+        ]
+        rows = namespace["build_trax_booking_orders"]([{"id": "1", "name": "Lahore", "services": ["OVERNIGHT"]}])
+        self.assertFalse(rows[0]["is_replacement"])
+        self.assertTrue(rows[1]["is_replacement"])
+        self.assertIn("zero-value", rows[1]["replacement_reason"])
+        self.assertTrue(rows[2]["is_replacement"])
+        self.assertIn("marked Replacement", rows[2]["replacement_reason"])
+        self.assertNotEqual(rows[0].get("duplicate_group"), rows[1].get("duplicate_group"))
+
 
 if __name__ == "__main__":
     unittest.main()

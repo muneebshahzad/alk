@@ -32,6 +32,7 @@ class BookingsTemplateTests(unittest.TestCase):
         self.assertIn("Last: <b>Delivered</b>", result)
         self.assertIn("Merge these orders", result)
         self.assertIn("sortOrders", result)
+        self.assertNotIn("[:4]", result)
 
 
 if __name__ == "__main__":

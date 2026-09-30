@@ -1780,23 +1780,32 @@ def build_trax_booking_orders(cities):
         identity_phone = re.sub(r"\D", "", str(customer.get("phone") or ""))[-10:]
         identity_address = re.sub(r"[^a-z0-9]", "", str(customer.get("address") or "").casefold())
         identity = f"{identity_phone}|{identity_address}" if identity_phone and identity_address else ""
+        total = parse_money(order.get("current_total_price") or order.get("total_price"))
+        replacement_text = " ".join([str(order.get("note") or ""), " ".join(order.get("tags") or [])]).casefold()
+        replacement_reasons = []
+        if total == 0:
+            replacement_reasons.append("zero-value order")
+        if "replacement" in replacement_text:
+            replacement_reasons.append("marked Replacement")
         rows.append({
             "id": str(order.get("id") or order.get("shopify_id") or ""),
             "number": str(order.get("order_num") or order.get("order_id") or ""),
             "date": order.get("created_at", ""), "customer": customer,
             "city_match": city, "items": items,
-            "total": parse_money(order.get("current_total_price") or order.get("total_price")),
-            "cod": 0 if str(order.get("financial_status", "")).casefold() in PAID_FINANCIAL_STATUSES else parse_money(order.get("current_total_price") or order.get("total_price")),
+            "total": total,
+            "cod": 0 if str(order.get("financial_status", "")).casefold() in PAID_FINANCIAL_STATUSES else total,
             "financial_status": order.get("financial_status", ""),
             "customer_order_count": int(customer.get("order_count") or 0),
             "last_order_status": previous_status,
             "last_order_name": (previous or {}).get("name", ""),
             "customer_identity": identity,
+            "is_replacement": bool(replacement_reasons),
+            "replacement_reason": " and ".join(replacement_reasons),
         })
     grouped = {}
     for row in rows:
         if row["customer_identity"]:
-            grouped.setdefault(row["customer_identity"], []).append(row)
+            grouped.setdefault((row["is_replacement"], row["customer_identity"]), []).append(row)
     for members in grouped.values():
         if len(members) < 2:
             continue
@@ -1804,7 +1813,7 @@ def build_trax_booking_orders(cities):
         for row in members:
             row["duplicate_group"] = group_id
             row["duplicate_count"] = len(members)
-    return rows
+    return [row for row in rows if not row["is_replacement"]] + [row for row in rows if row["is_replacement"]]
 
 
 @app.route('/book')
@@ -1846,6 +1855,18 @@ def create_trax_bookings_api():
                     raise ValueError("One of the orders is no longer available")
                 selected_for_order = validate_booking_selection(order, order_request.get("items"))
                 order_selections.append({"order": order, "items": selected_for_order})
+            replacement_flags = {
+                parse_money(selection["order"].get("current_total_price") or selection["order"].get("total_price")) == 0
+                or "replacement" in " ".join([
+                    str(selection["order"].get("note") or ""),
+                    " ".join(selection["order"].get("tags") or []),
+                ]).casefold()
+                for selection in order_selections
+            }
+            if True in replacement_flags and not request_row.get("replacement_confirmed"):
+                raise ValueError("Confirm the replacement order before booking")
+            if len(replacement_flags) > 1:
+                raise ValueError("Replacement and regular orders cannot be merged together")
             if len(order_selections) > 1:
                 identities = set()
                 for selection in order_selections:
@@ -2187,7 +2208,8 @@ async def process_order(session, order):
             'financial_status': order.financial_status.title(),
             'fulfillment_status': order.fulfillment_status or "Unfulfilled",
             'customer_details': customer_details,
-            'tags': order.tags.split(", ") if order.tags else []
+            'tags': order.tags.split(", ") if order.tags else [],
+            'note': str(getattr(order, 'note', '') or '')
         }
 
         tasks = [process_line_item(session, line_item, order.fulfillments) for line_item in order.line_items]
