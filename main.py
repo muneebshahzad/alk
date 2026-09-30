@@ -4023,6 +4023,12 @@ def finance_page():
             async with aiohttp.ClientSession() as client:
                 return await fetch_digidokaan_payments(client)
         payment_dashboard = build_digidokaan_payment_dashboard(asyncio.run(load_finance_cheques()))
+        outstanding_card = next(
+            (card for card in payment_dashboard.get("cards", []) if card.get("label") == "Outstanding payment"),
+            {},
+        )
+        unpaid_cheques["amount"] = parse_money(outstanding_card.get("value"), 0)
+        unpaid_cheques["count"] = parse_int(outstanding_card.get("count"), 0)
         paid_words = ("paid", "cleared", "completed", "disbursed", "transferred", "success")
         for cheque in payment_dashboard.get("cheques", []):
             status = str(cheque.get("status") or cheque.get("settlement_status") or "").strip().casefold()
@@ -4030,9 +4036,7 @@ def finance_page():
             amount = parse_money(cheque.get("amount") or cheque.get("cheque_amount") or cheque.get("settlement_amount"), 0)
             if is_unpaid and amount > 0:
                 unpaid_cheques["rows"].append(cheque)
-                unpaid_cheques["amount"] += amount
-        unpaid_cheques["count"] = len(unpaid_cheques["rows"])
-        unpaid_cheques["amount"] = round(unpaid_cheques["amount"], 2)
+        unpaid_cheques["cheque_count"] = len(unpaid_cheques["rows"])
     except Exception as cheque_error:
         print(f"Finance unpaid cheque fetch error: {cheque_error}")
     return render_template(
