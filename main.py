@@ -79,6 +79,7 @@ from digidokaan import (
     match_trax_city,
     submit_shipper_advice,
 )
+from finance import build_entry, finance_dashboard, post_journal, reverse_journal
 
 app = Flask(__name__)
 app.debug = True
@@ -3589,6 +3590,7 @@ def build_admin_mobile_sections():
         {"id": "pending", "label": "Pending", "icon": "pending", "src": "/pending?embedded=1"},
         {"id": "abandoned", "label": "Abandoned", "icon": "abandoned", "src": "/abandoned?embedded=1"},
         {"id": "payments", "label": "Payments", "icon": "payments", "src": "/payments?embedded=1"},
+        {"id": "finance", "label": "Finance", "icon": "finance", "src": "/finance?embedded=1"},
         {"id": "product-costs", "label": "Product Costs", "icon": "cost", "src": "/product-costs?embedded=1"},
     ]
 
@@ -3986,6 +3988,83 @@ def approve_employee_status():
 @app.route("/product-costs")
 def product_costs():
     return render_template("product_costs.html", products=build_product_cost_rows())
+
+
+def _finance_csrf_token():
+    token = session.get("finance_csrf_token")
+    if not token:
+        token = secrets.token_urlsafe(32)
+        session["finance_csrf_token"] = token
+    return token
+
+
+def _require_finance_csrf():
+    supplied = request.form.get("csrf_token") or request.headers.get("X-CSRF-Token") or ""
+    if not supplied or not secrets.compare_digest(supplied, session.get("finance_csrf_token", "")):
+        abort(400, "This finance form expired. Reload the page and try again.")
+
+
+@app.route("/finance")
+def finance_page():
+    if not admin_portal_is_authenticated():
+        return redirect(url_for("admin_portal", section="finance"))
+    try:
+        period = (request.args.get("period") or datetime.now().strftime("%Y-%m")).strip()
+        period_start = datetime.strptime(period, "%Y-%m").date().replace(day=1)
+        dashboard = finance_dashboard(period_start)
+        error = ""
+    except Exception as finance_error:
+        print(f"Finance dashboard error: {finance_error}")
+        dashboard = {"accounts": [], "journals": [], "by_key": {}, "income": 0, "expenses": 0, "profit": 0}
+        error = str(finance_error)
+    return render_template(
+        "finance.html",
+        finance=dashboard,
+        finance_error=error,
+        csrf_token=_finance_csrf_token(),
+        today=datetime.now().date().isoformat(),
+        period=(request.args.get("period") or datetime.now().strftime("%Y-%m")),
+    )
+
+
+@app.route("/finance/transactions", methods=["POST"])
+def finance_create_transaction():
+    if not admin_portal_is_authenticated():
+        return jsonify({"success": False, "error": "Unauthorized"}), 401
+    _require_finance_csrf()
+    try:
+        kind = (request.form.get("kind") or "").strip()
+        lines = build_entry(
+            kind,
+            request.form.get("amount"),
+            cash_account=(request.form.get("cash_account") or "bank").strip(),
+            category=(request.form.get("category") or "").strip() or None,
+            destination=(request.form.get("destination") or "").strip() or None,
+            deduction=request.form.get("deduction") or 0,
+        )
+        public_id = post_journal(
+            request.form.get("transaction_date") or datetime.now().date(),
+            request.form.get("description"),
+            request.form.get("reference"),
+            lines,
+        )
+        flash(f"Transaction posted: {public_id[:8]}", "success")
+    except Exception as error:
+        flash(str(error), "error")
+    return redirect(url_for("finance_page"))
+
+
+@app.route("/finance/transactions/<public_id>/reverse", methods=["POST"])
+def finance_reverse_transaction(public_id):
+    if not admin_portal_is_authenticated():
+        return jsonify({"success": False, "error": "Unauthorized"}), 401
+    _require_finance_csrf()
+    try:
+        reverse_journal(public_id)
+        flash("Transaction reversed. The original entry remains in the audit trail.", "success")
+    except Exception as error:
+        flash(str(error), "error")
+    return redirect(url_for("finance_page"))
 
 
 @app.route("/product-costs/update", methods=["POST"])

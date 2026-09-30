@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}Finance · Al Karamat{% endblock %}
+{% block content %}
+<style>
+  .fin{padding:24px;max-width:1500px;margin:auto;color:#17213b}.fin-head{display:flex;justify-content:space-between;gap:16px;align-items:flex-end;margin-bottom:20px}.fin h1{margin:0;font-size:30px}.muted{color:#8490a8}.fin-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px}.fin-card,.fin-panel{background:#fff;border:1px solid #e3e7f0;border-radius:18px;box-shadow:0 8px 24px rgba(29,43,76,.05)}.fin-card{padding:18px}.fin-label{text-transform:uppercase;letter-spacing:.07em;font-size:11px;color:#8490a8;font-weight:800}.fin-value{font-size:25px;font-weight:850;margin-top:8px}.positive{color:#25845b}.negative{color:#c34e44}.fin-layout{display:grid;grid-template-columns:380px minmax(0,1fr);gap:18px;margin-top:18px}.fin-panel{padding:20px}.fin-panel h2{font-size:18px;margin:0 0 16px}.fin-form{display:grid;gap:12px}.fin-form label{font-size:12px;font-weight:800;color:#576177}.fin-form input,.fin-form select,.fin-form textarea{box-sizing:border-box;width:100%;border:1px solid #dce2ed;border-radius:11px;padding:11px 12px;background:#fff;color:#17213b;font:inherit}.fin-form textarea{min-height:70px;resize:vertical}.two{display:grid;grid-template-columns:1fr 1fr;gap:10px}.fin-btn{border:0;border-radius:11px;padding:12px 15px;font-weight:800;cursor:pointer;background:#1e3a70;color:#fff}.fin-btn.secondary{background:#fff;color:#b0443c;border:1px solid #e5c8c5;padding:7px 10px}.notice{padding:12px 14px;border-radius:11px;margin-bottom:14px;background:#edf8f2;color:#247453}.notice.error{background:#fff0ee;color:#a64239}.accounts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;margin-top:15px}.account{padding:11px 12px;border-radius:12px;background:#f7f8fb;display:flex;justify-content:space-between;gap:12px}.account span{font-size:12px;color:#69748a}.journal-wrap{overflow:auto}.journal{width:100%;border-collapse:collapse;min-width:760px}.journal th,.journal td{text-align:left;padding:12px 10px;border-bottom:1px solid #edf0f5;font-size:13px}.journal th{font-size:11px;text-transform:uppercase;color:#8490a8}.pill{display:inline-block;padding:4px 8px;border-radius:99px;background:#edf2ff;color:#3555ad;font-size:11px;font-weight:800}.pill.reversed{background:#f3f3f3;color:#777}.empty{text-align:center;padding:48px 20px;color:#8490a8}.form-note{font-size:12px;color:#8490a8;line-height:1.45}.hidden-field{display:none}
+  @media(max-width:900px){.fin{padding:12px}.fin-head{align-items:flex-start;flex-direction:column}.fin-grid{grid-template-columns:1fr 1fr}.fin-layout{grid-template-columns:1fr}.accounts{grid-template-columns:1fr}.fin-panel{padding:15px}}
+  @media(max-width:500px){.fin-grid{grid-template-columns:1fr}.two{grid-template-columns:1fr}.fin h1{font-size:25px}.fin-value{font-size:22px}}
+</style>
+<main class="fin">
+  <header class="fin-head"><div><h1>Finance</h1><div class="muted">A clean ledger for Al Karamat · Sole owner</div></div><form method="get"><label class="fin-label">Reporting month</label><input type="month" name="period" value="{{ period }}" onchange="this.form.submit()" style="display:block;margin-top:5px;border:1px solid #dce2ed;border-radius:9px;padding:8px"></form></header>
+  {% if finance_error %}<div class="notice error">Finance could not load: {{ finance_error }}</div>{% endif %}
+  {% with messages = get_flashed_messages(with_categories=true) %}{% for category,message in messages %}<div class="notice{% if category == 'error' %} error{% endif %}">{{ message }}</div>{% endfor %}{% endwith %}
+  <section class="fin-grid">
+    <article class="fin-card"><div class="fin-label">Bank</div><div class="fin-value">PKR {{ finance.by_key.get('bank', {}).get('balance', 0)|format_currency }}</div></article>
+    <article class="fin-card"><div class="fin-label">Cash</div><div class="fin-value">PKR {{ finance.by_key.get('cash', {}).get('balance', 0)|format_currency }}</div></article>
+    <article class="fin-card"><div class="fin-label">DigiDokaan receivable</div><div class="fin-value">PKR {{ finance.by_key.get('digidokaan_receivable', {}).get('balance', 0)|format_currency }}</div></article>
+    <article class="fin-card"><div class="fin-label">Accounts payable</div><div class="fin-value">PKR {{ finance.by_key.get('accounts_payable', {}).get('balance', 0)|format_currency }}</div></article>
+    <article class="fin-card"><div class="fin-label">Income · {{ period }}</div><div class="fin-value positive">PKR {{ finance.income|format_currency }}</div></article>
+    <article class="fin-card"><div class="fin-label">Business expenses · {{ period }}</div><div class="fin-value negative">PKR {{ finance.expenses|format_currency }}</div></article>
+    <article class="fin-card"><div class="fin-label">Operating profit · {{ period }}</div><div class="fin-value {% if finance.profit < 0 %}negative{% else %}positive{% endif %}">PKR {{ finance.profit|format_currency }}</div></article>
+    <article class="fin-card"><div class="fin-label">Owner drawings</div><div class="fin-value">PKR {{ finance.by_key.get('owner_drawings', {}).get('balance', 0)|format_currency }}</div></article>
+  </section>
+  <section class="fin-layout">
+    <div>
+      <article class="fin-panel">
+        <h2>Post transaction</h2>
+        <form class="fin-form" method="post" action="/finance/transactions" id="financeForm">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <label>Transaction type<select name="kind" id="finKind" required>
+            <option value="income">Sales or other income received</option><option value="expense">Expense paid</option><option value="owner_contribution">Owner contribution</option><option value="owner_drawing">Owner drawing</option><option value="transfer">Transfer between Bank and Cash</option><option value="supplier_bill">Supplier bill / stock received</option><option value="supplier_payment">Pay supplier</option><option value="courier_receivable">Delivered COD due from DigiDokaan</option><option value="courier_settlement">DigiDokaan settlement received</option>
+          </select></label>
+          <div class="two"><label>Date<input type="date" name="transaction_date" value="{{ today }}" required></label><label>Amount<input type="number" name="amount" min="0.01" step="0.01" inputmode="decimal" required></label></div>
+          <label id="cashWrap">Paid through<select name="cash_account" id="cashAccount"><option value="bank">Bank</option><option value="cash">Cash</option></select></label>
+          <label id="categoryWrap">Category<select name="category" id="category"></select></label>
+          <label id="destinationWrap" class="hidden-field">Transfer to<select name="destination" id="destination"><option value="cash">Cash</option><option value="bank">Bank</option></select></label>
+          <label id="deductionWrap" class="hidden-field">Courier deductions<input type="number" name="deduction" min="0" step="0.01" value="0" inputmode="decimal"></label>
+          <label>Description<textarea name="description" placeholder="What was this transaction for?" required></textarea></label>
+          <label>Reference (optional)<input name="reference" placeholder="Invoice, order, tracking or cheque number"></label>
+          <button class="fin-btn" type="submit">Post transaction</button>
+          <div class="form-note">Posted transactions cannot be edited or deleted. If a mistake is made, reverse it and post the corrected transaction.</div>
+        </form>
+      </article>
+      <article class="fin-panel" style="margin-top:18px"><h2>Account balances</h2><div class="accounts">{% for account in finance.accounts %}<div class="account"><span>{{ account.code }} · {{ account.name }}</span><strong>{{ account.balance|format_currency }}</strong></div>{% endfor %}</div></article>
+    </div>
+    <article class="fin-panel"><h2>Transaction history</h2><div class="journal-wrap">{% if finance.journals %}<table class="journal"><thead><tr><th>Date</th><th>Description</th><th>From → To</th><th>Reference</th><th>Amount</th><th>Status</th><th></th></tr></thead><tbody>{% for row in finance.journals %}<tr><td>{{ row.transaction_date }}</td><td><strong>{{ row.description }}</strong><br><span class="muted">{{ row.source }}</span></td><td>{{ row.credit_accounts }} → {{ row.debit_accounts }}</td><td>{{ row.reference or '—' }}</td><td><strong>PKR {{ row.amount|format_currency }}</strong></td><td><span class="pill{% if row.status == 'reversed' %} reversed{% endif %}">{{ row.status|title }}</span></td><td>{% if row.status == 'posted' and not row.reversal_of %}<form method="post" action="/finance/transactions/{{ row.public_id }}/reverse" onsubmit="return confirm('Reverse this transaction? Its history will be preserved.');"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="fin-btn secondary">Reverse</button></form>{% endif %}</td></tr>{% endfor %}</tbody></table>{% else %}<div class="empty"><strong>No finance entries yet.</strong><br>Start with the actual Bank and Cash opening balances as owner contributions.</div>{% endif %}</div></article>
+  </section>
+</main>
+<script>
+const options={income:[['sales_revenue','Sales revenue'],['delivery_income','Delivery income'],['other_income','Other income']],expense:[['advertising','Advertising'],['salaries','Salaries'],['logistics','Logistics & courier'],['packaging','Packaging'],['software','Software & subscriptions'],['cost_of_goods','Cost of goods sold'],['other_expense','Other expense']],supplier_bill:[['inventory','Inventory / stock'],['advertising','Advertising'],['packaging','Packaging'],['software','Software & subscriptions'],['logistics','Logistics & courier'],['other_expense','Other expense']]};
+function updateFinanceForm(){const kind=document.getElementById('finKind').value,cat=document.getElementById('category'),catWrap=document.getElementById('categoryWrap'),dest=document.getElementById('destinationWrap'),ded=document.getElementById('deductionWrap'),cash=document.getElementById('cashWrap');cat.innerHTML='';(options[kind]||[]).forEach(([v,t])=>cat.add(new Option(t,v)));catWrap.style.display=options[kind]?'block':'none';dest.style.display=kind==='transfer'?'block':'none';ded.style.display=kind==='courier_settlement'?'block':'none';cash.style.display=['supplier_bill','courier_receivable'].includes(kind)?'none':'block'}
+document.getElementById('finKind').addEventListener('change',updateFinanceForm);document.getElementById('cashAccount').addEventListener('change',e=>{document.getElementById('destination').value=e.target.value==='bank'?'cash':'bank'});updateFinanceForm();
+</script>
+{% endblock %}

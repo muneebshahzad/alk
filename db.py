@@ -106,6 +106,81 @@ def _ensure_employee_passkeys_table(cur):
     )
 
 
+def _ensure_finance_tables(cur):
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS finance_accounts (
+            id BIGSERIAL PRIMARY KEY,
+            code TEXT NOT NULL UNIQUE,
+            name TEXT NOT NULL,
+            account_type TEXT NOT NULL CHECK (account_type IN ('asset','liability','equity','income','expense')),
+            normal_side CHAR(1) NOT NULL CHECK (normal_side IN ('D','C')),
+            system_key TEXT UNIQUE,
+            active BOOLEAN NOT NULL DEFAULT TRUE,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        CREATE TABLE IF NOT EXISTS finance_journals (
+            id BIGSERIAL PRIMARY KEY,
+            public_id UUID NOT NULL UNIQUE,
+            transaction_date DATE NOT NULL,
+            reference TEXT,
+            description TEXT NOT NULL,
+            source TEXT NOT NULL DEFAULT 'manual',
+            external_id TEXT,
+            status TEXT NOT NULL DEFAULT 'posted' CHECK (status IN ('posted','reversed')),
+            reversal_of BIGINT REFERENCES finance_journals(id),
+            created_by TEXT NOT NULL DEFAULT 'Owner',
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            reversed_at TIMESTAMPTZ
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS finance_journals_source_external_idx
+            ON finance_journals(source, external_id) WHERE external_id IS NOT NULL;
+        CREATE TABLE IF NOT EXISTS finance_lines (
+            id BIGSERIAL PRIMARY KEY,
+            journal_id BIGINT NOT NULL REFERENCES finance_journals(id) ON DELETE RESTRICT,
+            account_id BIGINT NOT NULL REFERENCES finance_accounts(id) ON DELETE RESTRICT,
+            debit NUMERIC(16,2) NOT NULL DEFAULT 0 CHECK (debit >= 0),
+            credit NUMERIC(16,2) NOT NULL DEFAULT 0 CHECK (credit >= 0),
+            memo TEXT,
+            CHECK ((debit > 0 AND credit = 0) OR (credit > 0 AND debit = 0))
+        );
+        CREATE INDEX IF NOT EXISTS finance_lines_journal_idx ON finance_lines(journal_id);
+        CREATE INDEX IF NOT EXISTS finance_lines_account_idx ON finance_lines(account_id);
+        """
+    )
+    accounts = (
+        ('1000', 'Bank', 'asset', 'D', 'bank'),
+        ('1010', 'Cash', 'asset', 'D', 'cash'),
+        ('1100', 'DigiDokaan Receivable', 'asset', 'D', 'digidokaan_receivable'),
+        ('1200', 'Inventory', 'asset', 'D', 'inventory'),
+        ('2000', 'Accounts Payable', 'liability', 'C', 'accounts_payable'),
+        ('3000', "Owner's Equity", 'equity', 'C', 'owner_equity'),
+        ('3100', "Owner's Drawings", 'equity', 'D', 'owner_drawings'),
+        ('4000', 'Sales Revenue', 'income', 'C', 'sales_revenue'),
+        ('4010', 'Delivery Income', 'income', 'C', 'delivery_income'),
+        ('4090', 'Other Income', 'income', 'C', 'other_income'),
+        ('5000', 'Cost of Goods Sold', 'expense', 'D', 'cost_of_goods'),
+        ('5100', 'Advertising', 'expense', 'D', 'advertising'),
+        ('5110', 'Salaries', 'expense', 'D', 'salaries'),
+        ('5120', 'Logistics & Courier', 'expense', 'D', 'logistics'),
+        ('5130', 'Packaging', 'expense', 'D', 'packaging'),
+        ('5140', 'Software & Subscriptions', 'expense', 'D', 'software'),
+        ('5190', 'Other Expense', 'expense', 'D', 'other_expense')
+    )
+    cur.executemany(
+        """
+        INSERT INTO finance_accounts (code, name, account_type, normal_side, system_key)
+        VALUES (%s, %s, %s, %s, %s)
+        ON CONFLICT (code) DO UPDATE SET
+            name = EXCLUDED.name,
+            account_type = EXCLUDED.account_type,
+            normal_side = EXCLUDED.normal_side,
+            system_key = EXCLUDED.system_key
+        """,
+        accounts,
+    )
+
+
 def get_conn():
     url = (
         os.getenv("DATABASE_URL", "")
@@ -160,6 +235,7 @@ def init_db():
                 _ensure_aghaje_order_item_cost_overrides_table(cur)
                 _ensure_admin_passkeys_table(cur)
                 _ensure_employee_passkeys_table(cur)
+                _ensure_finance_tables(cur)
             conn.commit()
         _set_last_db_error("")
         print("DB initialized.")
