@@ -119,6 +119,7 @@ def _ensure_finance_tables(cur):
             active BOOLEAN NOT NULL DEFAULT TRUE,
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         );
+        ALTER TABLE finance_accounts ADD COLUMN IF NOT EXISTS currency TEXT NOT NULL DEFAULT 'PKR';
         CREATE TABLE IF NOT EXISTS finance_journals (
             id BIGSERIAL PRIMARY KEY,
             public_id UUID NOT NULL UNIQUE,
@@ -144,15 +145,15 @@ def _ensure_finance_tables(cur):
             memo TEXT,
             CHECK ((debit > 0 AND credit = 0) OR (credit > 0 AND debit = 0))
         );
+        ALTER TABLE finance_lines ADD COLUMN IF NOT EXISTS native_debit NUMERIC(16,2) NOT NULL DEFAULT 0;
+        ALTER TABLE finance_lines ADD COLUMN IF NOT EXISTS native_credit NUMERIC(16,2) NOT NULL DEFAULT 0;
         CREATE INDEX IF NOT EXISTS finance_lines_journal_idx ON finance_lines(journal_id);
         CREATE INDEX IF NOT EXISTS finance_lines_account_idx ON finance_lines(account_id);
         """
     )
     accounts = (
         ('1000', 'Bank', 'asset', 'D', 'bank'),
-        ('1010', 'Cash', 'asset', 'D', 'cash'),
-        ('1100', 'DigiDokaan Receivable', 'asset', 'D', 'digidokaan_receivable'),
-        ('1200', 'Inventory', 'asset', 'D', 'inventory'),
+        ('1050', 'Payoneer', 'asset', 'D', 'payoneer_usd'),
         ('2000', 'Accounts Payable', 'liability', 'C', 'accounts_payable'),
         ('3000', "Owner's Equity", 'equity', 'C', 'owner_equity'),
         ('3100', "Owner's Drawings", 'equity', 'D', 'owner_drawings'),
@@ -179,6 +180,8 @@ def _ensure_finance_tables(cur):
         """,
         accounts,
     )
+    cur.execute("UPDATE finance_accounts SET currency='USD' WHERE system_key='payoneer_usd'")
+    cur.execute("UPDATE finance_accounts SET active=FALSE WHERE system_key IN ('cash','inventory','digidokaan_receivable')")
 
 
 def get_conn():

@@ -17,10 +17,10 @@ def totals(lines):
         ("owner_contribution", {}),
         ("owner_drawing", {}),
         ("transfer", {"destination": "cash"}),
-        ("supplier_bill", {"category": "inventory"}),
+        ("supplier_bill", {"category": "other_expense"}),
         ("supplier_payment", {}),
-        ("courier_receivable", {}),
-        ("courier_settlement", {"deduction": "125.50"}),
+        ("digidokaan_cheque", {"deduction": "125.50"}),
+        ("call_courier_invoice", {"deduction": "125.50"}),
     ],
 )
 def test_guided_entries_are_balanced(kind, kwargs):
@@ -29,12 +29,12 @@ def test_guided_entries_are_balanced(kind, kwargs):
     assert debit == credit == Decimal("1000.00")
 
 
-def test_courier_settlement_splits_bank_and_deduction():
-    lines = build_entry("courier_settlement", "1000", deduction="125.50")
+def test_courier_invoice_splits_bank_and_deduction():
+    lines = build_entry("digidokaan_cheque", "1000", deduction="125.50")
     assert lines == [
         ("bank", Decimal("874.50"), 0),
         ("logistics", Decimal("125.50"), 0),
-        ("digidokaan_receivable", 0, Decimal("1000.00")),
+        ("sales_revenue", 0, Decimal("1000.00")),
     ]
 
 
@@ -57,5 +57,12 @@ def test_transfer_requires_different_accounts():
 
 def test_courier_deduction_cannot_consume_settlement():
     with pytest.raises(ValueError):
-        build_entry("courier_settlement", "100", deduction="100")
+        build_entry("digidokaan_cheque", "100", deduction="100")
 
+
+def test_payoneer_keeps_usd_amount_and_pkr_ledger_value():
+    lines = build_entry("expense", "27950", cash_account="payoneer_usd", category="advertising", foreign_amount="100")
+    assert lines == [
+        ("advertising", Decimal("27950.00"), 0, 0, 0),
+        ("payoneer_usd", 0, Decimal("27950.00"), 0, Decimal("100.00")),
+    ]

@@ -79,7 +79,7 @@ from digidokaan import (
     match_trax_city,
     submit_shipper_advice,
 )
-from finance import build_entry, finance_dashboard, post_journal, reverse_journal
+from finance import build_entry, finance_dashboard, money, post_journal, reverse_journal
 
 app = Flask(__name__)
 app.debug = True
@@ -4017,6 +4017,24 @@ def finance_page():
         print(f"Finance dashboard error: {finance_error}")
         dashboard = {"accounts": [], "journals": [], "by_key": {}, "income": 0, "expenses": 0, "profit": 0}
         error = str(finance_error)
+    unpaid_cheques = {"count": 0, "amount": 0, "rows": []}
+    try:
+        async def load_finance_cheques():
+            async with aiohttp.ClientSession() as client:
+                return await fetch_digidokaan_payments(client)
+        payment_dashboard = build_digidokaan_payment_dashboard(asyncio.run(load_finance_cheques()))
+        paid_words = ("paid", "cleared", "completed", "disbursed", "transferred", "success")
+        for cheque in payment_dashboard.get("cheques", []):
+            status = str(cheque.get("status") or cheque.get("settlement_status") or "").strip().casefold()
+            is_unpaid = "unpaid" in status or "not paid" in status or not any(word in status for word in paid_words)
+            amount = parse_money(cheque.get("amount") or cheque.get("cheque_amount") or cheque.get("settlement_amount"), 0)
+            if is_unpaid and amount > 0:
+                unpaid_cheques["rows"].append(cheque)
+                unpaid_cheques["amount"] += amount
+        unpaid_cheques["count"] = len(unpaid_cheques["rows"])
+        unpaid_cheques["amount"] = round(unpaid_cheques["amount"], 2)
+    except Exception as cheque_error:
+        print(f"Finance unpaid cheque fetch error: {cheque_error}")
     return render_template(
         "finance.html",
         finance=dashboard,
@@ -4024,6 +4042,7 @@ def finance_page():
         csrf_token=_finance_csrf_token(),
         today=datetime.now().date().isoformat(),
         period=(request.args.get("period") or datetime.now().strftime("%Y-%m")),
+        unpaid_cheques=unpaid_cheques,
     )
 
 
@@ -4034,13 +4053,24 @@ def finance_create_transaction():
     _require_finance_csrf()
     try:
         kind = (request.form.get("kind") or "").strip()
+        cash_account = (request.form.get("cash_account") or "bank").strip()
+        if kind == "supplier_bill":
+            cash_account = "bank"
+        submitted_amount = money(request.form.get("amount"))
+        foreign_amount = 0
+        if cash_account == "payoneer_usd" or (request.form.get("destination") or "").strip() == "payoneer_usd":
+            foreign_amount = submitted_amount
+            submitted_amount = money(submitted_amount * money(request.form.get("exchange_rate")))
+        if kind in {"digidokaan_cheque", "call_courier_invoice"}:
+            cash_account = "bank"
         lines = build_entry(
             kind,
-            request.form.get("amount"),
-            cash_account=(request.form.get("cash_account") or "bank").strip(),
+            submitted_amount,
+            cash_account=cash_account,
             category=(request.form.get("category") or "").strip() or None,
             destination=(request.form.get("destination") or "").strip() or None,
             deduction=request.form.get("deduction") or 0,
+            foreign_amount=foreign_amount,
         )
         public_id = post_journal(
             request.form.get("transaction_date") or datetime.now().date(),

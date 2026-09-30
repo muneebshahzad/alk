@@ -20,36 +20,46 @@ def money(value):
     return result
 
 
-def build_entry(kind, amount, cash_account="bank", category=None, destination=None, deduction=0):
+def build_entry(kind, amount, cash_account="bank", category=None, destination=None, deduction=0, foreign_amount=0):
     amount = money(amount)
     deduction_amount = Decimal("0.00") if not deduction else money(deduction)
     if kind == "income":
-        return [(cash_account, amount, 0), (category or "sales_revenue", 0, amount)]
-    if kind == "expense":
-        return [(category or "other_expense", amount, 0), (cash_account, 0, amount)]
-    if kind == "owner_contribution":
-        return [(cash_account, amount, 0), ("owner_equity", 0, amount)]
-    if kind == "owner_drawing":
-        return [("owner_drawings", amount, 0), (cash_account, 0, amount)]
-    if kind == "transfer":
+        lines = [(cash_account, amount, 0), (category or "sales_revenue", 0, amount)]
+    elif kind == "expense":
+        lines = [(category or "other_expense", amount, 0), (cash_account, 0, amount)]
+    elif kind == "owner_contribution":
+        lines = [(cash_account, amount, 0), ("owner_equity", 0, amount)]
+    elif kind == "owner_drawing":
+        lines = [("owner_drawings", amount, 0), (cash_account, 0, amount)]
+    elif kind == "transfer":
         if not destination or destination == cash_account:
             raise ValueError("Choose two different accounts for a transfer.")
-        return [(destination, amount, 0), (cash_account, 0, amount)]
-    if kind == "supplier_bill":
-        return [(category or "inventory", amount, 0), ("accounts_payable", 0, amount)]
-    if kind == "supplier_payment":
-        return [("accounts_payable", amount, 0), (cash_account, 0, amount)]
-    if kind == "courier_receivable":
-        return [("digidokaan_receivable", amount, 0), ("sales_revenue", 0, amount)]
-    if kind == "courier_settlement":
+        lines = [(destination, amount, 0), (cash_account, 0, amount)]
+    elif kind == "supplier_bill":
+        lines = [(category or "other_expense", amount, 0), ("accounts_payable", 0, amount)]
+    elif kind == "supplier_payment":
+        lines = [("accounts_payable", amount, 0), (cash_account, 0, amount)]
+    elif kind in {"digidokaan_cheque", "call_courier_invoice"}:
         if deduction_amount >= amount:
-            raise ValueError("Courier deductions must be less than the settlement amount.")
+            raise ValueError("Courier deductions must be less than the invoice amount.")
         lines = [(cash_account, amount - deduction_amount, 0)]
         if deduction_amount:
             lines.append(("logistics", deduction_amount, 0))
-        lines.append(("digidokaan_receivable", 0, amount))
+        lines.append(("sales_revenue", 0, amount))
+    else:
+        raise ValueError("Unsupported transaction type.")
+
+    payoneer_involved = cash_account == "payoneer_usd" or destination == "payoneer_usd"
+    if not payoneer_involved:
         return lines
-    raise ValueError("Unsupported transaction type.")
+    native = money(foreign_amount)
+    enriched = []
+    for account, debit, credit in lines:
+        if account == "payoneer_usd":
+            enriched.append((account, debit, credit, native if debit else 0, native if credit else 0))
+        else:
+            enriched.append((account, debit, credit, 0, 0))
+    return enriched
 
 
 def _account_map(cur):
@@ -60,14 +70,15 @@ def _account_map(cur):
 def post_journal(transaction_date, description, reference, lines, source="manual", external_id=None):
     if not description or not str(description).strip():
         raise ValueError("Description is required.")
-    debit = sum(Decimal(str(line[1])) for line in lines)
-    credit = sum(Decimal(str(line[2])) for line in lines)
+    normalized = [tuple(line) + (0, 0) if len(line) == 3 else tuple(line) for line in lines]
+    debit = sum(Decimal(str(line[1])) for line in normalized)
+    credit = sum(Decimal(str(line[2])) for line in normalized)
     if debit != credit or debit <= 0:
         raise ValueError("Transaction is not balanced.")
     with get_conn() as conn:
         with conn.cursor() as cur:
             accounts = _account_map(cur)
-            missing = [line[0] for line in lines if line[0] not in accounts]
+            missing = [line[0] for line in normalized if line[0] not in accounts]
             if missing:
                 raise ValueError("Unknown account: " + ", ".join(missing))
             public_id = str(uuid4())
@@ -80,9 +91,10 @@ def post_journal(transaction_date, description, reference, lines, source="manual
             )
             journal_id = cur.fetchone()[0]
             cur.executemany(
-                """INSERT INTO finance_lines (journal_id, account_id, debit, credit)
-                   VALUES (%s,%s,%s,%s)""",
-                [(journal_id, accounts[key], debit, credit) for key, debit, credit in lines],
+                """INSERT INTO finance_lines (journal_id, account_id, debit, credit, native_debit, native_credit)
+                   VALUES (%s,%s,%s,%s,%s,%s)""",
+                [(journal_id, accounts[key], debit, credit, native_debit, native_credit)
+                 for key, debit, credit, native_debit, native_credit in normalized],
             )
         conn.commit()
     return public_id
@@ -98,11 +110,11 @@ def reverse_journal(public_id, reversal_date=None):
             if original["status"] == "reversed":
                 raise ValueError("This transaction has already been reversed.")
             cur.execute(
-                """SELECT a.system_key, l.debit, l.credit
+                """SELECT a.system_key, l.debit, l.credit, l.native_debit, l.native_credit
                    FROM finance_lines l JOIN finance_accounts a ON a.id=l.account_id
                    WHERE l.journal_id=%s ORDER BY l.id""", (original["id"],)
             )
-            lines = [(row["system_key"], row["credit"], row["debit"]) for row in cur.fetchall()]
+            lines = [(row["system_key"], row["credit"], row["debit"], row["native_credit"], row["native_debit"]) for row in cur.fetchall()]
             reversal_id = str(uuid4())
             cur.execute(
                 """INSERT INTO finance_journals
@@ -114,8 +126,11 @@ def reverse_journal(public_id, reversal_date=None):
             new_id = cur.fetchone()[0]
             accounts = _account_map(cur)
             cur.executemany(
-                "INSERT INTO finance_lines (journal_id, account_id, debit, credit) VALUES (%s,%s,%s,%s)",
-                [(new_id, accounts[key], debit, credit) for key, debit, credit in lines],
+                """INSERT INTO finance_lines
+                   (journal_id, account_id, debit, credit, native_debit, native_credit)
+                   VALUES (%s,%s,%s,%s,%s,%s)""",
+                [(new_id, accounts[key], debit, credit, native_debit, native_credit)
+                 for key, debit, credit, native_debit, native_credit in lines],
             )
             cur.execute("UPDATE finance_journals SET status='reversed', reversed_at=NOW() WHERE id=%s", (original["id"],))
         conn.commit()
@@ -126,15 +141,18 @@ def finance_dashboard(period_start=None):
     with get_conn() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(
-                """SELECT a.code, a.name, a.account_type, a.normal_side, a.system_key,
-                          COALESCE(SUM(l.debit),0) debit, COALESCE(SUM(l.credit),0) credit
+                """SELECT a.code, a.name, a.account_type, a.normal_side, a.system_key, a.currency,
+                          COALESCE(SUM(l.debit),0) debit, COALESCE(SUM(l.credit),0) credit,
+                          COALESCE(SUM(l.native_debit),0) native_debit,
+                          COALESCE(SUM(l.native_credit),0) native_credit
                    FROM finance_accounts a LEFT JOIN finance_lines l ON l.account_id=a.id
-                   GROUP BY a.id ORDER BY a.code"""
+                   WHERE a.active=TRUE GROUP BY a.id ORDER BY a.code"""
             )
             accounts = []
             for row in cur.fetchall():
                 row = dict(row)
                 row["balance"] = row["debit"] - row["credit"] if row["normal_side"] == "D" else row["credit"] - row["debit"]
+                row["native_balance"] = row["native_debit"] - row["native_credit"] if row["normal_side"] == "D" else row["native_credit"] - row["native_debit"]
                 accounts.append(row)
             cur.execute(
                 """SELECT a.account_type,
