@@ -1,12 +1,17 @@
 import asyncio
 import html
+import json
 import os
 import re
 import ssl
+import threading
 import time
+from difflib import SequenceMatcher
+from html.parser import HTMLParser
 
 import certifi
 from aiohttp import ClientTimeout
+import requests
 
 
 _token = ""
@@ -17,12 +22,230 @@ _payments_cache = None
 _payments_cache_expires_at = 0.0
 _shipper_advice_cache = None
 _shipper_advice_cache_expires_at = 0.0
+_booking_metadata_cache = None
+_booking_metadata_expires_at = 0.0
+_booking_lock = threading.Lock()
 _TOKEN_TTL_SECONDS = 6 * 60 * 60
 _ACTIVE_CACHE_SECONDS = 5 * 60
 _TERMINAL_CACHE_SECONDS = 24 * 60 * 60
 _OPERATIONS_REFRESH_SECONDS = 6 * 60 * 60
 _TERMINAL_STATUSES = {"delivered", "returned", "return delivered", "cancelled"}
 _SSL_CONTEXT = ssl.create_default_context(cafile=certifi.where())
+
+
+class _DigiDokaanPageParser(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.csrf = ""
+        self.inputs = {}
+        self.options = {}
+        self._select_id = ""
+
+    def handle_starttag(self, tag, attrs):
+        values = dict(attrs)
+        if tag == "meta" and values.get("name") == "csrf-token":
+            self.csrf = html.unescape(values.get("content") or "")
+        elif tag == "input" and values.get("id"):
+            self.inputs[values["id"]] = html.unescape(values.get("value") or "")
+        elif tag == "select":
+            self._select_id = values.get("id") or values.get("name") or ""
+        elif tag == "option" and self._select_id:
+            self.options.setdefault(self._select_id, []).append(html.unescape(values.get("value") or ""))
+
+    def handle_endtag(self, tag):
+        if tag == "select":
+            self._select_id = ""
+
+
+def _web_login_session(config):
+    session = requests.Session()
+    login_page = session.get(config["web_url"] + "/", timeout=30)
+    login_page.raise_for_status()
+    parser = _DigiDokaanPageParser()
+    parser.feed(login_page.text)
+    if not parser.csrf:
+        raise RuntimeError("DigiDokaan login token was not found")
+    digits = re.sub(r"\D", "", config["phone"])
+    number = digits[2:] if digits.startswith("92") else digits.lstrip("0")
+    headers = {"Accept": "application/json", "X-CSRF-TOKEN": parser.csrf, "X-Requested-With": "XMLHttpRequest"}
+    send = session.post(
+        config["web_url"] + "/user/send-otp",
+        data={"country_code": "+92", "number": number}, headers=headers, timeout=30,
+    )
+    send.raise_for_status()
+    login = session.post(
+        config["web_url"] + "/user/login-new-password",
+        data={"password": config["password"], "number": "+92" + number}, headers=headers, timeout=30,
+    )
+    result = login.json()
+    if login.status_code != 200 or str(result.get("code")) != "200":
+        raise RuntimeError("DigiDokaan web login failed")
+    session.get(config["web_url"] + "/", timeout=30).raise_for_status()
+    return session
+
+
+def _parse_booking_metadata(page_html):
+    parser = _DigiDokaanPageParser()
+    parser.feed(page_html)
+    try:
+        cities = json.loads(parser.inputs.get("courier_cities_array") or "[]")
+    except (TypeError, ValueError):
+        cities = []
+    pickups = []
+    for raw in parser.options.get("normal_pickup_location", []):
+        try:
+            pickup = json.loads(raw)
+        except (TypeError, ValueError):
+            continue
+        if "5" in [str(value) for value in pickup.get("gateways") or []]:
+            pickups.append(pickup)
+    trax_cities = []
+    for city in cities:
+        if "trax" not in [str(value).casefold() for value in city.get("courier") or []]:
+            continue
+        raw_services = city.get("trax_shipment_type")
+        try:
+            services = json.loads(raw_services) if isinstance(raw_services, str) else list(raw_services or [])
+        except (TypeError, ValueError):
+            services = []
+        trax_cities.append({
+            "id": str(city.get("id") or ""),
+            "name": str(city.get("city_name") or "").strip(),
+            "services": [str(value).upper() for value in services],
+        })
+    business = {}
+    try:
+        business = json.loads(parser.inputs.get("business_detail") or "{}")
+    except (TypeError, ValueError):
+        pass
+    return {"csrf": parser.csrf, "cities": trax_cities, "pickups": pickups, "business": business}
+
+
+def fetch_booking_metadata(force=False):
+    global _booking_metadata_cache, _booking_metadata_expires_at
+    if not force and _booking_metadata_cache and _booking_metadata_expires_at > time.monotonic():
+        return _booking_metadata_cache
+    config = configuration()
+    if not config:
+        raise RuntimeError("DigiDokaan booking credentials are not configured")
+    session = _web_login_session(config)
+    page = session.get(config["web_url"] + "/manage/book-packet-show", timeout=45)
+    page.raise_for_status()
+    metadata = _parse_booking_metadata(page.text)
+    if not metadata["cities"] or not metadata["pickups"]:
+        raise RuntimeError("DigiDokaan Trax cities or pickup address are unavailable")
+    _booking_metadata_cache = metadata
+    _booking_metadata_expires_at = time.monotonic() + _OPERATIONS_REFRESH_SECONDS
+    return metadata
+
+
+def match_trax_city(city_name, cities):
+    wanted = re.sub(r"[^a-z0-9]", "", str(city_name or "").casefold())
+    if not wanted:
+        return None
+    normalized = [(re.sub(r"[^a-z0-9]", "", city["name"].casefold()), city) for city in cities]
+    exact = next((city for key, city in normalized if key == wanted), None)
+    if exact:
+        return exact
+    contained = [city for key, city in normalized if wanted in key or key in wanted]
+    if len(contained) == 1:
+        return contained[0]
+    scored = sorted(((SequenceMatcher(None, wanted, key).ratio(), city) for key, city in normalized), reverse=True, key=lambda row: row[0])
+    return scored[0][1] if scored and scored[0][0] >= 0.82 else None
+
+
+def create_trax_booking(payload):
+    """Create one Trax shipment through DigiDokaan's authenticated merchant workflow."""
+    config = configuration()
+    if not config:
+        raise RuntimeError("DigiDokaan booking credentials are not configured")
+    with _booking_lock:
+        session = _web_login_session(config)
+        page = session.get(config["web_url"] + "/manage/book-packet-show", timeout=45)
+        page.raise_for_status()
+        metadata = _parse_booking_metadata(page.text)
+        pickup = next((row for row in metadata["pickups"] if str(row.get("pickup_address_id")) == str(payload.get("pickup_address_id"))), None)
+        pickup = pickup or (metadata["pickups"][0] if metadata["pickups"] else None)
+        if not pickup:
+            raise RuntimeError("No Trax pickup address is approved in DigiDokaan")
+        api_session = requests.Session()
+        token_response = api_session.post(
+            config["base_url"] + "/api/auth/login",
+            json={"phone": config["phone"], "password": config["password"]},
+            headers={"Accept": "application/json"}, timeout=30,
+        )
+        token_response.raise_for_status()
+        token = token_response.json().get("token")
+        shipper_response = api_session.post(
+            config["base_url"] + "/api/courier/get_courier_shipper",
+            json={"phone": config["phone"], "gateway_id": "5", "pickup_address_id": pickup["pickup_address_id"], "business_name": pickup.get("name") or "Al Karamat"},
+            headers={"Accept": "application/json", "Authorization": "Bearer " + str(token or "")}, timeout=30,
+        )
+        shipper_body = shipper_response.json()
+        shippers = shipper_body.get("data") if isinstance(shipper_body, dict) else None
+        if shipper_response.status_code != 200 or str(shipper_body.get("code")) != "200" or not shippers:
+            raise RuntimeError(shipper_body.get("error") or "Trax pickup is not approved")
+        shipper = shippers[0]
+        service_codes = {"OVERNIGHT": "1", "DETAIN": "2", "OVERLAND": "3"}
+        service = str(payload.get("service_type") or "OVERNIGHT").upper()
+        form = {
+            "origin": pickup.get("city") or "Lahore",
+            "destination_city": str(payload.get("destination_city_id") or ""),
+            "consignee_phone": str(payload.get("customer_phone") or ""),
+            "consignee_phone_two": "",
+            "consignee_name": str(payload.get("customer_name") or ""),
+            "piece": str(payload.get("pieces") or 1),
+            "quantity": str(payload.get("quantity") or payload.get("pieces") or 1),
+            "consignee_address": str(payload.get("customer_address") or ""),
+            "net_weight": str(payload.get("weight") or "0.5"),
+            "cod_amount": str(payload.get("cod_amount") or 0),
+            "parcel_value": str(payload.get("parcel_value") or payload.get("cod_amount") or 0),
+            "other_product": "true",
+            "product_name": str(payload.get("product_name") or "Clothing"),
+            "reference_number": str(payload.get("reference_number") or "")[:20],
+            "special_instruction": str(payload.get("special_instruction") or ""),
+            "normal_pickup_location": json.dumps(pickup, separators=(",", ":")),
+            "pickup_location": str(shipper.get("shipper_id") or ""),
+            "shipper_phone": "0" + re.sub(r"\D", "", str(shipper.get("phone") or config["phone"]))[-10:],
+            "shipper_name": str(shipper.get("shipment_name") or pickup.get("name") or "Al Karamat"),
+            "gateway_id": "5",
+            "shipment_type": service_codes.get(service, "1"),
+        }
+        response = session.post(
+            config["web_url"] + "/manage/save-book-packet", data=form,
+            headers={"Accept": "application/json", "X-CSRF-TOKEN": metadata["csrf"], "X-Requested-With": "XMLHttpRequest"}, timeout=60,
+        )
+        try:
+            body = response.json()
+        except ValueError:
+            body = {}
+        if response.status_code != 200 or str(body.get("code")) != "200":
+            raise RuntimeError(body.get("error") or body.get("msg") or "DigiDokaan rejected the Trax booking")
+        result = body.get("data") if isinstance(body.get("data"), dict) else body
+        order_no = result.get("order_no") or result.get("order_id") or result.get("id")
+        tracking_no = result.get("tracking_no") or result.get("tracking_number") or result.get("tracking")
+        return {"order_no": str(order_no or ""), "tracking_no": str(tracking_no or ""), "raw": body}
+
+
+def fetch_trax_label(order_no, tracking_no):
+    config = configuration()
+    if not config:
+        raise RuntimeError("DigiDokaan booking credentials are not configured")
+    session = _web_login_session(config)
+    page = session.get(config["web_url"] + f"/orders/order-detail/{order_no}", timeout=30)
+    page.raise_for_status()
+    parser = _DigiDokaanPageParser()
+    parser.feed(page.text)
+    response = session.post(
+        config["web_url"] + "/orders/generate-load-sheet",
+        data={"orders[]": order_no, "tracking_numbers[]": tracking_no, "gateway_id": "5", "order_type_download": "label", "order_type": "2", "phone": config["phone"]},
+        headers={"Accept": "application/json", "X-CSRF-TOKEN": parser.csrf, "X-Requested-With": "XMLHttpRequest"}, timeout=60,
+    )
+    body = response.json()
+    if response.status_code != 200 or str(body.get("code")) != "200":
+        raise RuntimeError(body.get("error") or "DigiDokaan could not generate the label")
+    result = body.get("data") if isinstance(body.get("data"), dict) else body
+    return result.get("link") or result.get("pdf_link") or ""
 
 
 def configuration():

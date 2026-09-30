@@ -16,7 +16,7 @@ from email.mime.text import MIMEText
 from flask import Flask, render_template, jsonify, request, flash, redirect, url_for, abort, session, send_from_directory, has_request_context
 from markupsafe import Markup
 from datetime import datetime, timedelta
-from urllib.parse import quote, urlencode
+from urllib.parse import quote, urlencode, urlparse
 import pymssql, shopify
 import aiohttp
 import lazop
@@ -69,10 +69,14 @@ from shopify_protected_data import (
 )
 from token_manager import get_access_token, load_tokens, save_tokens
 from digidokaan import (
+    create_trax_booking,
+    fetch_booking_metadata,
     fetch_pending_shipper_advice,
     fetch_payments as fetch_digidokaan_payments,
     fetch_tracking_history as fetch_digidokaan_tracking_history,
     fetch_tracking_status as fetch_digidokaan_tracking_status,
+    fetch_trax_label,
+    match_trax_city,
     submit_shipper_advice,
 )
 
@@ -101,6 +105,7 @@ EMPLOYEE_PASSKEY_CHALLENGE_KEY = "employee_passkey_challenge"
 SHOPIFY_OAUTH_STATE_SESSION_KEY = "shopify_oauth_state"
 PRODUCT_COSTS_SETTING_KEY = "product_cost_overrides_v1"
 ABANDONED_VIEWED_SETTING_KEY = "abandoned_checkout_viewed_v1"
+TRAX_BOOKING_LOG_SETTING_KEY = "trax_booking_log_v1"
 PAID_FINANCIAL_STATUSES = {"paid", "partially_paid", "partially refunded", "partially_refunded"}
 DARAZ_API_URL = os.getenv("DARAZ_API_URL", "https://api.daraz.pk/rest").rstrip("/")
 DARAZ_ORDER_STATUSES = tuple(
@@ -1447,6 +1452,58 @@ def fulfill_order_sync(order_id, tracking_number):
         return False
 
 
+@shopify_api_retry
+def fulfill_selected_items_with_trax(order_id, tracking_number, selected_items):
+    """Fulfil only the booked Shopify quantities and attach the public Al Karamat tracker."""
+    requested = {
+        str(item.get("line_item_id")): int(item.get("quantity") or 0)
+        for item in selected_items or [] if item.get("line_item_id") and int(item.get("quantity") or 0) > 0
+    }
+    if not requested:
+        return False, "No Shopify line items were selected"
+    groups = []
+    allocated = {key: 0 for key in requested}
+    try:
+        for fulfillment_order in shopify.FulfillmentOrders.find(order_id=order_id):
+            if str(getattr(fulfillment_order, "status", "")).lower() not in {"open", "in_progress", "scheduled"}:
+                continue
+            rows = []
+            for fulfillment_line in getattr(fulfillment_order, "line_items", []) or []:
+                line_item_id = str(getattr(fulfillment_line, "line_item_id", ""))
+                remaining = int(getattr(fulfillment_line, "remaining_quantity", None) or getattr(fulfillment_line, "quantity", 0) or 0)
+                needed = requested.get(line_item_id, 0) - allocated.get(line_item_id, 0)
+                quantity = min(remaining, max(needed, 0))
+                if quantity:
+                    rows.append({"id": fulfillment_line.id, "quantity": quantity})
+                    allocated[line_item_id] += quantity
+            if rows:
+                groups.append({"fulfillment_order_id": fulfillment_order.id, "fulfillment_order_line_items": rows})
+        missing = [key for key, quantity in requested.items() if allocated.get(key, 0) != quantity]
+        if missing:
+            return False, "Selected quantities are no longer available for fulfillment"
+        payload = {"fulfillment": {
+            "message": "Booked with Trax through DigiDokaan",
+            "notify_customer": True,
+            "tracking_info": {
+                "number": tracking_number,
+                "url": f"https://track.alkaramat.com/{quote(str(tracking_number), safe='')}",
+                "company": "Trax",
+            },
+            "line_items_by_fulfillment_order": groups,
+        }}
+        response = shopify.ShopifyResource.connection.post(
+            "/admin/api/2025-01/fulfillments.json",
+            data=json.dumps(payload).encode("utf-8"), headers={"Content-Type": "application/json"},
+        )
+        if response.code == 201:
+            return True, ""
+        return False, f"Shopify returned {response.code}"
+    except Exception as error:
+        if "429" in str(error):
+            raise
+        return False, str(error)
+
+
 async def get_pickup_address_code():
     global POSTEX_ADDRESS_CODE
     if POSTEX_ADDRESS_CODE:
@@ -1649,68 +1706,188 @@ def print_labels():
         return "Failed to fetch PDF from PostEx", 500
 
 
+def load_trax_booking_logs():
+    try:
+        rows = json.loads(get_app_setting(TRAX_BOOKING_LOG_SETTING_KEY, "[]") or "[]")
+        return rows if isinstance(rows, list) else []
+    except (TypeError, ValueError):
+        return []
+
+
+def save_trax_booking_log(entry):
+    rows = load_trax_booking_logs()
+    identity = str(entry.get("tracking_no") or entry.get("booking_key") or "")
+    rows = [row for row in rows if str(row.get("tracking_no") or row.get("booking_key") or "") != identity]
+    rows.insert(0, entry)
+    set_app_setting(TRAX_BOOKING_LOG_SETTING_KEY, json.dumps(rows[:1000]))
+
+
+def trax_booking_key(order_id, selected_items):
+    parts = sorted(f"{item.get('line_item_id')}:{int(item.get('quantity') or 0)}" for item in selected_items)
+    return f"{order_id}|{'|'.join(parts)}"
+
+
+def find_cached_order(order_id):
+    return next((row for row in order_details if str(row.get("id") or row.get("shopify_id")) == str(order_id)), None)
+
+
+def validate_booking_selection(order, requested_items):
+    available = {
+        str(item.get("line_item_id")): item for item in order.get("line_items", [])
+        if item.get("line_item_id") and int(item.get("fulfillable_quantity") or item.get("quantity") or 0) > 0
+        and str(item.get("tracking_number") or "N/A") in {"", "N/A"}
+    }
+    selected = []
+    for requested in requested_items or []:
+        item = available.get(str(requested.get("line_item_id") or ""))
+        quantity = int(requested.get("quantity") or 0)
+        maximum = int((item or {}).get("fulfillable_quantity") or (item or {}).get("quantity") or 0)
+        if not item or quantity < 1 or quantity > maximum:
+            raise ValueError("One or more selected item quantities are no longer available")
+        selected.append({
+            "line_item_id": str(item["line_item_id"]), "quantity": quantity,
+            "title": item.get("product_title", ""), "sku": item.get("sku", ""),
+            "image": item.get("image_src", ""),
+        })
+    if not selected:
+        raise ValueError("Select at least one item")
+    return selected
+
+
+def build_trax_booking_orders(cities):
+    rows = []
+    for order in order_details:
+        items = [item for item in order.get("line_items", [])
+                 if item.get("line_item_id") and int(item.get("fulfillable_quantity") or item.get("quantity") or 0) > 0
+                 and str(item.get("tracking_number") or "N/A") in {"", "N/A"}]
+        if not items:
+            continue
+        customer = order.get("customer_details") or {}
+        city = match_trax_city(customer.get("city"), cities)
+        rows.append({
+            "id": str(order.get("id") or order.get("shopify_id") or ""),
+            "number": str(order.get("order_num") or order.get("order_id") or ""),
+            "date": order.get("created_at", ""), "customer": customer,
+            "city_match": city, "items": items,
+            "total": parse_money(order.get("current_total_price") or order.get("total_price")),
+            "cod": 0 if str(order.get("financial_status", "")).casefold() in PAID_FINANCIAL_STATUSES else parse_money(order.get("current_total_price") or order.get("total_price")),
+            "financial_status": order.get("financial_status", ""),
+        })
+    return rows
+
+
 @app.route('/book')
 def book_orders():
-    global order_details
+    return redirect(url_for("bookings_page"))
 
-    # 1. Calculate Customer History Stats
-    customer_stats = {}
 
-    for order in order_details:
-        phone = order['customer_details'].get('phone', '').strip()
-        if not phone:
-            continue
+@app.route('/bookings')
+def bookings_page():
+    try:
+        metadata = fetch_booking_metadata()
+        cities, booking_error = metadata.get("cities", []), ""
+    except Exception as error:
+        cities, booking_error = [], str(error)
+    return render_template(
+        "bookings.html", booking_orders=build_trax_booking_orders(cities), cities=cities,
+        booking_logs=load_trax_booking_logs(), booking_error=booking_error,
+    )
 
-        if phone not in customer_stats:
-            customer_stats[phone] = {'total': 0, 'delivered': 0}
 
-        customer_stats[phone]['total'] += 1
+@app.route('/api/bookings/trax', methods=['POST'])
+def create_trax_bookings_api():
+    requested = (request.get_json(silent=True) or {}).get("bookings") or []
+    if not requested or len(requested) > 30:
+        return jsonify({"success": False, "error": "Select between 1 and 30 orders"}), 400
+    try:
+        metadata = fetch_booking_metadata()
+    except Exception as error:
+        return jsonify({"success": False, "error": str(error)}), 502
+    city_by_id = {str(city.get("id")): city for city in metadata.get("cities", [])}
+    results = []
+    for request_row in requested:
+        order = find_cached_order(request_row.get("order_id"))
+        try:
+            if not order:
+                raise ValueError("Order is no longer available")
+            selected = validate_booking_selection(order, request_row.get("items"))
+            city = city_by_id.get(str(request_row.get("destination_city_id") or ""))
+            if not city:
+                raise ValueError("Choose a valid Trax destination city")
+            service = str(request_row.get("service_type") or "OVERNIGHT").upper()
+            if service not in (city.get("services") or []):
+                raise ValueError(f"{service.title()} is unavailable for {city.get('name')}")
+            customer_name = str(request_row.get("customer_name") or "").strip()
+            customer_phone = re.sub(r"[^0-9+]", "", str(request_row.get("customer_phone") or ""))
+            customer_address = str(request_row.get("customer_address") or "").strip()
+            if not customer_name or len(re.sub(r"\D", "", customer_phone)) < 10 or not customer_address:
+                raise ValueError("Customer name, valid phone and address are required")
+            cod_amount = round(parse_money(request_row.get("cod_amount")), 2)
+            weight = float(request_row.get("weight") or 0)
+            if cod_amount < 0 or weight <= 0:
+                raise ValueError("COD and weight values are invalid")
+            booking_key = trax_booking_key(order["id"], selected)
+            existing = next((row for row in load_trax_booking_logs() if row.get("booking_key") == booking_key), None)
+            if existing:
+                raise ValueError(f"These items are already booked as {existing.get('tracking_no')}")
+            payload = {
+                "destination_city_id": city["id"], "service_type": service,
+                "customer_name": customer_name, "customer_phone": customer_phone,
+                "customer_address": customer_address, "pieces": sum(item["quantity"] for item in selected),
+                "quantity": sum(item["quantity"] for item in selected), "weight": weight,
+                "cod_amount": cod_amount, "parcel_value": round(parse_money(request_row.get("parcel_value") or order.get("total_price")), 2),
+                "product_name": str(request_row.get("product_name") or ", ".join(item["title"] for item in selected))[:250],
+                "reference_number": str(order.get("order_num") or "")[:20],
+                "special_instruction": str(request_row.get("special_instruction") or "")[:500],
+            }
+            booked = create_trax_booking(payload)
+            if not booked.get("tracking_no"):
+                raise RuntimeError("DigiDokaan created no tracking number")
+            log = {
+                "booking_key": booking_key, "shopify_order_id": str(order["id"]),
+                "order_number": str(order.get("order_num") or ""), "order_no": booked.get("order_no"),
+                "tracking_no": booked["tracking_no"], "tracking_url": f"https://track.alkaramat.com/{booked['tracking_no']}",
+                "customer_name": customer_name, "customer_phone": customer_phone, "customer_address": customer_address,
+                "city": city.get("name"), "service_type": service, "cod_amount": cod_amount, "weight": weight,
+                "items": selected, "booked_at": datetime.now().isoformat(timespec="seconds"),
+                "shopify_fulfilled": False, "shopify_error": "Pending",
+            }
+            save_trax_booking_log(log)
+            fulfilled, fulfillment_error = fulfill_selected_items_with_trax(order["id"], booked["tracking_no"], selected)
+            log.update(shopify_fulfilled=fulfilled, shopify_error=fulfillment_error)
+            save_trax_booking_log(log)
+            results.append({"success": True, **log})
+        except Exception as error:
+            results.append({"success": False, "order_id": str(request_row.get("order_id") or ""), "error": str(error)})
+    return jsonify({"success": all(row["success"] for row in results), "results": results})
 
-        status = str(order.get('status', '')).lower()
-        if 'delivered' in status or 'completed' in status:
-            customer_stats[phone]['delivered'] += 1
 
-    # 2. Filter and Prepare List for Display
-    orders_with_stats = []
-    for order in order_details:
-        # Filter: Only show 'Un-Booked' orders
-        if order.get('status') != 'Un-Booked':
-            continue
+@app.route('/api/bookings/<tracking_number>/retry-fulfillment', methods=['POST'])
+def retry_trax_fulfillment(tracking_number):
+    log = next((row for row in load_trax_booking_logs() if str(row.get("tracking_no")) == str(tracking_number)), None)
+    if not log:
+        return jsonify({"success": False, "error": "Booking log not found"}), 404
+    fulfilled, error = fulfill_selected_items_with_trax(log["shopify_order_id"], tracking_number, log.get("items") or [])
+    log.update(shopify_fulfilled=fulfilled, shopify_error=error)
+    save_trax_booking_log(log)
+    return jsonify({"success": fulfilled, "error": error}), (200 if fulfilled else 502)
 
-        o_copy = order.copy()
 
-        # Prepare items_list
-        items_formatted = []
-        if 'line_items' in order:
-            for item in order['line_items']:
-                items_formatted.append({
-                    'item_image': item.get('image_src', ''),
-                    'item_title': item.get('product_title', ''),
-                    'quantity': item.get('quantity', 0),
-                    'tracking_number': item.get('tracking_number', 'N/A'),
-                    'status': item.get('status', 'Un-Booked')
-                })
-        o_copy['items_list'] = items_formatted
-
-        # History Stats Logic
-        phone = order['customer_details'].get('phone', '').strip()
-        stats = customer_stats.get(phone, {'total': 0, 'delivered': 0})
-
-        # --- MODIFIED LOGIC: Check for First Order ---
-        if stats['total'] == 1 and stats['delivered'] == 0:
-            o_copy['history_str'] = "First Order"
-        else:
-            o_copy['history_str'] = f"{stats['delivered']} Delivered / {stats['total']} Orders"
-        # ---------------------------------------------
-
-        if stats['total'] > 0:
-            o_copy['success_rate'] = (stats['delivered'] / stats['total']) * 100
-        else:
-            o_copy['success_rate'] = 0
-
-        orders_with_stats.append(o_copy)
-
-    return render_template('book.html', all_orders=orders_with_stats)
+@app.route('/bookings/label/<tracking_number>')
+def trax_booking_label(tracking_number):
+    log = next((row for row in load_trax_booking_logs() if str(row.get("tracking_no")) == str(tracking_number)), None)
+    if not log:
+        abort(404)
+    try:
+        label = fetch_trax_label(log.get("order_no"), tracking_number)
+        if str(label).startswith(("https://", "http://")):
+            host = (urlparse(label).hostname or "").casefold()
+            if host == "digidokaan.pk" or host.endswith(".digidokaan.pk"):
+                return redirect(label)
+            abort(502)
+        return make_response(str(label), 200, {"Content-Type": "text/html; charset=utf-8"})
+    except Exception as error:
+        return f"Could not generate label: {error}", 502
 
 @retry(stop=stop_after_attempt(5), wait=wait_exponential(min=1, max=10))
 async def fetch_with_retry(session, url, method="GET", **kwargs):
@@ -1854,7 +2031,7 @@ async def process_line_item(session, line_item, fulfillments):
                         'quantity': item.quantity
                     })
     return tracking_info if tracking_info else [
-        {"tracking_number": "N/A", "status": "Un-Booked", "quantity": line_item.quantity}
+        {"tracking_number": "N/A", "status": "Un-Booked", "quantity": int(getattr(line_item, "fulfillable_quantity", 0) or 0)}
     ]
 
 
@@ -1962,10 +2139,13 @@ async def process_order(session, order):
 
             for info in tracking_info_list:
                 order_info['line_items'].append({
+                    'line_item_id': line_item.id,
                     'fulfillment_status': line_item.fulfillment_status,
                     'image_src': image_src,
                     'product_id': line_item.product_id,
                     'variant_id': line_item.variant_id,
+                    'sku': getattr(line_item, 'sku', '') or '',
+                    'fulfillable_quantity': int(getattr(line_item, 'fulfillable_quantity', 0) or 0),
                     'unit_price': parse_money(getattr(line_item, 'price', 0)),
                     'product_title': line_item.title + (f" - {variant_name}" if variant_name else ""),
                     'quantity': info['quantity'],
