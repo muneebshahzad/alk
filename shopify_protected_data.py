@@ -198,27 +198,39 @@ def _format_address(address: dict[str, Any] | None) -> dict[str, str]:
     return {"name": _pick(address.get("name")), "address": _pick(address.get("address1"), address.get("address2")), "city": _pick(address.get("city")), "phone": _pick(address.get("phone"))}
 
 
-def _build_customer_details(node: dict[str, Any]) -> dict[str, str]:
+def _build_customer_details(node: dict[str, Any]) -> dict[str, Any]:
     shipping = _format_address(node.get("shippingAddress"))
     billing = _format_address(node.get("billingAddress"))
     customer = node.get("customer") or {}
     default = _format_address(customer.get("defaultAddress"))
     customer_name = " ".join(filter(None, (_clean(customer.get("firstName")), _clean(customer.get("lastName"))))).strip()
     customer_phone = (customer.get("defaultPhoneNumber") or {}).get("phoneNumber")
+    recent_orders = [
+        {
+            "id": _clean(order.get("legacyResourceId")),
+            "name": _clean(order.get("name")),
+            "fulfillment_status": _clean(order.get("displayFulfillmentStatus")),
+            "cancelled": bool(order.get("cancelledAt")),
+            "tags": [_clean(tag) for tag in order.get("tags") or [] if _clean(tag)],
+        }
+        for order in (customer.get("orders") or {}).get("nodes") or [] if order
+    ]
     return {
         "name": _pick(shipping["name"], billing["name"], customer_name, default["name"]),
         "address": _pick(shipping["address"], billing["address"], default["address"]),
         "city": _pick(shipping["city"], billing["city"], default["city"]),
         "phone": _pick(node.get("phone"), shipping["phone"], billing["phone"], customer_phone, default["phone"]),
+        "order_count": int(customer.get("numberOfOrders") or 0),
+        "recent_orders": recent_orders,
     }
 
 
-def fetch_protected_order_details(order_ids: list[int | str]) -> tuple[dict[str, dict[str, str]], list[str]]:
+def fetch_protected_order_details(order_ids: list[int | str]) -> tuple[dict[str, dict[str, Any]], list[str]]:
     token = get_graphql_token()
     if not token or not order_ids:
         return {}, []
-    query = """query ProtectedOrderDetails($ids: [ID!]!) { nodes(ids: $ids) { ... on Order { legacyResourceId phone shippingAddress { name address1 address2 city phone } billingAddress { name address1 address2 city phone } customer { firstName lastName defaultPhoneNumber { phoneNumber } defaultAddress { name address1 address2 city phone } } } } }"""
-    details: dict[str, dict[str, str]] = {}
+    query = """query ProtectedOrderDetails($ids: [ID!]!) { nodes(ids: $ids) { ... on Order { legacyResourceId phone shippingAddress { name address1 address2 city phone } billingAddress { name address1 address2 city phone } customer { firstName lastName numberOfOrders defaultPhoneNumber { phoneNumber } defaultAddress { name address1 address2 city phone } orders(first: 3, reverse: true, sortKey: CREATED_AT) { nodes { legacyResourceId name displayFulfillmentStatus cancelledAt tags } } } } } }"""
+    details: dict[str, dict[str, Any]] = {}
     errors: list[str] = []
     for start in range(0, len(order_ids), 100):
         batch = order_ids[start:start + 100]

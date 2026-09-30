@@ -12,6 +12,8 @@ class BookingsTemplateTests(unittest.TestCase):
             "customer": {"name": "Customer", "phone": "03000000000", "address": "Address", "city": "Lahore"},
             "city_match": {"id": "1", "name": "Lahore", "services": ["OVERNIGHT"]},
             "items": [{"line_item_id": "10", "product_title": "Shawl", "image_src": "", "sku": "S1", "quantity": 1, "fulfillable_quantity": 1}],
+            "customer_order_count": 4, "last_order_status": "Delivered", "last_order_name": "#99",
+            "duplicate_group": "group1", "duplicate_count": 2,
         }
         log = {
             "booked_at": "2026-09-30T12:00:00", "order_number": "100", "order_no": "20",
@@ -26,6 +28,10 @@ class BookingsTemplateTests(unittest.TestCase):
             )
         self.assertIn("Shawl", result)
         self.assertIn("123", result)
+        self.assertIn("4</b> lifetime orders", result)
+        self.assertIn("Last: <b>Delivered</b>", result)
+        self.assertIn("Merge these orders", result)
+        self.assertIn("sortOrders", result)
 
 
 if __name__ == "__main__":

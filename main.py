@@ -245,6 +245,8 @@ def enrich_orders_with_protected_customer_data(orders):
         customer = order.setdefault("customer_details", {})
         for field in ("name", "phone", "address", "city"):
             customer[field] = details.get(field) or customer.get(field, "")
+        customer["order_count"] = int(details.get("order_count") or customer.get("order_count") or 0)
+        customer["recent_orders"] = details.get("recent_orders") or customer.get("recent_orders") or []
     return orders
 
 
@@ -1764,6 +1766,20 @@ def build_trax_booking_orders(cities):
             continue
         customer = order.get("customer_details") or {}
         city = match_trax_city(customer.get("city"), cities)
+        current_id = str(order.get("id") or order.get("shopify_id") or "")
+        previous = next((recent for recent in customer.get("recent_orders") or [] if str(recent.get("id")) != current_id), None)
+        previous_status = "No previous order"
+        if previous:
+            status_text = " ".join([str(previous.get("fulfillment_status") or ""), " ".join(previous.get("tags") or [])]).casefold()
+            if previous.get("cancelled") or "return" in status_text or "restock" in status_text:
+                previous_status = "Returned"
+            elif "fulfilled" in status_text and "unfulfilled" not in status_text:
+                previous_status = "Delivered"
+            else:
+                previous_status = "Pending"
+        identity_phone = re.sub(r"\D", "", str(customer.get("phone") or ""))[-10:]
+        identity_address = re.sub(r"[^a-z0-9]", "", str(customer.get("address") or "").casefold())
+        identity = f"{identity_phone}|{identity_address}" if identity_phone and identity_address else ""
         rows.append({
             "id": str(order.get("id") or order.get("shopify_id") or ""),
             "number": str(order.get("order_num") or order.get("order_id") or ""),
@@ -1772,7 +1788,22 @@ def build_trax_booking_orders(cities):
             "total": parse_money(order.get("current_total_price") or order.get("total_price")),
             "cod": 0 if str(order.get("financial_status", "")).casefold() in PAID_FINANCIAL_STATUSES else parse_money(order.get("current_total_price") or order.get("total_price")),
             "financial_status": order.get("financial_status", ""),
+            "customer_order_count": int(customer.get("order_count") or 0),
+            "last_order_status": previous_status,
+            "last_order_name": (previous or {}).get("name", ""),
+            "customer_identity": identity,
         })
+    grouped = {}
+    for row in rows:
+        if row["customer_identity"]:
+            grouped.setdefault(row["customer_identity"], []).append(row)
+    for members in grouped.values():
+        if len(members) < 2:
+            continue
+        group_id = hashlib.sha256(members[0]["customer_identity"].encode()).hexdigest()[:12]
+        for row in members:
+            row["duplicate_group"] = group_id
+            row["duplicate_count"] = len(members)
     return rows
 
 
@@ -1806,11 +1837,26 @@ def create_trax_bookings_api():
     city_by_id = {str(city.get("id")): city for city in metadata.get("cities", [])}
     results = []
     for request_row in requested:
-        order = find_cached_order(request_row.get("order_id"))
         try:
-            if not order:
-                raise ValueError("Order is no longer available")
-            selected = validate_booking_selection(order, request_row.get("items"))
+            order_requests = request_row.get("orders") or [{"order_id": request_row.get("order_id"), "items": request_row.get("items")}]
+            order_selections = []
+            for order_request in order_requests:
+                order = find_cached_order(order_request.get("order_id"))
+                if not order:
+                    raise ValueError("One of the orders is no longer available")
+                selected_for_order = validate_booking_selection(order, order_request.get("items"))
+                order_selections.append({"order": order, "items": selected_for_order})
+            if len(order_selections) > 1:
+                identities = set()
+                for selection in order_selections:
+                    customer = selection["order"].get("customer_details") or {}
+                    phone = re.sub(r"\D", "", str(customer.get("phone") or ""))[-10:]
+                    address = re.sub(r"[^a-z0-9]", "", str(customer.get("address") or "").casefold())
+                    identities.add(f"{phone}|{address}")
+                if len(identities) != 1 or identities == {"|"}:
+                    raise ValueError("Only orders with the same customer phone and address can be merged")
+            order = order_selections[0]["order"]
+            selected = [item for selection in order_selections for item in selection["items"]]
             city = city_by_id.get(str(request_row.get("destination_city_id") or ""))
             if not city:
                 raise ValueError("Choose a valid Trax destination city")
@@ -1826,7 +1872,10 @@ def create_trax_bookings_api():
             weight = float(request_row.get("weight") or 0)
             if cod_amount < 0 or weight <= 0:
                 raise ValueError("COD and weight values are invalid")
-            booking_key = trax_booking_key(order["id"], selected)
+            booking_key = "merge|" + "|".join(sorted(
+                trax_booking_key(selection["order"]["id"], selection["items"])
+                for selection in order_selections
+            ))
             existing = next((row for row in load_trax_booking_logs() if row.get("booking_key") == booking_key), None)
             if existing:
                 raise ValueError(f"These items are already booked as {existing.get('tracking_no')}")
@@ -1837,7 +1886,7 @@ def create_trax_bookings_api():
                 "quantity": sum(item["quantity"] for item in selected), "weight": weight,
                 "cod_amount": cod_amount, "parcel_value": round(parse_money(request_row.get("parcel_value") or order.get("total_price")), 2),
                 "product_name": str(request_row.get("product_name") or ", ".join(item["title"] for item in selected))[:250],
-                "reference_number": str(order.get("order_num") or "")[:20],
+                "reference_number": "+".join(str(selection["order"].get("order_num") or "") for selection in order_selections)[:20],
                 "special_instruction": str(request_row.get("special_instruction") or "")[:500],
             }
             booked = create_trax_booking(payload)
@@ -1845,7 +1894,11 @@ def create_trax_bookings_api():
                 raise RuntimeError("DigiDokaan created no tracking number")
             log = {
                 "booking_key": booking_key, "shopify_order_id": str(order["id"]),
-                "order_number": str(order.get("order_num") or ""), "order_no": booked.get("order_no"),
+                "shopify_orders": [
+                    {"order_id": str(selection["order"]["id"]), "order_number": str(selection["order"].get("order_num") or ""), "items": selection["items"]}
+                    for selection in order_selections
+                ],
+                "order_number": ", ".join(str(selection["order"].get("order_num") or "") for selection in order_selections), "order_no": booked.get("order_no"),
                 "tracking_no": booked["tracking_no"], "tracking_url": f"https://track.alkaramat.com/{booked['tracking_no']}",
                 "customer_name": customer_name, "customer_phone": customer_phone, "customer_address": customer_address,
                 "city": city.get("name"), "service_type": service, "cod_amount": cod_amount, "weight": weight,
@@ -1853,7 +1906,12 @@ def create_trax_bookings_api():
                 "shopify_fulfilled": False, "shopify_error": "Pending",
             }
             save_trax_booking_log(log)
-            fulfilled, fulfillment_error = fulfill_selected_items_with_trax(order["id"], booked["tracking_no"], selected)
+            fulfillment_results = [
+                fulfill_selected_items_with_trax(selection["order"]["id"], booked["tracking_no"], selection["items"])
+                for selection in order_selections
+            ]
+            fulfilled = all(result[0] for result in fulfillment_results)
+            fulfillment_error = "; ".join(result[1] for result in fulfillment_results if result[1])
             log.update(shopify_fulfilled=fulfilled, shopify_error=fulfillment_error)
             save_trax_booking_log(log)
             results.append({"success": True, **log})
@@ -1867,7 +1925,10 @@ def retry_trax_fulfillment(tracking_number):
     log = next((row for row in load_trax_booking_logs() if str(row.get("tracking_no")) == str(tracking_number)), None)
     if not log:
         return jsonify({"success": False, "error": "Booking log not found"}), 404
-    fulfilled, error = fulfill_selected_items_with_trax(log["shopify_order_id"], tracking_number, log.get("items") or [])
+    selections = log.get("shopify_orders") or [{"order_id": log["shopify_order_id"], "items": log.get("items") or []}]
+    results = [fulfill_selected_items_with_trax(selection["order_id"], tracking_number, selection.get("items") or []) for selection in selections]
+    fulfilled = all(result[0] for result in results)
+    error = "; ".join(result[1] for result in results if result[1])
     log.update(shopify_fulfilled=fulfilled, shopify_error=error)
     save_trax_booking_log(log)
     return jsonify({"success": fulfilled, "error": error}), (200 if fulfilled else 502)

@@ -15,7 +15,13 @@ class ShopifyProtectedDataTests(unittest.TestCase):
             "phone": "03210000000",
             "shippingAddress": {"name": "Sara Khan", "address1": "Block 2", "city": "Karachi"},
             "billingAddress": None,
-            "customer": None,
+            "customer": {
+                "numberOfOrders": 4,
+                "orders": {"nodes": [{
+                    "legacyResourceId": "98", "name": "#98", "displayFulfillmentStatus": "FULFILLED",
+                    "cancelledAt": None, "tags": ["Delivered"],
+                }]},
+            },
         }]}}
 
         details, errors = protected.fetch_protected_order_details([99])
@@ -25,6 +31,9 @@ class ShopifyProtectedDataTests(unittest.TestCase):
         self.assertEqual(details["99"]["phone"], "03210000000")
         self.assertEqual(details["99"]["address"], "Block 2")
         self.assertEqual(details["99"]["city"], "Karachi")
+        self.assertEqual(details["99"]["order_count"], 4)
+        self.assertEqual(details["99"]["recent_orders"][0]["fulfillment_status"], "FULFILLED")
+        self.assertIn("numberOfOrders", post.call_args.kwargs["json"]["query"])
         response.raise_for_status.assert_called_once()
 
 
