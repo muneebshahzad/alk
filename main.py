@@ -34,8 +34,10 @@ from db import (
     load_admin_passkeys,
     load_employee_passkeys,
     load_order_statuses,
+    load_shipper_advice_action_keys,
     save_admin_passkey,
     save_employee_passkey,
+    save_shipper_advice_action,
     set_app_setting,
     update_admin_passkey_usage,
     update_employee_passkey_usage,
@@ -80,6 +82,7 @@ from digidokaan import (
     submit_shipper_advice,
 )
 from finance import build_entry, finance_dashboard, money, post_journal, reverse_journal
+from shipper_advice_state import advice_request_key, remove_acknowledged_advice
 
 app = Flask(__name__)
 app.debug = True
@@ -95,6 +98,7 @@ tracking_refresh_lock = threading.Lock()
 tracking_refresh_state = {"running": False, "error": "", "shopify_count": 0, "daraz_count": 0, "updated_at": 0}
 TRACKING_AUTO_REFRESH_SECONDS = max(5 * 60, int(os.getenv("TRACKING_AUTO_REFRESH_SECONDS", "3600")))
 abandoned_checkout_cache = {"rows": None, "expires_at": 0.0}
+shipper_advice_action_cache = set()
 EMPLOYEE_PORTAL_SESSION_KEY = "employee_portal_authenticated"
 ADMIN_PORTAL_SESSION_KEY = "admin_portal_authenticated"
 EMPLOYEE_PORTAL_PASSWORD = os.getenv("EMPLOYEE_PORTAL_PASSWORD", "@@@t")
@@ -145,6 +149,12 @@ def parse_int(value, default=0):
         return int(float(value or default))
     except (TypeError, ValueError):
         return int(default)
+
+
+def visible_shipper_advice_rows(rows):
+    acknowledged = set(shipper_advice_action_cache)
+    acknowledged.update(load_shipper_advice_action_keys())
+    return remove_acknowledged_advice(rows, acknowledged)
 
 
 def extract_shopify_money(value, default=0.0):
@@ -2508,23 +2518,28 @@ def post_shipper_advice():
 
     async def submit():
         async with aiohttp.ClientSession() as client:
-            pending = await fetch_pending_shipper_advice(client)
+            pending = visible_shipper_advice_rows(await fetch_pending_shipper_advice(client))
             shipment = next(
                 (row for row in pending if str(row.get("tracking_no") or "").strip() == tracking_number),
                 None,
             )
             if not shipment:
                 raise ValueError("This shipment is no longer awaiting shipper advice.")
-            return await submit_shipper_advice(
+            result = await submit_shipper_advice(
                 client,
                 tracking_number,
                 shipment.get("gateway_id"),
                 advice_status,
                 remarks,
             )
+            return result, shipment
 
     try:
-        result = asyncio.run(submit())
+        result, shipment = asyncio.run(submit())
+        request_key = advice_request_key(shipment)
+        shipper_advice_action_cache.add(request_key)
+        if not save_shipper_advice_action(request_key, tracking_number, advice_status, remarks):
+            print(f"Shipper advice {tracking_number} was accepted, but its acknowledgement could not be persisted")
         return jsonify({
             "success": True,
             "message": result.get("msg") or result.get("message") or "Shipper advice submitted successfully.",
@@ -2825,7 +2840,10 @@ def tracking_home():
             async with aiohttp.ClientSession() as client:
                 return await fetch_pending_shipper_advice(client)
 
-        shipper_advice_orders = enrich_shipper_advice_orders(asyncio.run(load_shipper_advice()), order_details)
+        shipper_advice_orders = enrich_shipper_advice_orders(
+            visible_shipper_advice_rows(asyncio.run(load_shipper_advice())),
+            order_details,
+        )
     except Exception as advice_error:
         print(f"Could not load DigiDokaan shipper advice: {advice_error}")
         shipper_advice_orders = []
@@ -3069,6 +3087,7 @@ def admin_notifications():
 
     try:
         abandoned, advice = asyncio.run(load_notifications())
+        advice = visible_shipper_advice_rows(advice)
         viewed_tokens = load_abandoned_viewed_tokens()
         abandoned_items = []
         for checkout in sorted(abandoned, key=lambda row: parse_date_timestamp(row.get("updated_at") or row.get("created_at")), reverse=True):
