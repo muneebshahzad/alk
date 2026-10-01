@@ -64,6 +64,15 @@ class DigiDokaanTrackingTests(IsolatedAsyncioTestCase):
         self.assertEqual(digidokaan._money_from_text("Rs.15,472"), 15472)
         self.assertEqual(digidokaan._money_from_text("Rs.-18,227"), -18227)
 
+    def test_booking_phone_is_normalized_from_shopify_format(self):
+        self.assertEqual(digidokaan.normalize_booking_phone("+92 333 5032786"), "03335032786")
+        self.assertEqual(digidokaan.normalize_booking_phone("3335032786"), "03335032786")
+        self.assertEqual(digidokaan.normalize_booking_phone("03335032786"), "03335032786")
+
+    def test_booking_phone_rejects_invalid_number(self):
+        with self.assertRaisesRegex(ValueError, "valid Pakistani mobile"):
+            digidokaan.normalize_booking_phone("12345")
+
     async def test_concurrent_requests_are_deduplicated_and_cached(self):
         async def delayed_status(*args):
             await asyncio.sleep(0)

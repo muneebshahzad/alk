@@ -154,6 +154,18 @@ def match_trax_city(city_name, cities):
     return scored[0][1] if scored and scored[0][0] >= 0.82 else None
 
 
+def normalize_booking_phone(phone):
+    """Return the 03XXXXXXXXX format required by DigiDokaan's booking form."""
+    digits = re.sub(r"\D", "", str(phone or ""))
+    if len(digits) == 12 and digits.startswith("92"):
+        digits = "0" + digits[2:]
+    elif len(digits) == 10 and digits.startswith("3"):
+        digits = "0" + digits
+    if not re.fullmatch(r"03\d{9}", digits):
+        raise ValueError("Customer phone must be a valid Pakistani mobile number")
+    return digits
+
+
 def create_trax_booking(payload):
     """Create one Trax shipment through DigiDokaan's authenticated merchant workflow."""
     config = configuration()
@@ -188,10 +200,12 @@ def create_trax_booking(payload):
         shipper = shippers[0]
         service_codes = {"OVERNIGHT": "1", "DETAIN": "2", "OVERLAND": "3"}
         service = str(payload.get("service_type") or "OVERNIGHT").upper()
+        customer_phone = normalize_booking_phone(payload.get("customer_phone"))
+        shipper_phone = normalize_booking_phone(shipper.get("phone") or config["phone"])
         form = {
             "origin": pickup.get("city") or "Lahore",
             "destination_city": str(payload.get("destination_city_id") or ""),
-            "consignee_phone": str(payload.get("customer_phone") or ""),
+            "consignee_phone": customer_phone,
             "consignee_phone_two": "",
             "consignee_name": str(payload.get("customer_name") or ""),
             "piece": str(payload.get("pieces") or 1),
@@ -206,7 +220,7 @@ def create_trax_booking(payload):
             "special_instruction": str(payload.get("special_instruction") or ""),
             "normal_pickup_location": json.dumps(pickup, separators=(",", ":")),
             "pickup_location": str(shipper.get("shipper_id") or ""),
-            "shipper_phone": "0" + re.sub(r"\D", "", str(shipper.get("phone") or config["phone"]))[-10:],
+            "shipper_phone": shipper_phone,
             "shipper_name": str(shipper.get("shipment_name") or pickup.get("name") or "Al Karamat"),
             "gateway_id": "5",
             "shipment_type": service_codes.get(service, "1"),
@@ -220,7 +234,13 @@ def create_trax_booking(payload):
         except ValueError:
             body = {}
         if response.status_code != 200 or str(body.get("code")) != "200":
-            raise RuntimeError(body.get("error") or body.get("msg") or "DigiDokaan rejected the Trax booking")
+            message = body.get("error") or body.get("msg") or body.get("message")
+            if isinstance(message, dict):
+                message = "; ".join(
+                    f"{field}: {', '.join(map(str, errors if isinstance(errors, list) else [errors]))}"
+                    for field, errors in message.items()
+                )
+            raise RuntimeError(str(message or "DigiDokaan rejected the Trax booking"))
         result = body.get("data") if isinstance(body.get("data"), dict) else body
         order_no = result.get("order_no") or result.get("order_id") or result.get("id")
         tracking_no = result.get("tracking_no") or result.get("tracking_number") or result.get("tracking")
