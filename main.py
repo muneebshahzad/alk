@@ -112,6 +112,7 @@ SHOPIFY_OAUTH_STATE_SESSION_KEY = "shopify_oauth_state"
 PRODUCT_COSTS_SETTING_KEY = "product_cost_overrides_v1"
 ABANDONED_VIEWED_SETTING_KEY = "abandoned_checkout_viewed_v1"
 TRAX_BOOKING_LOG_SETTING_KEY = "trax_booking_log_v1"
+TRAX_LOAD_SHEET_LOG_SETTING_KEY = "trax_load_sheet_log_v1"
 PAID_FINANCIAL_STATUSES = {"paid", "partially_paid", "partially refunded", "partially_refunded"}
 DARAZ_API_URL = os.getenv("DARAZ_API_URL", "https://api.daraz.pk/rest").rstrip("/")
 DARAZ_ORDER_STATUSES = tuple(
@@ -1734,6 +1735,20 @@ def save_trax_booking_log(entry):
     rows = [row for row in rows if str(row.get("tracking_no") or row.get("booking_key") or "") != identity]
     rows.insert(0, entry)
     set_app_setting(TRAX_BOOKING_LOG_SETTING_KEY, json.dumps(rows[:1000]))
+
+
+def load_trax_load_sheet_logs():
+    try:
+        rows = json.loads(get_app_setting(TRAX_LOAD_SHEET_LOG_SETTING_KEY, "[]") or "[]")
+        return rows if isinstance(rows, list) else []
+    except (TypeError, ValueError):
+        return []
+
+
+def save_trax_load_sheet_log(entry):
+    rows = load_trax_load_sheet_logs()
+    rows.insert(0, entry)
+    set_app_setting(TRAX_LOAD_SHEET_LOG_SETTING_KEY, json.dumps(rows[:500]))
 
 
 def trax_booking_key(order_id, selected_items):
@@ -3606,6 +3621,7 @@ def build_admin_mobile_sections():
     return [
         {"id": "dashboard", "label": "Dashboard", "icon": "home", "src": "/?embedded=1"},
         {"id": "scanner", "label": "Scanner", "icon": "scan", "src": "/employee_portal"},
+        {"id": "load-sheets", "label": "Load Sheets", "icon": "orders", "src": "/employee_portal/load-sheets"},
         {"id": "employee-orders", "label": "Orders", "icon": "orders", "src": "/employee_portal/orders"},
         {"id": "pending", "label": "Pending", "icon": "pending", "src": "/pending?embedded=1"},
         {"id": "abandoned", "label": "Abandoned", "icon": "abandoned", "src": "/abandoned?embedded=1"},
@@ -3827,6 +3843,13 @@ def employee_portal_orders():
     if not employee_portal_is_authenticated():
         return redirect(url_for("employee_portal", next="/employee_portal/orders"))
     return render_template("orders.html", all_orders=build_pending_orders_mobile_data(), employee_portal_mode=True)
+
+
+@app.route("/employee_portal/load-sheets")
+def employee_portal_load_sheets():
+    if not employee_portal_is_authenticated():
+        return redirect(url_for("employee_portal", next="/employee_portal/load-sheets"))
+    return render_template("load_sheets.html", load_sheets=load_trax_load_sheet_logs())
 
 
 @app.route("/employee_portal/products")
@@ -4352,7 +4375,16 @@ def create_scanned_load_sheet():
             host = (urlparse(link).hostname or '').casefold()
             if host != 'digidokaan.pk' and not host.endswith('.digidokaan.pk'):
                 raise RuntimeError('DigiDokaan returned an unsafe load-sheet address')
-        return jsonify({'success': True, **result})
+        entry = {
+            'id': secrets.token_urlsafe(10),
+            'created_at': datetime.now().isoformat(timespec='seconds'),
+            'shipment_count': int(result.get('shipment_count') or 0),
+            'amount': round(parse_money(result.get('amount')), 2),
+            'tracking_numbers': result.get('tracking_numbers') or [],
+            'link': link,
+        }
+        save_trax_load_sheet_log(entry)
+        return jsonify({'success': True, **result, 'load_sheet_id': entry['id']})
     except ValueError as error:
         return jsonify({'success': False, 'error': str(error)}), 400
     except Exception as error:

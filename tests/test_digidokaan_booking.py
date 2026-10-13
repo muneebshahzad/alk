@@ -48,7 +48,7 @@ class DigiDokaanBookingTests(unittest.TestCase):
                 if url.endswith("/api/auth/login"):
                     return Response({"token": "api-token"})
                 tracking = kwargs["json"]["search_value"]
-                return Response({"data": [{"tracking_no": tracking, "order_id": "order-" + tracking[-2:]}]})
+                return Response({"data": [{"tracking_no": tracking, "order_id": "order-" + tracking[-2:], "cod_amount": "PKR 1,250"}]})
 
         class WebSession:
             submitted = None
@@ -71,6 +71,7 @@ class DigiDokaanBookingTests(unittest.TestCase):
             result = digidokaan.generate_trax_load_sheet(["2230000000001", "2230000000002", "2230000000001"])
 
         self.assertEqual(result["shipment_count"], 2)
+        self.assertEqual(result["amount"], 2500)
         self.assertEqual(result["link"], "https://web.digidokaan.pk/load-sheet.pdf")
         self.assertEqual(
             [value for key, value in web_session.submitted if key == "tracking_numbers[]"],

@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#14213d">
+  <title>Trax Load Sheets</title>
+  <link rel="manifest" href="/employee_portal-manifest.webmanifest">
+  <link rel="icon" href="/static/admin-portal-icon-v2-192.png" type="image/png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=Space+Mono:wght@700&display=swap" rel="stylesheet">
+  <style>
+    :root{--ink:#14213d;--muted:#778197;--line:rgba(20,33,61,.12);--blue:#2667ff;--green:#2a9d5b;--panel:rgba(255,252,247,.94)}
+    *{box-sizing:border-box}body{margin:0;min-height:100vh;padding:16px 14px 90px;font-family:'DM Sans',sans-serif;color:var(--ink);background:radial-gradient(circle at top left,rgba(242,182,50,.22),transparent 30%),radial-gradient(circle at top right,rgba(38,103,255,.14),transparent 28%),#f4efe6}
+    .shell{max-width:680px;margin:0 auto}.hero,.sheet,.empty{background:var(--panel);border:1px solid var(--line);border-radius:20px;box-shadow:0 16px 36px rgba(20,33,61,.1)}
+    .hero{padding:18px;position:sticky;top:8px;z-index:5}.brand{width:76px;height:40px;object-fit:contain}.eyebrow{margin-top:10px;color:var(--muted);font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase}h1{font-size:27px;margin:5px 0}.sub{color:var(--muted);font-size:13px}.list{display:grid;gap:12px;margin-top:14px}.sheet{padding:16px}.sheet-head{display:flex;justify-content:space-between;gap:12px;align-items:start}.date{font-size:16px;font-weight:800}.time{color:var(--muted);font-size:12px;margin-top:3px}.stats{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:14px 0}.stat{padding:12px;border-radius:14px;background:rgba(20,33,61,.045)}.stat span{display:block;color:var(--muted);font-size:10px;font-weight:800;text-transform:uppercase}.stat strong{display:block;margin-top:4px;font-family:'Space Mono',monospace;font-size:16px}.download{display:flex;min-height:46px;border-radius:13px;align-items:center;justify-content:center;text-decoration:none;background:var(--blue);color:#fff;font-weight:800}.tracking{margin-top:10px;color:var(--muted);font-size:11px;line-height:1.45;overflow-wrap:anywhere}.empty{padding:34px 20px;text-align:center;color:var(--muted)}
+    .employee-bottom-nav{position:fixed;left:0;right:0;bottom:0;z-index:60;display:grid;grid-template-columns:repeat(4,1fr);padding:7px 8px max(7px,env(safe-area-inset-bottom));background:rgba(255,252,247,.97);border-top:1px solid var(--line);box-shadow:0 -10px 30px rgba(20,33,61,.1)}.employee-bottom-nav a{min-height:48px;border-radius:12px;text-decoration:none;color:#778197;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;font-size:10px;font-weight:800}.employee-bottom-nav a.active{color:var(--blue);background:rgba(38,103,255,.08)}.employee-bottom-nav strong{font-size:18px;line-height:1}
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header class="hero">
+      <img class="brand" src="/static/alkaramat-logo-v2.png" alt="Alkaramat">
+      <div class="eyebrow">Trax dispatch records</div>
+      <h1>Load Sheets</h1>
+      <div class="sub">Previously generated sheets remain available for printing.</div>
+    </header>
+    <section class="list">
+      {% for sheet in load_sheets %}
+        <article class="sheet">
+          <div class="sheet-head">
+            <div><div class="date" data-load-sheet-date="{{ sheet.created_at }}">{{ sheet.created_at[:10] }}</div><div class="time">{{ sheet.created_at[11:16] }}</div></div>
+          </div>
+          <div class="stats">
+            <div class="stat"><span>Shipments</span><strong>{{ sheet.shipment_count }}</strong></div>
+            <div class="stat"><span>COD amount</span><strong>PKR {{ '{:,.0f}'.format(sheet.amount or 0) }}</strong></div>
+          </div>
+          <a class="download" href="{{ sheet.link }}" target="_blank" rel="noopener">Download / Print Load Sheet</a>
+          <div class="tracking">{{ (sheet.tracking_numbers or []) | join(' · ') }}</div>
+        </article>
+      {% else %}
+        <div class="empty">No load sheets generated yet. Create one from Scan → Dispatch.</div>
+      {% endfor %}
+    </section>
+  </main>
+  <nav class="employee-bottom-nav" aria-label="Employee navigation">
+    <a href="/employee_portal"><strong>▣</strong><span>Scan</span></a>
+    <a href="/employee_portal/orders"><strong>☷</strong><span>Orders</span></a>
+    <a href="/employee_portal/orders?show_add_order=1"><strong>＋</strong><span>Add order</span></a>
+    <a class="active" href="/employee_portal/load-sheets"><strong>▤</strong><span>Load Sheets</span></a>
+  </nav>
+  <script>
+    document.querySelectorAll('[data-load-sheet-date]').forEach(element => {
+      const value = element.dataset.loadSheetDate;
+      const date = value ? new Date(value) : null;
+      if (date && !Number.isNaN(date.getTime())) element.textContent = date.toLocaleDateString(undefined,{day:'numeric',month:'short',year:'numeric'});
+    });
+  </script>
+</body>
+</html>

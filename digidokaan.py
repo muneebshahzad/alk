@@ -296,6 +296,7 @@ def generate_trax_load_sheet(tracking_numbers):
     headers = {"Accept": "application/json", "Authorization": "Bearer " + token}
     order_numbers = []
     unresolved = []
+    total_cod_amount = 0.0
     for tracking_no in normalized:
         lookup = api_session.post(
             config["base_url"] + "/api/orders/search-courier-order",
@@ -316,6 +317,15 @@ def generate_trax_load_sheet(tracking_numbers):
             unresolved.append(tracking_no)
         else:
             order_numbers.append(order_no)
+            raw_cod = next(
+                ((exact or {}).get(key) for key in ("cod_amount", "order_amount", "cod", "amount", "total_amount")
+                 if (exact or {}).get(key) not in (None, "")),
+                0,
+            )
+            try:
+                total_cod_amount += float(re.sub(r"[^0-9.-]", "", str(raw_cod)) or 0)
+            except (TypeError, ValueError):
+                pass
     if unresolved:
         preview = ", ".join(unresolved[:5])
         suffix = "…" if len(unresolved) > 5 else ""
@@ -348,7 +358,10 @@ def generate_trax_load_sheet(tracking_numbers):
     link = result.get("link") or result.get("pdf_link") or result.get("url")
     if not link:
         raise RuntimeError("DigiDokaan returned no load-sheet PDF")
-    return {"link": str(link), "tracking_numbers": normalized, "shipment_count": len(normalized)}
+    return {
+        "link": str(link), "tracking_numbers": normalized, "shipment_count": len(normalized),
+        "amount": round(total_cod_amount, 2),
+    }
 
 
 def configuration():

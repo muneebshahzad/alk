@@ -461,6 +461,18 @@
       font-size: 22px;
       cursor: pointer;
     }
+    .load-sheet-overlay { position:fixed;inset:0;z-index:90;display:none;align-items:center;justify-content:center;padding:14px;background:rgba(20,33,61,.82); }
+    .load-sheet-overlay.open { display:flex; }
+    .load-sheet-progress { width:min(100%,420px);padding:24px;border-radius:22px;background:#fff;box-shadow:0 24px 60px rgba(0,0,0,.3);text-align:center; }
+    .load-sheet-progress h2 { margin:0 0 7px;font-size:22px; }
+    .load-sheet-progress p { margin:0;color:var(--muted);font-size:13px; }
+    .progress-track { height:10px;margin-top:18px;overflow:hidden;border-radius:999px;background:rgba(20,33,61,.09); }
+    .progress-bar { width:42%;height:100%;border-radius:999px;background:var(--green);animation:loadSheetProgress 1.15s ease-in-out infinite alternate; }
+    @keyframes loadSheetProgress { from{transform:translateX(-75%)} to{transform:translateX(215%)} }
+    .load-sheet-viewer { width:min(100%,900px);height:min(92vh,920px);display:flex;flex-direction:column;border-radius:20px;overflow:hidden;background:#fff;box-shadow:0 24px 60px rgba(0,0,0,.3); }
+    .load-sheet-viewer-head { display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;border-bottom:1px solid var(--line); }
+    .load-sheet-viewer-actions { display:flex;gap:8px; }
+    .load-sheet-viewer iframe { flex:1;width:100%;border:0;background:#f4f4f4; }
     .desktop-note {
       display: none;
       padding: 14px 16px;
@@ -582,10 +594,11 @@
           <button class="text-btn" onclick="window.location.href='/employee_portal/orders'">Orders List</button>
         </div>
       </section>
-      <nav class="employee-bottom-nav" aria-label="Employee navigation">
+      <nav class="employee-bottom-nav" aria-label="Employee navigation" style="grid-template-columns:repeat(4,1fr);">
         <a class="active" href="/employee_portal"><strong>▣</strong><span>Scan</span></a>
         <a href="/employee_portal/orders"><strong>☷</strong><span>Orders</span></a>
         <a href="/employee_portal/orders?show_add_order=1"><strong>＋</strong><span>Add order</span></a>
+        <a href="/employee_portal/load-sheets"><strong>▤</strong><span>Load Sheets</span></a>
       </nav>
 
       <section class="panel">
@@ -627,6 +640,15 @@
       <div class="image-modal-card">
         <button class="image-modal-close" type="button" aria-label="Close image" onclick="closeImageModal(event)">×</button>
         <img id="imageModalImg" src="" alt="Product image">
+      </div>
+    </div>
+    <div class="load-sheet-overlay" id="loadSheetProgress" aria-live="polite">
+      <div class="load-sheet-progress"><h2>Generating load sheet</h2><p>Checking shipments and preparing the printable PDF…</p><div class="progress-track"><div class="progress-bar"></div></div></div>
+    </div>
+    <div class="load-sheet-overlay" id="loadSheetViewer">
+      <div class="load-sheet-viewer">
+        <div class="load-sheet-viewer-head"><strong>Trax Load Sheet</strong><div class="load-sheet-viewer-actions"><a class="ghost-btn" id="loadSheetDownloadLink" target="_blank" rel="noopener">Download</a><button class="ghost-btn" type="button" onclick="closeLoadSheetViewer()">Close</button></div></div>
+        <iframe id="loadSheetFrame" title="Generated Trax load sheet"></iframe>
       </div>
     </div>
 
@@ -865,15 +887,14 @@
         const trackingNumbers = scannedDispatchTrackingNumbers();
         const button = document.getElementById('loadSheetBtn');
         if (generatedLoadSheetLink) {
-          window.open(generatedLoadSheetLink, '_blank');
+          showLoadSheetViewer(generatedLoadSheetLink);
           return;
         }
         if (!trackingNumbers.length) {
           showToast('No booked DigiDokaan shipment found', false);
           return;
         }
-        const pdfWindow = window.open('', '_blank');
-        if (pdfWindow) pdfWindow.document.write('<p style="font-family:sans-serif;padding:24px">Generating load sheet…</p>');
+        document.getElementById('loadSheetProgress').classList.add('open');
         button.disabled = true;
         button.textContent = 'Creating Load Sheet…';
         try {
@@ -887,16 +908,26 @@
           generatedLoadSheetLink = result.link;
           button.disabled = false;
           button.style.opacity = '1';
-          button.textContent = `Print Load Sheet (${result.shipment_count})`;
-          if (pdfWindow) pdfWindow.location.replace(result.link);
-          else window.open(result.link, '_blank');
+          button.textContent = `Download Load Sheet (${result.shipment_count})`;
+          document.getElementById('loadSheetProgress').classList.remove('open');
+          showLoadSheetViewer(result.link);
           showToast(`Load sheet created for ${result.shipment_count} shipments`, true);
         } catch (error) {
-          if (pdfWindow) pdfWindow.close();
+          document.getElementById('loadSheetProgress').classList.remove('open');
           button.disabled = false;
           button.textContent = 'Create & Print Load Sheet';
           showToast(error.message || 'Could not create load sheet', false);
         }
+      }
+
+      function showLoadSheetViewer(link) {
+        document.getElementById('loadSheetFrame').src = link;
+        document.getElementById('loadSheetDownloadLink').href = link;
+        document.getElementById('loadSheetViewer').classList.add('open');
+      }
+
+      function closeLoadSheetViewer() {
+        document.getElementById('loadSheetViewer').classList.remove('open');
       }
 
       function removeFromQueue(source, orderId) {
