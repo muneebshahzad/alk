@@ -338,6 +338,8 @@ onkeypress="if(event.key === 'Enter') { handleScanInput(this.value); }"
 
 <button id="generateReportBtn" class="menu-button red" style="width: 250px; padding: 10px; font-size: 16px;" onclick="generateReport()">Generate Dispatch Report</button>
 
+<button id="generateLoadSheetBtn" class="menu-button blue hidden" style="width: 250px; padding: 10px; font-size: 16px;" onclick="generateLoadSheet()">Create & Print Load Sheet</button>
+
 </div>
 
 
@@ -369,6 +371,8 @@ onkeypress="if(event.key === 'Enter') { handleScanInput(this.value); }"
 let currentMode = null; // 'SINGLE', 'DISPATCHED', or 'RETURNED'
 
 let scannedOrderCache = {};
+
+let loadSheetWindow = null;
 
 // FIX: Switched from Html5QrcodeScanner (for UI) to Html5Qrcode (for manual control)
 
@@ -650,6 +654,8 @@ document.getElementById('scannedOrderCount').textContent = '0';
 
 document.getElementById('generateReportBtn').classList.remove('hidden');
 
+document.getElementById('generateLoadSheetBtn').classList.add('hidden');
+
 document.getElementById('scanMoreBtn').classList.remove('hidden');
 
 document.getElementById('scanMoreBtn').disabled = false;
@@ -699,6 +705,12 @@ document.getElementById('bulk-list').classList.remove('hidden');
 document.getElementById('bulkListTitle').textContent = `${title} (0)`;
 
 document.getElementById('generateReportBtn').textContent = `Generate ${title} Report`;
+
+document.getElementById('generateLoadSheetBtn').classList.toggle('hidden', mode !== 'DISPATCHED');
+
+document.getElementById('generateLoadSheetBtn').disabled = true;
+
+document.getElementById('generateLoadSheetBtn').textContent = 'Create & Print Load Sheet';
 
 
 
@@ -761,6 +773,8 @@ const count = Object.keys(scannedOrderCache).length;
 document.getElementById('bulkListTitle').textContent = `${currentMode === 'DISPATCHED' ? 'Dispatch' : 'Return'} List (${count})`;
 
 document.getElementById('generateReportBtn').disabled = count === 0;
+
+document.getElementById('generateLoadSheetBtn').disabled = currentMode !== 'DISPATCHED' || getScannedTrackingNumbers().length === 0;
 
 }
 
@@ -1006,7 +1020,17 @@ data.items.forEach(item => totalPieces += item.quantity);
 
 // Store in cache
 
-scannedOrderCache[orderNum] = { id: numericShopifyId, items: data.items, pieces: totalPieces };
+scannedOrderCache[orderNum] = {
+
+id: numericShopifyId,
+
+items: data.items,
+
+pieces: totalPieces,
+
+trackingNumbers: data.dispatch_tracking_numbers || []
+
+};
 
 
 
@@ -1087,6 +1111,80 @@ document.getElementById('scannedOrderCount').textContent = count;
 document.getElementById('bulkListTitle').textContent = `${currentMode === 'DISPATCHED' ? 'Dispatch' : 'Return'} List (${count})`;
 
 document.getElementById('generateReportBtn').disabled = count === 0;
+
+document.getElementById('generateLoadSheetBtn').disabled = currentMode !== 'DISPATCHED' || getScannedTrackingNumbers().length === 0;
+
+}
+
+
+function getScannedTrackingNumbers() {
+
+return [...new Set(Object.values(scannedOrderCache).flatMap(order => order.trackingNumbers || []).filter(Boolean))];
+
+}
+
+
+async function generateLoadSheet() {
+
+const trackingNumbers = getScannedTrackingNumbers();
+
+const button = document.getElementById('generateLoadSheetBtn');
+
+if (!trackingNumbers.length) {
+
+alert('No DigiDokaan tracking number was found in the scanned orders. Scan a booked shipment or its tracking barcode.');
+
+return;
+
+}
+
+// Open synchronously so mobile browsers do not block the PDF as a popup.
+
+loadSheetWindow = window.open('', '_blank');
+
+if (loadSheetWindow) loadSheetWindow.document.write('<p style="font-family:sans-serif;padding:24px">Generating load sheet…</p>');
+
+button.disabled = true;
+
+button.textContent = 'Creating Load Sheet…';
+
+try {
+
+const response = await fetch('/api/scan/load-sheet', {
+
+method: 'POST',
+
+headers: { 'Content-Type': 'application/json' },
+
+body: JSON.stringify({ tracking_numbers: trackingNumbers })
+
+});
+
+const data = await response.json();
+
+if (!response.ok || !data.success || !data.link) throw new Error(data.error || 'DigiDokaan returned no load sheet');
+
+button.textContent = `Print Load Sheet (${data.shipment_count})`;
+
+button.disabled = false;
+
+button.onclick = () => window.open(data.link, '_blank');
+
+if (loadSheetWindow) loadSheetWindow.location.replace(data.link);
+
+else window.open(data.link, '_blank');
+
+} catch (error) {
+
+if (loadSheetWindow) loadSheetWindow.close();
+
+button.disabled = false;
+
+button.textContent = 'Create & Print Load Sheet';
+
+alert(error.message || 'Could not generate the load sheet');
+
+}
 
 }
 

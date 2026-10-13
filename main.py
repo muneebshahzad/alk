@@ -78,6 +78,7 @@ from digidokaan import (
     fetch_tracking_history as fetch_digidokaan_tracking_history,
     fetch_tracking_status as fetch_digidokaan_tracking_status,
     fetch_trax_label,
+    generate_trax_load_sheet,
     match_trax_city,
     submit_shipper_advice,
 )
@@ -4318,15 +4319,45 @@ def scan_single_order():
             }
             for item in found_order.get('items', [])
         ]
+        scanned_normalized = normalize_scan_term(scanned_value)
+        matched_tracking = [
+            item["tracking_number"] for item in items_list
+            if normalize_scan_term(item.get("tracking_number")) == scanned_normalized
+        ]
+        dispatch_tracking_numbers = matched_tracking or [
+            item["tracking_number"] for item in items_list
+            if is_digidokaan_tracking_number(item.get("tracking_number"))
+        ]
         return jsonify({
             'success': True,
             'order': found_order,
             'order_num': found_order.get('order_id'),
             'source': found_order.get('source'),
             'items': items_list,
+            'dispatch_tracking_numbers': list(dict.fromkeys(dispatch_tracking_numbers)),
         }), 200
     else:
         return jsonify({'success': False, 'error': 'Not found'}), 404
+
+
+@app.route('/api/scan/load-sheet', methods=['POST'])
+def create_scanned_load_sheet():
+    tracking_numbers = (request.get_json(silent=True) or {}).get('tracking_numbers') or []
+    if not isinstance(tracking_numbers, list):
+        return jsonify({'success': False, 'error': 'Invalid tracking-number list'}), 400
+    try:
+        result = generate_trax_load_sheet(tracking_numbers)
+        link = str(result.get('link') or '')
+        if link.startswith(('https://', 'http://')):
+            host = (urlparse(link).hostname or '').casefold()
+            if host != 'digidokaan.pk' and not host.endswith('.digidokaan.pk'):
+                raise RuntimeError('DigiDokaan returned an unsafe load-sheet address')
+        return jsonify({'success': True, **result})
+    except ValueError as error:
+        return jsonify({'success': False, 'error': str(error)}), 400
+    except Exception as error:
+        print(f"DigiDokaan load-sheet generation failed: {error}")
+        return jsonify({'success': False, 'error': str(error)}), 502
 
 
 shop_url = os.getenv('SHOP_URL')
