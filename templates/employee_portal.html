@@ -772,12 +772,14 @@
             return;
           }
           existing._dispatch_tracking_numbers = merged;
+          resetGeneratedLoadSheet();
           renderQueue();
           showToast('Added another shipment from this order', true);
           return;
         }
 
         queue.unshift({...order, _dispatch_tracking_numbers: dispatchTrackingNumbers});
+        resetGeneratedLoadSheet();
         renderQueue();
         renderResult(order);
         showToast('Added to ' + (currentMode === 'dispatch' ? 'dispatch' : 'return') + ' queue', true);
@@ -899,12 +901,20 @@
 
       function removeFromQueue(source, orderId) {
         queue = queue.filter((entry) => !(entry.source === source && entry.order_id === orderId));
+        resetGeneratedLoadSheet();
         renderQueue();
       }
 
       function clearQueue() {
         queue = [];
+        resetGeneratedLoadSheet();
         renderQueue();
+      }
+
+      function resetGeneratedLoadSheet() {
+        generatedLoadSheetLink = '';
+        const button = document.getElementById('loadSheetBtn');
+        if (button) button.textContent = 'Create & Print Load Sheet';
       }
 
       function updateScanCount() {
