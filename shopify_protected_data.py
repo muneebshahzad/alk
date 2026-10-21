@@ -61,7 +61,11 @@ def get_app_base_url() -> str:
 
 def get_oauth_scopes() -> list[str]:
     scopes = _clean(os.getenv("SHOPIFY_GRAPHQL_SCOPES")) or "read_orders,read_customers,read_products,write_draft_orders,write_orders"
-    return [scope.strip() for scope in scopes.split(",") if scope.strip()]
+    requested = [scope.strip() for scope in scopes.split(",") if scope.strip()]
+    for required in ("read_inventory", "write_inventory"):
+        if required not in requested:
+            requested.append(required)
+    return requested
 
 
 def get_install_url(state: str) -> str:

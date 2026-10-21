@@ -1349,6 +1349,11 @@ def save_product_cost_overrides(overrides):
 
 
 def get_cost_override_for_item(overrides, product_id=None, variant_id=None, title=""):
+    value = find_cost_override_for_item(overrides, product_id=product_id, variant_id=variant_id, title=title)
+    return value if value is not None else 0.0
+
+
+def find_cost_override_for_item(overrides, product_id=None, variant_id=None, title=""):
     for key in (
         product_cost_key(product_id=product_id, variant_id=variant_id, title=title),
         product_cost_key(product_id=product_id, title=title),
@@ -1357,7 +1362,95 @@ def get_cost_override_for_item(overrides, product_id=None, variant_id=None, titl
         entry = overrides.get(key)
         if isinstance(entry, dict):
             return parse_money(entry.get("cost", 0))
-    return 0.0
+    return None
+
+
+def shopify_inventory_item_costs(inventory_item_ids):
+    """Fetch Shopify's Cost per item values in one Admin GraphQL request."""
+    numeric_ids = list(dict.fromkeys(
+        str(value).split("/")[-1] for value in inventory_item_ids or [] if str(value or "").strip()
+    ))
+    if not numeric_ids:
+        return {}
+    endpoint, token = get_graphql_endpoint(), get_graphql_token()
+    if not endpoint or not token:
+        return {}
+    query = """
+      query InventoryItemCosts($ids: [ID!]!) {
+        nodes(ids: $ids) {
+          ... on InventoryItem { id unitCost { amount currencyCode } }
+        }
+      }
+    """
+    costs = {}
+    for offset in range(0, len(numeric_ids), 250):
+        batch = numeric_ids[offset:offset + 250]
+        response = requests.post(
+            endpoint,
+            json={"query": query, "variables": {"ids": [f"gid://shopify/InventoryItem/{value}" for value in batch]}},
+            headers={"X-Shopify-Access-Token": token, "Content-Type": "application/json"},
+            timeout=45,
+        )
+        response.raise_for_status()
+        payload = response.json()
+        if payload.get("errors"):
+            raise RuntimeError(payload["errors"][0].get("message") or "Shopify cost query failed")
+        for node in (payload.get("data") or {}).get("nodes") or []:
+            if not isinstance(node, dict) or not node.get("id"):
+                continue
+            costs[str(node["id"]).split("/")[-1]] = parse_money((node.get("unitCost") or {}).get("amount"), 0)
+    return costs
+
+
+def shopify_inventory_item_costs_legacy(inventory_item_ids):
+    """Compatibility fallback for the store's existing private Admin token."""
+    numeric_ids = list(dict.fromkeys(
+        str(value).split("/")[-1] for value in inventory_item_ids or [] if str(value or "").strip()
+    ))
+    costs = {}
+    for offset in range(0, len(numeric_ids), 100):
+        rows = shopify.InventoryItem.find(ids=",".join(numeric_ids[offset:offset + 100]))
+        try:
+            rows = list(rows or [])
+        except TypeError:
+            rows = [rows] if rows else []
+        for row in rows:
+            item_id = str(getattr(row, "id", "") or "")
+            if item_id:
+                costs[item_id] = parse_money(getattr(row, "cost", 0), 0)
+    return costs
+
+
+def update_shopify_inventory_item_cost(inventory_item_id, cost):
+    endpoint, token = get_graphql_endpoint(), get_graphql_token()
+    if not endpoint or not token:
+        raise RuntimeError("Shopify Admin API is not connected")
+    numeric_id = str(inventory_item_id or "").split("/")[-1]
+    mutation = """
+      mutation UpdateInventoryItemCost($id: ID!, $input: InventoryItemInput!) {
+        inventoryItemUpdate(id: $id, input: $input) {
+          inventoryItem { id unitCost { amount } }
+          userErrors { field message }
+        }
+      }
+    """
+    response = requests.post(
+        endpoint,
+        json={"query": mutation, "variables": {
+            "id": f"gid://shopify/InventoryItem/{numeric_id}", "input": {"cost": parse_money(cost, 0)},
+        }},
+        headers={"X-Shopify-Access-Token": token, "Content-Type": "application/json"},
+        timeout=30,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    if payload.get("errors"):
+        raise RuntimeError(payload["errors"][0].get("message") or "Shopify cost update failed")
+    result = (payload.get("data") or {}).get("inventoryItemUpdate") or {}
+    errors = result.get("userErrors") or []
+    if errors:
+        raise RuntimeError(errors[0].get("message") or "Shopify rejected the cost update")
+    return parse_money(((result.get("inventoryItem") or {}).get("unitCost") or {}).get("amount"), cost)
 
 
 def set_cost_override(overrides, product_id=None, variant_id=None, title="", price=0, cost=0):
@@ -3363,6 +3456,18 @@ def build_pending_orders_mobile_data():
     all_orders = []
     statuses = load_order_statuses()
     overrides = load_product_cost_overrides()
+    # Order payloads contain prices but Shopify keeps cost per item on the
+    # variant's InventoryItem. Build one catalogue so every pending line item
+    # can use the live Shopify cost instead of silently falling back to zero.
+    shopify_products = get_active_shopify_products()
+    costs_by_variant = {
+        str(row.get("variant_id")): parse_money(row.get("cost", 0))
+        for row in shopify_products if row.get("variant_id")
+    }
+    costs_by_title = {
+        str(row.get("title") or "").strip().casefold(): parse_money(row.get("cost", 0))
+        for row in shopify_products if str(row.get("title") or "").strip()
+    }
     for daraz_order in daraz_orders:
         if daraz_order.get('status') not in {'Ready To Ship', 'Pending', 'Packed', 'Packed by seller / warehouse'}:
             continue
@@ -3429,7 +3534,17 @@ def build_pending_orders_mobile_data():
             key = f"{shopify_order.get('order_num')}:{tracking_number}"
             quantity = int(item.get("quantity") or 0)
             unit_price = parse_money(item.get("unit_price", 0))
-            unit_cost = get_cost_override_for_item(overrides, title=item.get("product_title", ""))
+            variant_id = item.get("variant_id")
+            item_title = str(item.get("product_title", "") or "")
+            explicit_override = find_cost_override_for_item(
+                overrides,
+                product_id=item.get("product_id"),
+                variant_id=variant_id,
+                title=item_title,
+            )
+            unit_cost = explicit_override if explicit_override is not None else costs_by_variant.get(
+                str(variant_id), costs_by_title.get(item_title.strip().casefold(), 0.0)
+            )
             items.append(
                 {
                     "item_image": item.get("image_src", ""),
@@ -3580,7 +3695,7 @@ def get_active_shopify_products(limit=250):
         print(f"Could not fetch Shopify products: {error}")
         return []
 
-    results = []
+    variants = []
     while True:
         for product in products:
             if getattr(product, "status", "active") != "active":
@@ -3589,7 +3704,7 @@ def get_active_shopify_products(limit=250):
             for variant in getattr(product, "variants", []) or []:
                 variant_title = getattr(variant, "title", "") or ""
                 display_title = product.title if variant_title in {"Default Title", ""} else f"{product.title} - {variant_title}"
-                results.append(
+                variants.append(
                     {
                         "product_id": getattr(product, "id", None),
                         "variant_id": getattr(variant, "id", None),
@@ -3598,7 +3713,6 @@ def get_active_shopify_products(limit=250):
                         "product_title": getattr(product, "title", ""),
                         "variant_title": variant_title,
                         "price": parse_money(getattr(variant, "price", 0)),
-                        "cost": get_cost_override_for_item(overrides, product_id=getattr(product, "id", None), variant_id=getattr(variant, "id", None), title=display_title),
                         "image": base_image,
                         "sku": getattr(variant, "sku", "") or "",
                     }
@@ -3610,7 +3724,27 @@ def get_active_shopify_products(limit=250):
         except Exception as error:
             print(f"Could not load next Shopify product page: {error}")
             break
-    return results
+    try:
+        shopify_costs = shopify_inventory_item_costs(row.get("inventory_item_id") for row in variants)
+    except Exception as error:
+        print(f"Could not fetch Shopify product costs: {error}")
+        shopify_costs = {}
+    missing_inventory_ids = [
+        row.get("inventory_item_id") for row in variants
+        if str(row.get("inventory_item_id") or "") not in shopify_costs
+    ]
+    if missing_inventory_ids:
+        try:
+            shopify_costs.update(shopify_inventory_item_costs_legacy(missing_inventory_ids))
+        except Exception as error:
+            print(f"Could not fetch Shopify product costs with legacy credentials: {error}")
+    for row in variants:
+        override = find_cost_override_for_item(
+            overrides, product_id=row.get("product_id"), variant_id=row.get("variant_id"), title=row.get("title"),
+        )
+        row["cost"] = override if override is not None else shopify_costs.get(str(row.get("inventory_item_id") or ""), 0.0)
+        row["cost_source"] = "Portal override" if override is not None else "Shopify"
+    return variants
 
 
 def build_product_cost_rows(limit=250):
@@ -4163,6 +4297,7 @@ def update_product_costs():
     title = (data.get("title") or "").strip()
     submitted_price = parse_money(data.get("price", 0))
     submitted_cost = parse_money(data.get("cost", 0))
+    inventory_item_id = data.get("inventory_item_id")
     if not variant_id and not product_id and not title:
         return jsonify({"success": False, "error": "Product identity is required."}), 400
     try:
@@ -4171,6 +4306,13 @@ def update_product_costs():
             variant.price = submitted_price
             if not variant.save():
                 raise RuntimeError("Shopify price update failed.")
+        if inventory_item_id:
+            try:
+                submitted_cost = update_shopify_inventory_item_cost(inventory_item_id, submitted_cost)
+            except Exception as error:
+                # Preserve the portal override when the installed Shopify token has not
+                # yet been reauthorized with write_inventory.
+                print(f"Shopify cost update unavailable; saving portal override: {error}")
         overrides = load_product_cost_overrides()
         set_cost_override(overrides, product_id=product_id, variant_id=variant_id, title=title, price=submitted_price, cost=submitted_cost)
         if not save_product_cost_overrides(overrides):

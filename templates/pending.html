@@ -285,6 +285,26 @@
     } catch (error) {
       vendorItems = [];
     }
+    refreshStoredVendorCosts();
+  }
+
+  function refreshStoredVendorCosts() {
+    const costsByTitle = new Map();
+    document.querySelectorAll('.quick-add-btn[data-title]').forEach((button) => {
+      const title = String(button.dataset.title || '').trim().toLocaleLowerCase();
+      const cost = Number(button.dataset.cost || 0);
+      if (title && cost > 0) costsByTitle.set(title, cost);
+    });
+    let changed = false;
+    vendorItems.forEach((item) => {
+      const currentCost = Number(item.cost || 0);
+      const shopifyCost = costsByTitle.get(String(item.title || '').trim().toLocaleLowerCase());
+      if (currentCost <= 0 && Number(shopifyCost) > 0) {
+        item.cost = shopifyCost;
+        changed = true;
+      }
+    });
+    if (changed) saveVendorItems();
   }
 
   function saveVendorItems() {
