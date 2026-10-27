@@ -75,6 +75,7 @@ from digidokaan import (
     fetch_booking_metadata,
     fetch_pending_shipper_advice,
     fetch_payments as fetch_digidokaan_payments,
+    fetch_tracking_status as fetch_digidokaan_tracking_status,
     fetch_trax_label,
     generate_trax_load_sheet,
     match_trax_city,
@@ -2236,9 +2237,11 @@ async def process_line_item(session, line_item, fulfillments):
                 if item.id == line_item.id:
                     tracking_number = fulfillment.tracking_number
                     if is_digidokaan_tracking_number(tracking_number):
-                        snapshot = await fetch_resolved_tracking_snapshot(session, tracking_number)
-                        tracking_details = snapshot.get("status") or "Tracking unavailable"
-                        tracking_source = snapshot.get("source") or "DigiDokaan"
+                        # Publish the Shopify order list using the primary source first.
+                        # Direct Trax reconciliation runs after the list is available.
+                        tracking_details = await fetch_digidokaan_tracking_status(session, tracking_number)
+                        tracking_details = tracking_details or "Tracking unavailable"
+                        tracking_source = "DigiDokaan"
                     else:
                         tracking_details = await fetch_tracking_status(session, tracking_number)
                         tracking_source = "Call Courier"
@@ -2999,6 +3002,12 @@ def refresh_tracking_in_background():
                 if str(order.get("id") or order.get("shopify_id") or "") not in refreshed_ids
             ]
             order_details = refreshed_orders + preserved_orders
+            # The dashboard can now render. Reconcile Trax in this same background
+            # worker without holding back the Shopify order list.
+            try:
+                asyncio.run(refresh_trax_tracking_for_orders(order_details))
+            except Exception as tracking_error:
+                print(f"Direct Trax background reconciliation failed: {tracking_error}")
         elif order_details:
             print("Shopify refresh returned no orders; preserving the existing dashboard cache.")
         daraz_rows = refresh_daraz_cache_if_needed(force=True)
@@ -3332,6 +3341,11 @@ def background_webhook_processor(order_shopify_id):
         if not updated:
             order_details.insert(0, updated_order_info)  # Add to top
 
+        try:
+            asyncio.run(refresh_trax_tracking_for_orders([updated_order_info]))
+        except Exception as tracking_error:
+            print(f"Webhook Trax reconciliation failed for {order_num_to_match}: {tracking_error}")
+
         print(f"✅ Webhook: Successfully updated order {order_num_to_match}")
 
     except Exception as e:
@@ -3491,6 +3505,35 @@ async def revalidate_pending_trax_shipments(orders):
         results = await asyncio.gather(*(
             lookup(tracking_number)
             for _item, tracking_number in lookups
+        ), return_exceptions=True)
+    updated = 0
+    for (item, _tracking_number), result in zip(lookups, results):
+        if not isinstance(result, dict) or not result.get("status"):
+            continue
+        item["status"] = result["status"]
+        item["tracking_source"] = result.get("source") or item.get("tracking_source") or ""
+        updated += 1
+    return updated
+
+
+async def refresh_trax_tracking_for_orders(orders):
+    """Reconcile all active Trax rows after Shopify orders have been published."""
+    lookups = []
+    for order in orders or []:
+        for item in order.get("line_items", []) or []:
+            tracking_number = item.get("tracking_number")
+            if is_trax_tracking_number(tracking_number):
+                lookups.append((item, str(tracking_number)))
+    if not lookups:
+        return 0
+    semaphore = asyncio.Semaphore(10)
+    async with aiohttp.ClientSession() as client:
+        async def lookup(tracking_number):
+            async with semaphore:
+                return await fetch_resolved_tracking_snapshot(client, tracking_number)
+
+        results = await asyncio.gather(*(
+            lookup(tracking_number) for _item, tracking_number in lookups
         ), return_exceptions=True)
     updated = 0
     for (item, _tracking_number), result in zip(lookups, results):

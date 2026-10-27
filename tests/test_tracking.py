@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 import unittest
+from unittest.mock import AsyncMock
 
 source = ast.parse((Path(__file__).resolve().parents[1] / 'main.py').read_text())
 functions = [node for node in source.body if
@@ -83,6 +84,23 @@ class TrackingTests(unittest.IsolatedAsyncioTestCase):
         line = SimpleNamespace(quantity=2, fulfillment_status=None, fulfillable_quantity=2)
         result = await namespace['process_line_item'](None, line, [])
         self.assertEqual(result[0]['status'], 'Un-Booked')
+
+    async def test_shopify_order_loading_uses_primary_status_without_waiting_for_direct_history(self):
+        line = SimpleNamespace(id=1, quantity=1, fulfillment_status='fulfilled', fulfillable_quantity=0)
+        fulfillment = SimpleNamespace(
+            status='success', tracking_number='22322660078220', line_items=[line]
+        )
+        primary = AsyncMock(return_value='Booked')
+        direct = AsyncMock(return_value={"status": "Delivered", "source": "Trax Direct"})
+        namespace['fetch_digidokaan_tracking_status'] = primary
+        namespace['fetch_resolved_tracking_snapshot'] = direct
+
+        result = await namespace['process_line_item'](object(), line, [fulfillment])
+
+        self.assertEqual(result[0]['status'], 'Booked')
+        self.assertEqual(result[0]['tracking_source'], 'DigiDokaan')
+        primary.assert_awaited_once()
+        direct.assert_not_awaited()
 
     def test_digidokaan_tracking_uses_portal(self):
         number = '22322367960798'
