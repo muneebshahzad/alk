@@ -715,18 +715,20 @@ const STATUS_QUERY_ALIASES = {
 // ── Stats strip ──
 function normalizeStatusBucket(status) {
   const raw = (status || 'Un-Booked').trim();
-  const upper = raw.toUpperCase();
+  const upper = raw.toUpperCase().replace(/^SHIPMENT\s*[-–—:]\s*/, '').trim();
 
   if (upper.includes('PARTIALLY DELIVERED')) return 'Partially Delivered';
-  if (upper.includes('RETURNED TO SHIPPER')) return 'RETURNED TO SHIPPER';
+  if (upper.includes('RETURNED TO SHIPPER') || upper.includes('DELIVERED TO SHIPPER') || upper.includes('RETURN DELIVERED')) return 'RETURNED TO SHIPPER';
   if (upper.includes('BEING RETURN') || upper.includes('OUT FOR RETURN') || upper.includes('RETURN SUBMISSION')) return 'Being Return';
-  if (upper.includes('UNDELIVERED')) return 'Undelivered';
+  if (upper.includes('UNDELIVERED') || upper.includes('DELIVERY UNSUCCESSFUL') || upper.includes('DELIVERY FAILED') || upper.includes('REASON VALIDATION')) return 'Undelivered';
   if (upper.includes('CONTACTING CONSIGNEE') || upper.includes('MOVED TO ORIGIN BRANCH') || upper.includes('RETURN SUBMITTED')) return 'Need Attention';
   if (upper === 'NEED ATTENTION') return 'Need Attention';
   if (upper === 'MIXED STATUS') return 'Mixed Status';
   if (upper.includes('OUT FOR DELIVERY')) return 'Out For Delivery';
   if (upper === 'DELIVERED' || upper.startsWith('DELIVERED ')) return 'Delivered';
-  if (upper.includes('PICKED FROM SHIPPER')) return 'Picked From Shipper';
+  if (upper.includes('PICKED FROM SHIPPER') || upper.includes('RIDER PICKED') || upper.includes('PICKED UP')) return 'Picked From Shipper';
+  if (upper.includes('ARRIVED AT ORIGIN')) return 'Arrived At Origin';
+  if (upper.includes('IN TRANSIT')) return 'Delivery In Transit';
   if (upper === 'BOOKED' || upper.includes('CONSIGNMENT BOOKED')) return 'Booked';
   if (upper === 'UN-BOOKED' || upper === 'UNBOOKED') return 'Un-Booked';
 

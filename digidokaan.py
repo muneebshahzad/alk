@@ -18,6 +18,8 @@ _token = ""
 _token_created_at = 0.0
 _status_cache = {}
 _inflight = {}
+_history_cache = {}
+_history_inflight = {}
 _payments_cache = None
 _payments_cache_expires_at = 0.0
 _shipper_advice_cache = None
@@ -529,7 +531,7 @@ async def fetch_tracking_status(session, tracking_number):
             _inflight.pop(normalized, None)
 
 
-async def fetch_tracking_history(session, tracking_number):
+async def _fetch_tracking_history(session, tracking_number):
     """Return DigiDokaan events in the portal's existing tracking-history shape."""
     normalized = "".join(character for character in str(tracking_number or "") if character.isdigit())
     config = configuration()
@@ -587,12 +589,46 @@ async def fetch_tracking_history(session, tracking_number):
                     "ReasonDesc": event.get("status_reason") or "",
                     "ConsigneeName": detail.get("customer_name") or "",
                     "ConsigneeCity": detail.get("customer_city") or "",
+                    "TrackingSource": "DigiDokaan",
                 }
             )
         return history
     except Exception as error:
         print(f"DigiDokaan tracking history unavailable for {normalized}: {error}")
         return []
+
+
+async def fetch_tracking_history(session, tracking_number):
+    """Return cached DigiDokaan history and deduplicate concurrent CN lookups."""
+    normalized = "".join(character for character in str(tracking_number or "") if character.isdigit())
+    if not normalized:
+        return []
+    cached = _history_cache.get(normalized)
+    if cached and cached[1] > time.monotonic():
+        return cached[0]
+    task = _history_inflight.get(normalized)
+    if task is None:
+        task = asyncio.create_task(_fetch_tracking_history(session, normalized))
+        _history_inflight[normalized] = task
+    try:
+        history = await task
+        if history:
+            latest = str(history[-1].get("ProcessDescForPortal") or "").strip().casefold()
+            terminal = (
+                latest == "delivered"
+                or latest.endswith(" - delivered")
+                or any(marker in latest for marker in ("returned to shipper", "delivered to shipper", "cancelled"))
+            ) and "undelivered" not in latest
+            ttl = _TERMINAL_CACHE_SECONDS if terminal else _ACTIVE_CACHE_SECONDS
+            _history_cache[normalized] = (history, time.monotonic() + ttl)
+            return history
+        return cached[0] if cached else []
+    except Exception as error:
+        print(f"DigiDokaan tracking history unavailable for {normalized}: {error}")
+        return cached[0] if cached else []
+    finally:
+        if _history_inflight.get(normalized) is task:
+            _history_inflight.pop(normalized, None)
 
 
 async def fetch_payments(session):

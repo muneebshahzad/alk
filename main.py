@@ -75,8 +75,6 @@ from digidokaan import (
     fetch_booking_metadata,
     fetch_pending_shipper_advice,
     fetch_payments as fetch_digidokaan_payments,
-    fetch_tracking_history as fetch_digidokaan_tracking_history,
-    fetch_tracking_status as fetch_digidokaan_tracking_status,
     fetch_trax_label,
     generate_trax_load_sheet,
     match_trax_city,
@@ -84,6 +82,12 @@ from digidokaan import (
 )
 from finance import build_entry, finance_dashboard, money, post_journal, reverse_journal
 from shipper_advice_state import advice_request_key, remove_acknowledged_advice
+from tracking_resolver import (
+    fetch_resolved_tracking_history,
+    fetch_resolved_tracking_snapshot,
+    fetch_resolved_tracking_status,
+)
+from trax import is_trax_tracking_number
 
 app = Flask(__name__)
 app.debug = True
@@ -1280,20 +1284,25 @@ def is_delivered_status(status):
 def normalize_status_bucket(status):
     raw = (status or "Un-Booked").strip()
     upper = raw.upper()
+    upper = re.sub(r"^SHIPMENT\s*[-–—:]\s*", "", upper).strip()
     if "PARTIALLY DELIVERED" in upper:
         return "Partially Delivered"
-    if "RETURNED TO SHIPPER" in upper:
+    if "RETURNED TO SHIPPER" in upper or "DELIVERED TO SHIPPER" in upper or "RETURN DELIVERED" in upper:
         return "RETURNED TO SHIPPER"
     if "BEING RETURN" in upper or "OUT FOR RETURN" in upper or "RETURN SUBMISSION" in upper:
         return "Being Return"
-    if "UNDELIVERED" in upper:
+    if any(marker in upper for marker in ("UNDELIVERED", "DELIVERY UNSUCCESSFUL", "DELIVERY FAILED", "REASON VALIDATION")):
         return "Undelivered"
     if "OUT FOR DELIVERY" in upper:
         return "Out For Delivery"
     if is_delivered_status(raw):
         return "Delivered"
-    if "PICKED FROM SHIPPER" in upper:
+    if "PICKED FROM SHIPPER" in upper or "RIDER PICKED" in upper or "PICKED UP" in upper:
         return "Picked From Shipper"
+    if "ARRIVED AT ORIGIN" in upper:
+        return "Arrived At Origin"
+    if "IN TRANSIT" in upper:
+        return "Delivery In Transit"
     if upper == "BOOKED" or "CONSIGNMENT BOOKED" in upper:
         return "Booked"
     if upper in {"UN-BOOKED", "UNBOOKED"}:
@@ -2197,7 +2206,7 @@ async def fetch_tracking_data(session, tracking_number):
 
 async def fetch_tracking_status(session, tracking_number):
     if is_digidokaan_tracking_number(tracking_number):
-        status = await fetch_digidokaan_tracking_status(session, tracking_number)
+        status = await fetch_resolved_tracking_status(session, tracking_number)
         return status or "Tracking unavailable"
     data = await fetch_tracking_data(session, tracking_number)
     if data and isinstance(data, list) and data[-1].get("ProcessDescForPortal"):
@@ -2226,15 +2235,22 @@ async def process_line_item(session, line_item, fulfillments):
             for item in fulfillment.line_items:
                 if item.id == line_item.id:
                     tracking_number = fulfillment.tracking_number
-                    tracking_details = await fetch_tracking_status(session, tracking_number)
+                    if is_digidokaan_tracking_number(tracking_number):
+                        snapshot = await fetch_resolved_tracking_snapshot(session, tracking_number)
+                        tracking_details = snapshot.get("status") or "Tracking unavailable"
+                        tracking_source = snapshot.get("source") or "DigiDokaan"
+                    else:
+                        tracking_details = await fetch_tracking_status(session, tracking_number)
+                        tracking_source = "Call Courier"
                     tracking_info.append({
                         'tracking_number': tracking_number,
                         'tracking_url': tracking_url_for_number(tracking_number),
                         'status': tracking_details,
+                        'tracking_source': tracking_source,
                         'quantity': item.quantity
                     })
     return tracking_info if tracking_info else [
-        {"tracking_number": "N/A", "status": "Un-Booked", "quantity": int(getattr(line_item, "fulfillable_quantity", 0) or 0)}
+        {"tracking_number": "N/A", "status": "Un-Booked", "tracking_source": "", "quantity": int(getattr(line_item, "fulfillable_quantity", 0) or 0)}
     ]
 
 
@@ -2355,7 +2371,8 @@ async def process_order(session, order):
                     'quantity': info['quantity'],
                     'tracking_number': info['tracking_number'],
                     'tracking_url': info.get('tracking_url') or tracking_url_for_number(info['tracking_number']),
-                    'status': info['status']
+                    'status': info['status'],
+                    'tracking_source': info.get('tracking_source') or '',
                 })
                 order_info['status'] = info['status']
 
@@ -2579,7 +2596,7 @@ def build_payment_operational_metrics():
         buckets["all"].append(order)
         if statuses and statuses != {"Un-Booked"}:
             buckets["dispatched"].append(order)
-        if statuses & {"Booked", "Picked From Shipper", "Out For Delivery"}:
+        if statuses & {"Booked", "Picked From Shipper", "Arrived At Origin", "Delivery In Transit", "Out For Delivery"}:
             buckets["in_transit"].append(order)
         if "Delivered" in statuses:
             buckets["delivered"].append(order)
@@ -3139,7 +3156,7 @@ def displayTracking(tracking_num):
     async def async_func():
         async with aiohttp.ClientSession() as session:
             if is_digidokaan_tracking_number(tracking_num):
-                return await fetch_digidokaan_tracking_history(session, tracking_num)
+                return await fetch_resolved_tracking_history(session, tracking_num)
             return await fetch_tracking_data(session, tracking_num)
 
     data = asyncio.run(async_func())
@@ -3451,8 +3468,47 @@ def apply_shopify_order_tag(order_id, tag, include_date=False):
     return order.save()
 
 
+async def revalidate_pending_trax_shipments(orders):
+    """Refresh apparently pending Trax items before vendor quantities are calculated."""
+    lookups = []
+    for order in orders or []:
+        for item in order.get("line_items", []) or []:
+            tracking_number = item.get("tracking_number")
+            if (
+                is_trax_tracking_number(tracking_number)
+                and is_pending_line_item_status(item.get("status"))
+            ):
+                lookups.append((item, str(tracking_number)))
+    if not lookups:
+        return 0
+    async with aiohttp.ClientSession() as client:
+        semaphore = asyncio.Semaphore(10)
+
+        async def lookup(tracking_number):
+            async with semaphore:
+                return await fetch_resolved_tracking_snapshot(client, tracking_number)
+
+        results = await asyncio.gather(*(
+            lookup(tracking_number)
+            for _item, tracking_number in lookups
+        ), return_exceptions=True)
+    updated = 0
+    for (item, _tracking_number), result in zip(lookups, results):
+        if not isinstance(result, dict) or not result.get("status"):
+            continue
+        item["status"] = result["status"]
+        item["tracking_source"] = result.get("source") or item.get("tracking_source") or ""
+        updated += 1
+    return updated
+
+
 def build_pending_orders_mobile_data():
     refresh_daraz_cache_if_needed()
+    try:
+        asyncio.run(revalidate_pending_trax_shipments(order_details))
+    except Exception as error:
+        # Cached order data remains safe to display when either courier is down.
+        print(f"Could not revalidate pending Trax shipments: {error}")
     all_orders = []
     statuses = load_order_statuses()
     overrides = load_product_cost_overrides()
@@ -3557,6 +3613,7 @@ def build_pending_orders_mobile_data():
                     "line_total": round(unit_price * quantity, 2),
                     "line_cost_total": round(unit_cost * quantity, 2),
                     "tracking_number": tracking_number,
+                    "tracking_source": item.get("tracking_source") or "",
                     "status": item_status,
                     "applied_status": statuses.get(key, ""),
                 }
