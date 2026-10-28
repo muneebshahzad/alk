@@ -13,6 +13,17 @@ class TrackingResolverTests(unittest.IsolatedAsyncioTestCase):
              patch.object(tracking_resolver, "fetch_public_tracking_history", AsyncMock(return_value=direct)):
             return await tracking_resolver.fetch_resolved_tracking_history(object(), "22322660078220")
 
+    def test_shipment_prefix_is_removed_from_display_status(self):
+        self.assertEqual(
+            tracking_resolver.clean_tracking_status_label("Shipment - Out for Delivery"),
+            "Out for Delivery",
+        )
+        self.assertEqual(
+            tracking_resolver.clean_tracking_status_label("Shipment – In Transit"),
+            "In Transit",
+        )
+        self.assertEqual(tracking_resolver.clean_tracking_status_label("Return - Dispatched"), "Return - Dispatched")
+
     async def test_newer_trax_overrides_stale_digidokaan(self):
         result = await self.resolve(
             [{"TransactionDate": "2026-10-27 10:00:00", "ProcessDescForPortal": "Booked"}],
@@ -47,4 +58,3 @@ class TrackingResolverTests(unittest.IsolatedAsyncioTestCase):
             [{"TransactionDate": "2026-10-27", "ProcessDescForPortal": "Booked"}], []
         )
         self.assertEqual(result[-1]["ProcessDescForPortal"], "Delivered")
-

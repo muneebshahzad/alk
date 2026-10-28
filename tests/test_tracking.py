@@ -22,6 +22,7 @@ namespace = {
     'parse_money': lambda value, default=0: float(value or default),
     'parse_int': lambda value, default=0: int(value or default),
     'format_currency_amount': lambda value, currency='PKR': f"{currency} {float(value or 0):,.0f}",
+    'clean_tracking_status_label': lambda value: str(value or '').removeprefix('Shipment - ').strip(),
 }
 exec(compile(ast.Module(body=functions, type_ignores=[]), 'main.py', 'exec'), namespace)
 

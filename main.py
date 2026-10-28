@@ -84,6 +84,7 @@ from digidokaan import (
 from finance import build_entry, finance_dashboard, money, post_journal, reverse_journal
 from shipper_advice_state import advice_request_key, remove_acknowledged_advice
 from tracking_resolver import (
+    clean_tracking_status_label,
     fetch_resolved_tracking_history,
     fetch_resolved_tracking_snapshot,
     fetch_resolved_tracking_status,
@@ -2240,7 +2241,7 @@ async def process_line_item(session, line_item, fulfillments):
                         # Publish the Shopify order list using the primary source first.
                         # Direct Trax reconciliation runs after the list is available.
                         tracking_details = await fetch_digidokaan_tracking_status(session, tracking_number)
-                        tracking_details = tracking_details or "Tracking unavailable"
+                        tracking_details = clean_tracking_status_label(tracking_details) or "Tracking unavailable"
                         tracking_source = "DigiDokaan"
                     else:
                         tracking_details = await fetch_tracking_status(session, tracking_number)

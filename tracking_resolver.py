@@ -14,6 +14,11 @@ _DATE_FORMATS = (
 )
 
 
+def clean_tracking_status_label(value):
+    """Remove Trax's repetitive display prefix without changing status meaning."""
+    return re.sub(r"^\s*shipment\s*[-–—:]\s*", "", str(value or ""), flags=re.I).strip()
+
+
 def tracking_event_datetime(event):
     raw = str((event or {}).get("TransactionDate") or "").strip()
     if not raw:
@@ -39,7 +44,11 @@ def tracking_history_latest_datetime(history):
 
 
 def _with_source(history, source):
-    return [{**event, "TrackingSource": event.get("TrackingSource") or source} for event in history or []]
+    return [{
+        **event,
+        "ProcessDescForPortal": clean_tracking_status_label(event.get("ProcessDescForPortal")),
+        "TrackingSource": event.get("TrackingSource") or source,
+    } for event in history or []]
 
 
 def choose_freshest_history(digidokaan_history, trax_history):
