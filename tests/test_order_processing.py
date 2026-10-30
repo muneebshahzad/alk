@@ -10,6 +10,10 @@ function = next(
     node for node in source.body
     if isinstance(node, ast.AsyncFunctionDef) and node.name == "safe_process_order"
 )
+process_line_item_function = next(
+    node for node in source.body
+    if isinstance(node, ast.AsyncFunctionDef) and node.name == "process_line_item"
+)
 customer_functions = [
     node for node in source.body
     if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
@@ -18,6 +22,41 @@ customer_functions = [
 
 
 class OrderProcessingTests(unittest.TestCase):
+    def test_partially_fulfilled_line_keeps_remaining_quantity_pending(self):
+        async def fetch_digidokaan_tracking_status(_session, _tracking):
+            return "Delivered"
+
+        async def fetch_tracking_status(_session, _tracking):
+            return "Delivered"
+
+        namespace = {
+            "fetch_digidokaan_tracking_status": fetch_digidokaan_tracking_status,
+            "fetch_tracking_status": fetch_tracking_status,
+            "clean_tracking_status_label": lambda value: value,
+            "is_digidokaan_tracking_number": lambda value: str(value).startswith("223"),
+            "tracking_url_for_number": lambda value: f"/track/{value}",
+        }
+        exec(compile(ast.Module(body=[process_line_item_function], type_ignores=[]), "main.py", "exec"), namespace)
+        line_item = type("LineItem", (), {
+            "id": 10,
+            "quantity": 2,
+            "fulfillment_status": "partial",
+            "fulfillable_quantity": 1,
+        })()
+        fulfilled_item = type("FulfillmentItem", (), {"id": 10, "quantity": 1})()
+        fulfillment = type("Fulfillment", (), {
+            "status": "success",
+            "tracking_number": "2232369665557",
+            "line_items": [fulfilled_item],
+        })()
+
+        rows = asyncio.run(namespace["process_line_item"](None, line_item, [fulfillment]))
+
+        self.assertEqual([(row["status"], row["quantity"]) for row in rows], [
+            ("Delivered", 1),
+            ("Un-Booked", 1),
+        ])
+
     def test_limiter_can_be_used_by_repeated_refresh_event_loops(self):
         processed = []
 

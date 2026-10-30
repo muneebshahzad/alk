@@ -1317,6 +1317,52 @@ def is_pending_line_item_status(status):
     return normalized in {"Booked", "Un-Booked"}
 
 
+def is_need_attention_status(status):
+    upper = str(status or "").strip().upper()
+    normalized = normalize_status_bucket(status)
+    attention_keywords = (
+        "UNDELIVERED",
+        "DELIVERY UNSUCCESSFUL",
+        "DELIVERY FAILED",
+        "CONTACTING CONSIGNEE",
+        "CONSIGNEE REFUSED",
+        "CUSTOMER REFUSED",
+        "SHIPPER ADVISE REQUESTED",
+        "SHIPPER ADVICE REQUESTED",
+        "REASON VALIDATION REQUIRED",
+        "ADDRESS CLOSED",
+        "MOVED TO ORIGIN BRANCH",
+        "RETURN SUBMITTED",
+        "RETURN SUBMISSION",
+        "BEING RETURN",
+        "OUT FOR RETURN",
+    )
+    return normalized in {"Undelivered", "Being Return"} or any(
+        keyword in upper for keyword in attention_keywords
+    )
+
+
+def aggregate_order_status(line_items):
+    """Derive one order badge from every active line-item shipment."""
+    if not line_items:
+        return "Un-Booked"
+
+    normalized_statuses = [normalize_status_bucket(item.get("status")) for item in line_items]
+    unique_statuses = set(normalized_statuses)
+
+    if any(status == "RETURNED TO SHIPPER" for status in normalized_statuses):
+        return "RETURNED TO SHIPPER"
+    if any(status == "Being Return" for status in normalized_statuses):
+        return "Being Return"
+    if any(status == "Undelivered" for status in normalized_statuses):
+        return "Undelivered"
+    if any(is_need_attention_status(item.get("status")) for item in line_items):
+        return "Need Attention"
+    if len(unique_statuses) > 1:
+        return "Mixed Status"
+    return normalized_statuses[0] if normalized_statuses else "Un-Booked"
+
+
 def employee_portal_is_authenticated():
     return bool(session.get(EMPLOYEE_PORTAL_SESSION_KEY) or session.get(ADMIN_PORTAL_SESSION_KEY))
 
@@ -2230,32 +2276,55 @@ async def process_line_item(session, line_item, fulfillments):
         return []
 
     tracking_info = []
-    if line_item.fulfillment_status == "fulfilled":
-        for fulfillment in fulfillments:
-            if fulfillment.status == "cancelled":
+    fulfilled_quantity = 0
+    for fulfillment in fulfillments:
+        if fulfillment.status == "cancelled":
+            continue
+        for item in fulfillment.line_items:
+            if item.id != line_item.id:
                 continue
-            for item in fulfillment.line_items:
-                if item.id == line_item.id:
-                    tracking_number = fulfillment.tracking_number
-                    if is_digidokaan_tracking_number(tracking_number):
-                        # Publish the Shopify order list using the primary source first.
-                        # Direct Trax reconciliation runs after the list is available.
-                        tracking_details = await fetch_digidokaan_tracking_status(session, tracking_number)
-                        tracking_details = clean_tracking_status_label(tracking_details) or "Tracking unavailable"
-                        tracking_source = "DigiDokaan"
-                    else:
-                        tracking_details = await fetch_tracking_status(session, tracking_number)
-                        tracking_source = "Call Courier"
-                    tracking_info.append({
-                        'tracking_number': tracking_number,
-                        'tracking_url': tracking_url_for_number(tracking_number),
-                        'status': tracking_details,
-                        'tracking_source': tracking_source,
-                        'quantity': item.quantity
-                    })
-    return tracking_info if tracking_info else [
-        {"tracking_number": "N/A", "status": "Un-Booked", "tracking_source": "", "quantity": int(getattr(line_item, "fulfillable_quantity", 0) or 0)}
-    ]
+            quantity = max(int(getattr(item, "quantity", 0) or 0), 0)
+            if quantity <= 0:
+                continue
+            fulfilled_quantity += quantity
+            tracking_number = fulfillment.tracking_number or "N/A"
+            if is_digidokaan_tracking_number(tracking_number):
+                # Publish the Shopify order list using the primary source first.
+                # Direct Trax reconciliation runs after the list is available.
+                tracking_details = await fetch_digidokaan_tracking_status(session, tracking_number)
+                tracking_details = clean_tracking_status_label(tracking_details) or "Tracking unavailable"
+                tracking_source = "DigiDokaan"
+            else:
+                tracking_details = await fetch_tracking_status(session, tracking_number)
+                tracking_source = "Call Courier"
+            tracking_info.append({
+                'tracking_number': tracking_number,
+                'tracking_url': tracking_url_for_number(tracking_number),
+                'status': tracking_details,
+                'tracking_source': tracking_source,
+                'quantity': quantity,
+            })
+
+    pending_quantity = max(int(getattr(line_item, "fulfillable_quantity", 0) or 0), 0)
+    if pending_quantity:
+        tracking_info.append({
+            "tracking_number": "N/A",
+            "tracking_url": tracking_url_for_number("N/A"),
+            "status": "Un-Booked",
+            "tracking_source": "",
+            "quantity": pending_quantity,
+        })
+    if tracking_info:
+        return tracking_info
+
+    fallback_quantity = max(int(getattr(line_item, "quantity", 0) or 0) - fulfilled_quantity, 0)
+    return [{
+        "tracking_number": "N/A",
+        "tracking_url": tracking_url_for_number("N/A"),
+        "status": "Un-Booked",
+        "tracking_source": "",
+        "quantity": fallback_quantity,
+    }] if fallback_quantity else []
 
 
 async def fetch_product_display(session, line_item):
@@ -2378,7 +2447,7 @@ async def process_order(session, order):
                     'status': info['status'],
                     'tracking_source': info.get('tracking_source') or '',
                 })
-                order_info['status'] = info['status']
+        order_info['status'] = aggregate_order_status(order_info['line_items'])
 
         order_end_time = time.time()
         return order_info
@@ -3621,8 +3690,6 @@ def build_pending_orders_mobile_data():
             }
         )
     for shopify_order in order_details:
-        if any(str(tag).startswith("Dispatched") for tag in shopify_order.get("tags", [])):
-            continue
         customer = shopify_order.get("customer_details") or {}
         customer_city = (customer.get("city") or "").strip()
         items = []
