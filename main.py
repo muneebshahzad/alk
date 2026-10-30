@@ -3562,7 +3562,7 @@ async def revalidate_pending_trax_shipments(orders):
                 is_trax_tracking_number(tracking_number)
                 and is_pending_line_item_status(item.get("status"))
             ):
-                lookups.append((item, str(tracking_number)))
+                lookups.append((order, item, str(tracking_number)))
     if not lookups:
         return 0
     async with aiohttp.ClientSession() as client:
@@ -3574,15 +3574,20 @@ async def revalidate_pending_trax_shipments(orders):
 
         results = await asyncio.gather(*(
             lookup(tracking_number)
-            for _item, tracking_number in lookups
+            for _order, _item, tracking_number in lookups
         ), return_exceptions=True)
     updated = 0
-    for (item, _tracking_number), result in zip(lookups, results):
+    touched_orders = set()
+    for (order, item, _tracking_number), result in zip(lookups, results):
         if not isinstance(result, dict) or not result.get("status"):
             continue
         item["status"] = result["status"]
         item["tracking_source"] = result.get("source") or item.get("tracking_source") or ""
+        touched_orders.add(id(order))
         updated += 1
+    for order in orders or []:
+        if id(order) in touched_orders:
+            order["status"] = aggregate_order_status(order.get("line_items") or [])
     return updated
 
 
@@ -3593,7 +3598,7 @@ async def refresh_trax_tracking_for_orders(orders):
         for item in order.get("line_items", []) or []:
             tracking_number = item.get("tracking_number")
             if is_trax_tracking_number(tracking_number):
-                lookups.append((item, str(tracking_number)))
+                lookups.append((order, item, str(tracking_number)))
     if not lookups:
         return 0
     semaphore = asyncio.Semaphore(10)
@@ -3603,15 +3608,20 @@ async def refresh_trax_tracking_for_orders(orders):
                 return await fetch_resolved_tracking_snapshot(client, tracking_number)
 
         results = await asyncio.gather(*(
-            lookup(tracking_number) for _item, tracking_number in lookups
+            lookup(tracking_number) for _order, _item, tracking_number in lookups
         ), return_exceptions=True)
     updated = 0
-    for (item, _tracking_number), result in zip(lookups, results):
+    touched_orders = set()
+    for (order, item, _tracking_number), result in zip(lookups, results):
         if not isinstance(result, dict) or not result.get("status"):
             continue
         item["status"] = result["status"]
         item["tracking_source"] = result.get("source") or item.get("tracking_source") or ""
+        touched_orders.add(id(order))
         updated += 1
+    for order in orders or []:
+        if id(order) in touched_orders:
+            order["status"] = aggregate_order_status(order.get("line_items") or [])
     return updated
 
 

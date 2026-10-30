@@ -795,6 +795,17 @@ function orderNeedsAttention(order) {
   );
 }
 
+function effectiveOrderStatus(order) {
+  const itemStatuses = [...new Set(
+    (order?.line_items || [])
+      .map(item => normalizeStatusBucket(item?.status || ''))
+      .filter(Boolean)
+  )];
+  return itemStatuses.length === 1
+    ? itemStatuses[0]
+    : normalizeStatusBucket(order?.status || '');
+}
+
 function isUnpaidOrder(order) {
   const financial = `${order?.financial_status || ''}`.trim().toLowerCase();
   return !['paid', 'partially paid', 'partially_paid', 'partially-paid'].includes(financial);
@@ -880,7 +891,7 @@ function renderStats() {
   const unpaidTotals = { Delivered: 0, 'Un-Booked': 0, 'Need Attention': 0, Booked: 0 };
   let grandTotal = 0;
   ORDER_DATA.forEach(o => {
-    const s = normalizeStatusBucket(o.status);
+    const s = effectiveOrderStatus(o);
     const attention = orderNeedsAttention(o);
     const statBucket = attention ? 'Need Attention' : s;
     const amount = Number(o.total_price || 0);
@@ -973,7 +984,7 @@ function getVisibleOrders() {
   const statusQueryBucket = getStatusQueryBucket(q);
   const effectiveFilter = statusQueryBucket || currentFilter;
   return ORDER_DATA.filter((order) => {
-    const status = normalizeStatusBucket(order.status);
+    const status = effectiveOrderStatus(order);
     const attention = orderNeedsAttention(order);
     const search = [
       order.order_id || '',
@@ -998,9 +1009,9 @@ function updateBottomBar() {
   const q = document.getElementById('orderSearch').value.toLowerCase();
   const statusQueryBucket = getStatusQueryBucket(q);
   const effectiveFilter = statusQueryBucket || currentFilter;
-  ofdCount = visibleOrders.filter(o => normalizeStatusBucket(o.status) === 'Out For Delivery').length;
-  deliveredCount = visibleOrders.filter(o => normalizeStatusBucket(o.status) === 'Delivered').length;
-  rtsCount = visibleOrders.filter(o => normalizeStatusBucket(o.status) === 'RETURNED TO SHIPPER').length;
+  ofdCount = visibleOrders.filter(o => effectiveOrderStatus(o) === 'Out For Delivery').length;
+  deliveredCount = visibleOrders.filter(o => effectiveOrderStatus(o) === 'Delivered').length;
+  rtsCount = visibleOrders.filter(o => effectiveOrderStatus(o) === 'RETURNED TO SHIPPER').length;
   const deliverTargetCount = effectiveFilter === 'Delivered' ? deliveredCount : ofdCount;
   document.getElementById('deliverLabel').textContent = `Bulk Mark Delivered (${deliverTargetCount} Orders)`;
   document.getElementById('returnLabel').textContent  = `Mark All Returned (${rtsCount} Orders)`;
@@ -1034,8 +1045,8 @@ function applyFilterSearch() {
   const effectiveFilter = statusQueryBucket || currentFilter;
   let visible = 0;
   document.querySelectorAll('#shopifyOrderList .card').forEach(card => {
-    const status = normalizeStatusBucket(card.dataset.status || '');
     const order = ORDER_DATA.find(o => String(o.id) === String(card.id || '').replace('order-card-', ''));
+    const status = order ? effectiveOrderStatus(order) : normalizeStatusBucket(card.dataset.status || '');
     const attention = order ? orderNeedsAttention(order) : status === 'Need Attention';
     const search = `${card.dataset.search || ''}`.toLowerCase();
     const matchFilter = effectiveFilter === 'All' || status === effectiveFilter || (effectiveFilter === 'Need Attention' && attention);
@@ -1314,6 +1325,18 @@ function toggleMobile(orderId) {
 }
 
 // ── Init ──
+ORDER_DATA.forEach(order => {
+  const status = effectiveOrderStatus(order);
+  order.status = status;
+  const card = document.getElementById('order-card-' + order.id);
+  if (!card) return;
+  card.dataset.status = status;
+  const badge = card.querySelector('.order-status-badge');
+  if (!badge) return;
+  const meta = statusBadgeMeta(status);
+  badge.className = `sbadge ${meta.cls} order-status-badge`;
+  badge.innerHTML = `<svg width="6" height="6" viewBox="0 0 6 6"><circle cx="3" cy="3" r="3" fill="${meta.dot}"/></svg>${meta.label}`;
+});
 syncAttentionCards();
 renderStats();
 applyFilterSearch();

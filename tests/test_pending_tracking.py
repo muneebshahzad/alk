@@ -48,6 +48,10 @@ class PendingTraxTrackingTests(unittest.TestCase):
         ]
         self.assertEqual(namespace["aggregate_order_status"](items), "Delivered")
 
+    def test_out_for_delivery_item_drives_order_counter_status(self):
+        items = [{"tracking_number": "223232369716651", "status": "Out for Delivery"}]
+        self.assertEqual(namespace["aggregate_order_status"](items), "Out For Delivery")
+
     def test_dispatched_tag_does_not_hide_remaining_unbooked_items(self):
         async def no_revalidation(_orders):
             return 0
