@@ -45,6 +45,9 @@ from db import (
     load_aghaje_item_cost_overrides,
     load_aghaje_order_item_cost_overrides,
     load_aghaje_order_overrides,
+    upsert_aghaje_item_cost_override,
+    upsert_aghaje_order_item_cost_override,
+    upsert_aghaje_order_override,
 )
 from webauthn import (
     generate_authentication_options,
@@ -4816,12 +4819,78 @@ def _aabroo_delivery(order, notes):
     return "Inprocess", "Courier status not available yet"
 
 
+def _aabroo_item_cost_key(product_id=None, variant_id=None, title=""):
+    if variant_id: return f"variant:{variant_id}"
+    if product_id: return f"product:{product_id}"
+    return f"title:{' '.join(str(title or '').strip().lower().split())}"
+
+
 def _aabroo_settlements():
     try:
         value = json.loads(get_app_setting(AABROO_SETTLEMENTS_KEY, "[]") or "[]")
         return value if isinstance(value, list) else []
     except (TypeError, ValueError):
         return []
+
+
+def _add_aabroo_settlement(value):
+    amount = _aabroo_money(value)
+    if amount == 0:
+        raise ValueError("Amount received must not be zero.")
+    entries = _aabroo_settlements()
+    entries.append({"amount": amount, "created_at": datetime.now().isoformat(timespec="seconds")})
+    if not set_app_setting(AABROO_SETTLEMENTS_KEY, json.dumps(entries)):
+        raise RuntimeError("Could not save Aabroo received amount.")
+    return entries
+
+
+def _aabroo_day(value):
+    parsed = parse_date_for_sort(value)
+    return "Undated" if parsed == datetime.min else parsed.date().isoformat()
+
+
+def _build_aabroo_daily_ledger(orders, settlements):
+    daily = {}
+
+    def row(day):
+        return daily.setdefault(day, {"date": day, "order_count": 0, "cod_order_count": 0, "cash_entry_count": 0, "cod": 0.0, "cost": 0.0, "cash_paid": 0.0, "change": 0.0, "running_balance": 0.0, "details": []})
+
+    for order in orders:
+        if order.get("delivery_status") == "Cancelled":
+            continue
+        if order.get("fulfilled"):
+            cost = _aabroo_money(order.get("item_cost")) + _aabroo_money(order.get("packaging_cost")) + _aabroo_money(order.get("delivery_cost"))
+            if cost:
+                day = row(_aabroo_day(order.get("created_at")))
+                day["order_count"] += 1; day["cost"] += cost
+                day["details"].append({"type": "cost", "label": order.get("order_id"), "status": order.get("delivery_status"), "cod": 0.0, "cost": round(cost, 2), "cash_paid": 0.0, "note": "Product, packaging, and delivery cost applied from Shopify order date."})
+        received = _aabroo_money(order.get("amount_received"))
+        if received:
+            day = row(_aabroo_day(order.get("amount_received_updated_at") or order.get("created_at")))
+            day["cod_order_count"] += 1; day["cod"] += received
+            day["details"].append({"type": "cod", "label": order.get("order_id"), "status": order.get("delivery_status"), "cod": received, "cost": 0.0, "cash_paid": 0.0, "note": "Amount received saved on this date."})
+    for entry in settlements:
+        amount = _aabroo_money(entry.get("amount"))
+        if amount:
+            day = row(_aabroo_day(entry.get("created_at")))
+            day["cash_entry_count"] += 1; day["cash_paid"] += amount
+            day["details"].append({"type": "cash", "label": "Cash paid entry", "status": entry.get("created_at"), "cod": 0.0, "cost": 0.0, "cash_paid": amount, "note": "Manual cash payment entry."})
+    running = 0.0
+    rows = []
+    for key in sorted(daily):
+        day = daily[key]
+        for field in ("cod", "cost", "cash_paid"): day[field] = round(day[field], 2)
+        day["change"] = round(day["cod"] + day["cash_paid"] - day["cost"], 2)
+        running = round(running + day["change"], 2); day["running_balance"] = running; rows.append(day)
+    return list(reversed(rows))
+
+
+def _aabroo_fulfilled_filter(order):
+    detail = str(order.get("delivery_status_detail") or "").upper()
+    if order.get("delivery_status") == "Delivered": return "delivered"
+    if "OUT FOR DELIVERY" in detail: return "out-for-delivery"
+    if order.get("delivery_status") == "Returned" or any(word in detail for word in ("UNDELIVERED", "RETURN", "REFUS")): return "undelivered"
+    return "other"
 
 
 def build_aabroo_portal_data():
@@ -4838,24 +4907,37 @@ def build_aabroo_portal_data():
         for line in source.get("line_items") or []:
             count = int(line.get("current_quantity", line.get("quantity", 0)) or 0)
             if count <= 0: continue
-            product_id, variant_id = line.get("product_id"), line.get("variant_id"); title = str(line.get("title") or line.get("name") or "Product"); key = f"{product_id or 'product'}:{variant_id or title.lower()}"
-            saved = (order_items.get(order_id) or {}).get(key) or item_defaults.get(key) or {}; unit_cost = _aabroo_money(saved.get("cost")); item_cost += unit_cost * count; qty += count
-            items.append({"title": title, "qty": count, "unit_cost": unit_cost, "line_cost": unit_cost * count})
+            product_id, variant_id = line.get("product_id"), line.get("variant_id"); title = str(line.get("title") or line.get("name") or "Product"); key = _aabroo_item_cost_key(product_id, variant_id, title)
+            default_saved = item_defaults.get(key) or {}; order_saved = (order_items.get(order_id) or {}).get(key) or {}; saved = order_saved or default_saved
+            unit_cost = _aabroo_money(saved.get("cost")); unit_price = _aabroo_money(line.get("price")); item_cost += unit_cost * count; qty += count
+            items.append({"title": title, "image": line.get("image") or "/static/alkaramat-logo-v2.png", "qty": count, "unit_price": unit_price, "line_price": round(unit_price * count, 2), "unit_cost": unit_cost, "default_unit_cost": _aabroo_money(default_saved.get("cost")), "has_order_cost_override": bool(order_saved), "line_cost": round(unit_cost * count, 2), "cost": unit_cost, "cost_key": key, "product_id": product_id, "variant_id": variant_id})
         saved = overrides.get(order_id) or {}; fulfillment_raw = str(source.get("fulfillment_status") or "unfulfilled").lower(); fulfilled = fulfillment_raw in {"fulfilled", "partial"}
         payment_status = str(saved.get("payment_status") or ("Not Payable" if delivery == "Cancelled" else "Pending")); packaging = _aabroo_money(saved.get("packaging_cost")); courier_cost = _aabroo_money(saved.get("delivery_cost")); received = _aabroo_money(saved.get("amount_received"))
         if delivery == "Cancelled": item_cost = packaging = courier_cost = received = 0.0
         payable = 0.0 if payment_status == "Not Payable" else received - item_cost - packaging - courier_cost
         customer = source.get("customer") or {}; address = source.get("shipping_address") or source.get("billing_address") or {}
         orders.append({"order_id": order_id, "shopify_link": f"https://admin.shopify.com/store/{shop_name}/orders/{source.get('id')}" if shop_name else "#", "created_at": source.get("created_at", ""),
-          "customer_name": address.get("name") or f"{customer.get('first_name','')} {customer.get('last_name','')}".strip(), "customer_phone": address.get("phone") or customer.get("phone") or "", "customer_city": address.get("city") or "",
-          "fulfillment_status": "Partially fulfilled" if fulfillment_raw == "partial" else ("Fulfilled" if fulfilled else "Unfulfilled"), "fulfilled": fulfilled, "delivery_status": delivery, "delivery_status_detail": detail, "payment_status": payment_status,
-          "courier_name": notes.get("hxs_courier_name") or "", "tracking_number": notes.get("hxs_courier_tracking") or "", "items": items, "item_qty": qty, "item_cost": round(item_cost,2), "packaging_cost": packaging, "delivery_cost": courier_cost,
-          "price": _aabroo_money(source.get("current_subtotal_price", source.get("subtotal_price"))), "order_total": _aabroo_money(source.get("current_total_price", source.get("total_price"))), "amount_received": received, "payable": round(payable,2)})
+          "customer_name": address.get("name") or f"{customer.get('first_name','')} {customer.get('last_name','')}".strip(), "customer_phone": address.get("phone") or customer.get("phone") or "", "customer_city": address.get("city") or "", "is_lahore": "lahore" in str(address.get("city") or "").lower(),
+          "fulfillment_status": "Partially fulfilled" if fulfillment_raw == "partial" else ("Fulfilled" if fulfilled else "Unfulfilled"), "fulfillment_status_raw": fulfillment_raw, "fulfilled": fulfilled, "delivery_status": delivery, "delivery_status_detail": detail, "payment_status": payment_status, "financial_status": source.get("financial_status") or "",
+          "courier_name": notes.get("hxs_courier_name") or "", "tracking_number": notes.get("hxs_courier_tracking") or "", "is_postex": "postex" in str(notes.get("hxs_courier_name") or "").lower().replace(" ", ""), "items": items, "item_qty": qty, "item_cost": round(item_cost,2), "packaging_cost": packaging, "delivery_cost": courier_cost,
+          "price": _aabroo_money(source.get("current_subtotal_price", source.get("subtotal_price"))), "order_total": _aabroo_money(source.get("current_total_price", source.get("total_price"))), "amount_received": received, "amount_received_updated_at": saved.get("updated_at") or "", "payable": round(payable,2)})
     orders.sort(key=lambda x: parse_date_for_sort(x.get("created_at")), reverse=True); visible = [x for x in orders if x["delivery_status"] != "Cancelled"]
     closed = [x for x in visible if x["payment_status"] == "Paid"]; fulfilled = [x for x in visible if x["fulfilled"] and x["payment_status"] != "Paid"]; unfulfilled = [x for x in visible if not x["fulfilled"] and x["payment_status"] != "Paid"]
+    for order in fulfilled: order["fulfilled_filter_status"] = _aabroo_fulfilled_filter(order)
     settlements = _aabroo_settlements(); cash = sum(_aabroo_money(x.get("amount")) for x in settlements); cost = sum(x["item_cost"] + x["packaging_cost"] + x["delivery_cost"] for x in visible if x["fulfilled"]); cod = sum(x["amount_received"] for x in visible)
-    summary = {"total_orders": len(visible), "fulfilled_orders": len(fulfilled), "unfulfilled_orders": len(unfulfilled), "closed_orders": len(closed), "total_items_qty": sum(x["item_qty"] for x in visible), "delivered_orders": sum(x["delivery_status"] == "Delivered" for x in visible), "returned_orders": sum(x["delivery_status"] == "Returned" for x in visible), "pending_orders": sum(x["payment_status"] == "Pending" for x in visible), "paid_orders": len(closed), "total_cost": round(cost,2), "total_cod": round(cod,2), "total_cash_paid": round(cash,2), "balance": round(cod + cash - cost,2), "net_payment_received_entries": settlements}
-    return {"orders": visible, "fulfilled_orders": fulfilled, "closed_orders": closed, "unfulfilled_orders": unfulfilled, "summary": summary, "error_message": error}
+    unpaid = lambda rows: round(sum(_aabroo_money(x.get("order_total")) for x in rows if str(x.get("financial_status") or "").lower() not in PAID_FINANCIAL_STATUSES), 2)
+    summary = {"total_orders": len(visible), "fulfilled_orders": len(fulfilled), "unfulfilled_orders": len(unfulfilled), "closed_orders": len(closed), "total_items_qty": sum(x["item_qty"] for x in visible), "delivered_orders": sum(x["delivery_status"] == "Delivered" for x in visible), "returned_orders": sum(x["delivery_status"] == "Returned" for x in visible), "other_status_orders": sum(x["delivery_status"] == "Other status" for x in visible), "pending_orders": sum(x["payment_status"] == "Pending" for x in visible), "paid_orders": len(closed), "total_cost": round(cost,2), "total_cod": round(cod,2), "total_cash_paid": round(cash,2), "net_payment_received": round(cash,2), "balance": round(cod + cash - cost,2), "net_payment_received_entries": settlements, "fulfilled_unpaid_value": unpaid(fulfilled), "unfulfilled_unpaid_value": unpaid(unfulfilled), "closed_received_value": round(sum(x["amount_received"] for x in closed),2), "fulfilled_filter_values": {"delivered": round(sum(x["order_total"] for x in fulfilled if x["fulfilled_filter_status"] == "delivered"),2), "out_for_delivery": unpaid([x for x in fulfilled if x["fulfilled_filter_status"] == "out-for-delivery"]), "in_transit": unpaid([x for x in fulfilled if x["fulfilled_filter_status"] != "delivered"])}}
+    summary["daily_ledger"] = _build_aabroo_daily_ledger(visible, settlements)
+    return {"orders": visible, "all_orders": orders, "fulfilled_orders": fulfilled, "closed_orders": closed, "unfulfilled_orders": unfulfilled, "summary": summary, "error_message": error}
+
+
+def _aabroo_order_totals(orders):
+    totals = {"count": len(orders), "item_qty": 0, "item_cost": 0.0, "packaging_cost": 0.0, "delivery_cost": 0.0, "price": 0.0, "order_total": 0.0, "amount_received": 0.0, "payable": 0.0}
+    for order in orders:
+        totals["item_qty"] += sum(int(item.get("qty") or 0) for item in order.get("items") or [])
+        for field in ("item_cost", "packaging_cost", "delivery_cost", "price", "order_total", "amount_received", "payable"):
+            totals[field] += _aabroo_money(order.get(field))
+    return {key: round(value, 2) if isinstance(value, float) else value for key, value in totals.items()}
 
 
 @app.get("/aabroo-orders/paid-order-ids")
@@ -4872,6 +4954,85 @@ def aabroo_paid_order_ids():
     return jsonify({"success": True, "paid_order_ids": paid_order_ids})
 
 
+@app.post("/aabroo-orders/update")
+def update_aabroo_order():
+    data = request.get_json(silent=True) or {}
+    order_id = str(data.get("order_id") or "").strip()
+    if not order_id:
+        return jsonify({"success": False, "error": "Order id is required."}), 400
+    payment_status = str(data.get("payment_status") or "Pending").strip() or "Pending"
+    delivery_status = str(data.get("delivery_status") or "Inprocess").strip() or "Inprocess"
+    amount_received = _aabroo_money(data.get("amount_received"))
+    packaging_cost = _aabroo_money(data.get("packaging_cost"))
+    delivery_cost = _aabroo_money(data.get("delivery_cost"))
+    is_postex = bool(data.get("is_postex")) or "postex" in str(data.get("courier_name") or "").lower().replace(" ", "")
+    if is_postex:
+        amount_received = delivery_cost = 0.0
+    if delivery_status == "Cancelled":
+        payment_status, amount_received, packaging_cost, delivery_cost = "Not Payable", 0.0, 0.0, 0.0
+    try:
+        defaults = load_aghaje_item_cost_overrides()
+        for item in data.get("item_costs") or []:
+            key, title = str(item.get("cost_key") or "").strip(), str(item.get("title") or "").strip()
+            if not key or not title: continue
+            cost = _aabroo_money(item.get("cost"))
+            if not upsert_aghaje_order_item_cost_override(order_id, key, title, cost, item.get("product_id"), item.get("variant_id")):
+                raise RuntimeError(f"Could not save item cost for {title}.")
+            if cost and _aabroo_money((defaults.get(key) or {}).get("cost")) == 0:
+                if not upsert_aghaje_item_cost_override(key, title, cost, item.get("product_id"), item.get("variant_id")):
+                    raise RuntimeError(f"Could not save default item cost for {title}.")
+        if not upsert_aghaje_order_override(order_id, amount_received, packaging_cost, delivery_cost, payment_status, delivery_status):
+            raise RuntimeError("Could not save Aabroo order override.")
+        return jsonify({"success": True, "order_id": order_id, "amount_received": amount_received, "packaging_cost": packaging_cost, "delivery_cost": delivery_cost, "payment_status": payment_status, "delivery_status": delivery_status})
+    except Exception as error:
+        return jsonify({"success": False, "error": str(error)}), 500
+
+
+@app.post("/aabroo-orders/update-summary")
+def update_aabroo_summary():
+    try:
+        entries = _add_aabroo_settlement((request.get_json(silent=True) or {}).get("amount_received"))
+        return jsonify({"success": True, "total_received": round(sum(_aabroo_money(x.get("amount")) for x in entries), 2), "entries": entries})
+    except Exception as error:
+        return jsonify({"success": False, "error": str(error)}), 500
+
+
+@app.post("/aabroo-orders/refresh")
+@app.post("/aabroo_portal/refresh")
+@app.post("/aabroo-portal/refresh")
+def refresh_aabroo_portal():
+    if request.path != "/aabroo-orders/refresh" and not session.get(AABROO_PORTAL_SESSION_KEY):
+        return jsonify({"success": False, "error": "Not authenticated."}), 401
+    try:
+        count = len(_aabroo_fetch_orders())
+        return jsonify({"success": True, "message": f"Refreshed {count} Aabroo orders.", "refreshed_count": count})
+    except Exception as error:
+        return jsonify({"success": False, "error": str(error)}), 500
+
+
+@app.get("/aabroo-orders")
+def aabroo_orders():
+    data = build_aabroo_portal_data()
+    orders = data.get("all_orders") or []
+    fulfilled, closed, unfulfilled, returned, cancelled = [], [], [], [], []
+    for order in orders:
+        if order.get("delivery_status") == "Cancelled": cancelled.append(order)
+        elif order.get("delivery_status") == "Returned": returned.append(order)
+        else:
+            if order.get("fulfilled"): fulfilled.append(order)
+            if order.get("payment_status") == "Paid": closed.append(order)
+            elif not order.get("fulfilled"): unfulfilled.append(order)
+    unpaid = lambda rows: round(sum(_aabroo_money(x.get("order_total")) for x in rows if str(x.get("financial_status") or "").lower() not in PAID_FINANCIAL_STATUSES), 2)
+    return render_template(
+        "aabroo_orders.html", orders=orders, fulfilled_orders=fulfilled, closed_orders=closed,
+        unfulfilled_orders=unfulfilled, returned_orders=returned, cancelled_orders=cancelled,
+        tab_unpaid_values={"fulfilled": unpaid(fulfilled), "unfulfilled": unpaid(unfulfilled)},
+        all_order_totals=_aabroo_order_totals(orders),
+        all_order_fulfilled_totals=_aabroo_order_totals([x for x in orders if x.get("fulfilled")]),
+        summary=data["summary"], error_message=data["error_message"],
+    )
+
+
 @app.route("/aabroo_portal", methods=["GET", "POST"])
 @app.route("/aabroo-portal", methods=["GET", "POST"])
 def aabroo_portal():
@@ -4885,6 +5046,7 @@ def aabroo_portal():
 
 
 @app.post("/aabroo_portal/logout")
+@app.post("/aabroo-portal/logout")
 def aabroo_portal_logout():
     session.pop(AABROO_PORTAL_SESSION_KEY, None); return redirect(url_for("aabroo_portal"))
 

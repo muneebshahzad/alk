@@ -1,0 +1,1303 @@
+{% extends 'base.html' %}
+{% block title %}The Al Karamat – Aabroo Orders{% endblock %}
+
+{% block content %}
+<style>
+  #main { overflow:auto !important; }
+  .agh-shell { min-height:100%; display:block; }
+  .agh-topbar { height:52px; position:sticky; top:0; z-index:5; background:#fff; border-bottom:1px solid #e3e6f0; display:flex; align-items:center; padding:0 20px; gap:12px; flex-shrink:0; }
+  .agh-title { font-size:16px; font-weight:700; color:#3a3b45; }
+  .agh-scroll { padding:16px; display:flex; flex-direction:column; gap:16px; }
+  .agh-stats { display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:12px; }
+  .agh-card { background:#fff; border-radius:12px; border:1px solid #e3e6f0; overflow:hidden; box-shadow:0 1px 4px rgba(0,0,0,0.04); }
+  .agh-card-head { padding:14px 20px; border-bottom:1px solid #e3e6f0; display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+  .agh-stat-row { padding:14px 16px; display:flex; align-items:center; gap:12px; }
+  .agh-stat-icon { width:42px; height:42px; border-radius:10px; display:flex; align-items:center; justify-content:center; font-size:18px; flex-shrink:0; }
+  .agh-stat-label { font-size:10px; color:#858796; font-weight:700; text-transform:uppercase; letter-spacing:.05em; }
+  .agh-stat-value { font-size:22px; font-weight:800; margin-top:2px; }
+	  .agh-toolbar { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+	  .agh-bulk-edit { display:grid; grid-template-columns:repeat(6, minmax(105px, 1fr)) auto auto; gap:8px; align-items:center; max-width:1040px; }
+	  .agh-tabs { position:sticky; top:52px; z-index:4; display:grid; grid-template-columns:repeat(7, minmax(0, 1fr)); gap:10px; padding:10px; border:1px solid #e3e6f0; background:#fff; border-radius:12px; box-shadow:0 1px 4px rgba(0,0,0,0.04); }
+  .agh-tab-btn { border:1px solid #dce2ee; background:#fff; color:#14213d; border-radius:10px; min-height:46px; font-size:12px; font-weight:800; font-family:'DM Sans', sans-serif; cursor:pointer; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px; }
+  .agh-tab-btn.active { border-color:#b8c7f0; background:#eef3ff; color:#2f63ff; box-shadow:inset 0 0 0 1px rgba(78,115,223,0.08); }
+  .agh-tab-subvalue { color:#858796; font-size:9px; font-weight:800; letter-spacing:.04em; text-transform:uppercase; }
+  .agh-tab-btn.active .agh-tab-subvalue { color:#2f63ff; }
+	  .agh-summary-panel[hidden], .agh-ledger-panel[hidden], .agh-readonly-panel[hidden] { display:none !important; }
+  .agh-filter-panel { display:flex; align-items:center; gap:10px; flex-wrap:wrap; padding:10px 12px; border:1px solid #e3e6f0; background:#fff; border-radius:12px; box-shadow:0 1px 4px rgba(0,0,0,0.04); }
+  .agh-filter-panel[hidden] { display:none !important; }
+  .agh-filter-label { font-size:10px; color:#858796; font-weight:800; text-transform:uppercase; letter-spacing:.05em; }
+  .agh-filter-chip { border:1px solid #dce2ee; background:#fff; color:#14213d; border-radius:999px; min-height:34px; padding:0 12px; font-size:11px; font-weight:800; font-family:'DM Sans', sans-serif; cursor:pointer; display:inline-flex; align-items:center; gap:6px; }
+  .agh-filter-chip.active { border-color:#b8c7f0; background:#eef3ff; color:#2f63ff; }
+  .agh-filter-chip input { margin:0; }
+  .agh-product-filter { min-height:34px; min-width:240px; border:1px solid #dce2ee; background:#fff; color:#14213d; border-radius:999px; padding:0 14px; font-size:11px; font-weight:800; font-family:'DM Sans', sans-serif; }
+  .agh-product-filter:focus { outline:none; border-color:#b8c7f0; box-shadow:0 0 0 3px rgba(78,115,223,0.12); }
+  .agh-btn { border-radius:8px; padding:8px 12px; font-size:11px; font-weight:700; cursor:pointer; font-family:'DM Sans', sans-serif; border:1px solid #dce2ee; background:#fff; color:#3a3b45; }
+  .agh-btn.primary { border-color:#4e73df; background:#4e73df; color:#fff; }
+  .agh-btn.success { border-color:#1cc88a; background:#1cc88a; color:#fff; }
+  .agh-btn.warning { border-color:#f6c23e; background:#fff7dd; color:#8b5a00; }
+  .agh-btn[hidden] { display:none !important; }
+  .agh-table-wrap { overflow:auto; }
+  .agh-table { width:100%; border-collapse:collapse; min-width:1680px; }
+  .agh-table th, .agh-table td { padding:12px 14px; border-bottom:1px solid #eef0f6; text-align:left; vertical-align:top; }
+	  .agh-table th { background:#f8f9fc; font-size:11px; font-weight:700; color:#858796; text-transform:uppercase; letter-spacing:.05em; white-space:nowrap; }
+  .agh-sort-btn { width:100%; border:0; background:transparent; color:inherit; cursor:pointer; padding:0; font:inherit; letter-spacing:inherit; text-transform:inherit; text-align:left; display:inline-flex; align-items:center; gap:5px; }
+  .agh-sort-btn::after { content:'↕'; font-size:10px; opacity:.45; }
+  .agh-sort-btn.active { color:#2f63ff; }
+  .agh-sort-btn.active.asc::after { content:'↑'; opacity:1; }
+  .agh-sort-btn.active.desc::after { content:'↓'; opacity:1; }
+	  .agh-table tbody tr:hover { background:#fafbff; }
+	  .agh-total-row th, .agh-total-row td { background:#eef3ff; color:#14213d; font-weight:800; border-bottom:1px solid #dce5ff; }
+	  .agh-table tfoot td { border-top:2px solid #dce2ee; border-bottom:0; }
+	  .agh-readonly-table .agh-item-chip { grid-template-columns:38px minmax(0,1fr) auto; }
+	  .agh-readonly-table .agh-item-chip img { width:38px; height:38px; }
+	  .agh-pill { display:inline-flex; align-items:center; width:max-content; border-radius:999px; padding:4px 9px; background:#f0f2f7; color:#14213d; font-size:11px; font-weight:800; white-space:nowrap; }
+	  .agh-pill.good { background:#e7f7ee; color:#146c43; }
+	  .agh-pill.warn { background:#fff4d8; color:#8b5a00; }
+	  .agh-pill.bad { background:#fde8e5; color:#a0281f; }
+	  .agh-pill.lahore { background:#fff3cd; color:#8b5a00; margin-top:6px; }
+  .agh-order-id { font-size:13px; font-weight:700; color:#4e73df; text-decoration:none; white-space:nowrap; }
+  .agh-order-date { font-size:10px; color:#858796; margin-top:4px; white-space:nowrap; }
+  .agh-chip-list { display:flex; flex-direction:column; gap:8px; }
+  .agh-item-chip { display:grid; grid-template-columns:44px minmax(0,1fr) auto; gap:10px; align-items:start; padding:8px 10px; border:1px solid #e8eaef; border-radius:10px; background:#fff; }
+  .agh-item-chip img { width:44px; height:44px; border-radius:8px; object-fit:cover; background:#f2f4f8; }
+  .agh-item-body { display:flex; flex-direction:column; gap:6px; min-width:0; }
+  .agh-item-title { font-size:12px; font-weight:700; color:#2d2e36; }
+  .agh-item-meta { font-size:10px; color:#858796; }
+  .agh-item-cost-row { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+  .agh-item-cost-label { font-size:10px; color:#858796; font-weight:700; text-transform:uppercase; letter-spacing:.04em; }
+  .agh-item-cost-input { width:92px; }
+  .agh-line-cost { font-size:11px; color:#3a3b45; font-weight:700; white-space:nowrap; }
+  .agh-money { font-family:'DM Mono', monospace; font-size:13px; font-weight:700; color:#2d2e36; white-space:nowrap; }
+  .agh-input, .agh-select { width:120px; border:1px solid #dce2ee; border-radius:8px; padding:8px 10px; font-size:12px; font-family:'DM Sans', sans-serif; color:#2d2e36; background:#fff; }
+  .agh-input.compact { width:95px; }
+  .agh-checkbox { width:16px; height:16px; accent-color:#4e73df; }
+  .agh-input[disabled], .agh-select[disabled] { background:#f8f9fc; color:#858796; cursor:default; }
+  .agh-postex-locked { background:#f1f3f7 !important; color:#858796 !important; border-color:#e2e6ef !important; }
+  .agh-postex-note { font-size:10px; color:#858796; margin-top:5px; max-width:130px; line-height:1.35; }
+  .agh-postex-muted { color:#858796; opacity:.7; }
+  .agh-summary-input { width:100%; max-width:170px; margin-top:6px; font-size:14px; font-weight:700; }
+  .agh-summary-total { font-size:20px; font-weight:800; color:#2d2e36; margin-top:4px; cursor:pointer; }
+  .agh-summary-add-row { display:flex; align-items:center; gap:8px; margin-top:8px; }
+  .agh-summary-add-row .agh-summary-input { margin-top:0; }
+  .agh-plus-btn { min-width:42px; height:38px; padding:0; font-size:20px; line-height:1; }
+  .agh-actions { display:flex; gap:8px; align-items:center; }
+  .agh-payable { font-family:'DM Mono', monospace; font-size:14px; font-weight:800; white-space:nowrap; }
+  .agh-detail { font-size:10px; color:#858796; margin-top:6px; line-height:1.45; max-width:220px; }
+  .agh-empty { padding:36px 16px; text-align:center; color:#858796; font-size:13px; }
+  .agh-banner { padding:12px 14px; border-radius:10px; background:#fef3f2; border:1px solid #f4c7c3; color:#a33a2e; font-size:12px; }
+  .agh-modal-backdrop { position:fixed; inset:0; background:rgba(20,33,61,.36); display:none; align-items:center; justify-content:center; z-index:1000; padding:18px; }
+  .agh-modal-backdrop.open { display:flex; }
+  .agh-modal { width:min(420px, 100%); max-height:80vh; overflow:auto; background:#fff; border-radius:14px; border:1px solid #e3e6f0; box-shadow:0 18px 50px rgba(20,33,61,.22); }
+  .agh-modal-head { padding:16px 18px; border-bottom:1px solid #eef0f6; display:flex; align-items:center; justify-content:space-between; gap:12px; }
+  .agh-modal-title { font-size:15px; font-weight:800; color:#2d2e36; }
+  .agh-entry-list { padding:10px 18px 18px; display:flex; flex-direction:column; gap:8px; }
+  .agh-entry-row { display:flex; justify-content:space-between; gap:12px; padding:10px 0; border-bottom:1px solid #f0f2f7; font-size:13px; }
+  .agh-entry-row:last-child { border-bottom:0; }
+  .agh-entry-date { color:#858796; font-size:11px; }
+  .agh-daily-card { margin-top:16px; }
+  .agh-daily-wrap { overflow:auto; }
+  .agh-daily-table { width:100%; border-collapse:collapse; min-width:980px; }
+  .agh-daily-table th, .agh-daily-table td { padding:12px 14px; border-bottom:1px solid #eef0f6; text-align:left; vertical-align:top; }
+  .agh-daily-table th { background:#f8f9fc; font-size:10px; font-weight:800; color:#858796; text-transform:uppercase; letter-spacing:.06em; }
+  .agh-daily-table td { font-size:12px; color:#2d2e36; }
+  .agh-daily-date { font-weight:800; color:#14213d; white-space:nowrap; }
+  .agh-daily-note { color:#858796; font-size:10px; margin-top:3px; }
+  .agh-daily-details { display:flex; flex-direction:column; gap:5px; min-width:260px; }
+  .agh-daily-detail-row { display:grid; grid-template-columns:minmax(90px, 1fr) minmax(90px, 1.2fr) auto; gap:8px; align-items:center; padding:6px 8px; border-radius:8px; background:#fafbff; }
+  .agh-daily-pill { display:inline-flex; width:max-content; align-items:center; border-radius:999px; padding:3px 8px; font-size:10px; font-weight:800; background:#eef3ff; color:#2f63ff; }
+  .agh-daily-muted { color:#858796; font-size:10px; }
+  .agh-positive { color:#1cc88a; }
+  .agh-negative { color:#e74a3b; }
+  .agh-neutral { color:#6f7280; }
+	  @media (max-width: 767px) {
+    .agh-topbar { padding:0 14px; }
+    .agh-scroll { padding:12px; }
+    .agh-stats { grid-template-columns:1fr; }
+	    .agh-tabs { grid-template-columns:1fr 1fr; }
+	    .agh-bulk-edit { grid-template-columns:1fr 1fr; width:100%; }
+	  }
+</style>
+
+<div class="agh-shell">
+  <div class="agh-topbar">
+    <span class="agh-title">Aabroo Orders</span>
+    <div style="flex:1"></div>
+    <span style="font-size:11px;color:#858796;">{{ summary.total_orders }} order{{ '' if summary.total_orders == 1 else 's' }}</span>
+  </div>
+
+  <div class="agh-scroll">
+    {% if error_message %}
+    <div class="agh-banner">Could not fetch Aabroo orders: {{ error_message }}</div>
+    {% endif %}
+
+	    <div class="agh-tabs" role="tablist" aria-label="Aabroo order tabs">
+	      <button class="agh-tab-btn" type="button" data-agh-tab="all-orders">
+	        <span>All Orders ({{ orders|length }})</span>
+	        <span class="agh-tab-subvalue">View only</span>
+	      </button>
+	      <button class="agh-tab-btn active" type="button" data-agh-tab="fulfilled">
+	        <span>Fulfilled ({{ fulfilled_orders|length }})</span>
+	        <span class="agh-tab-subvalue">Rs {{ tab_unpaid_values.fulfilled|format_number }}</span>
+      </button>
+      <button class="agh-tab-btn" type="button" data-agh-tab="unfulfilled">
+        <span>Unfulfilled ({{ unfulfilled_orders|length }})</span>
+        <span class="agh-tab-subvalue">Rs {{ tab_unpaid_values.unfulfilled|format_number }}</span>
+      </button>
+      <button class="agh-tab-btn" type="button" data-agh-tab="closed">Closed ({{ closed_orders|length }})</button>
+      <button class="agh-tab-btn" type="button" data-agh-tab="returned">Returned ({{ returned_orders|length }})</button>
+      <button class="agh-tab-btn" type="button" data-agh-tab="cancelled">Cancelled ({{ cancelled_orders|length }})</button>
+      <button class="agh-tab-btn" type="button" data-agh-tab="summary">Summary</button>
+    </div>
+
+    <div class="agh-filter-panel" data-fulfilled-filter-panel>
+      <span class="agh-filter-label">Fulfilled view</span>
+      <button class="agh-filter-chip active" type="button" data-fulfilled-payment-filter="all">All</button>
+      <button class="agh-filter-chip" type="button" data-fulfilled-payment-filter="open">Open</button>
+      <button class="agh-filter-chip" type="button" data-fulfilled-payment-filter="closed">Closed</button>
+      <label class="agh-filter-chip"><input type="checkbox" data-courier-filter="postex"> PostEx</label>
+      <label class="agh-filter-chip"><input type="checkbox" data-courier-filter="call-courier"> Call Courier</label>
+      <label class="agh-filter-chip"><input type="checkbox" data-courier-filter="leopards"> Leopards</label>
+      <label class="agh-filter-chip"><input type="checkbox" data-courier-filter="lahore"> Lahore</label>
+      <span class="agh-filter-label">Product</span>
+      <input class="agh-product-filter" type="search" data-product-filter placeholder="Filter by product">
+      <span class="agh-filter-label">Courier status</span>
+      <input class="agh-product-filter" type="search" data-courier-status-filter placeholder="Filter by courier status">
+      <span class="agh-filter-label">Missing</span>
+      <label class="agh-filter-chip"><input type="checkbox" data-missing-filter="item"> Item cost</label>
+      <label class="agh-filter-chip"><input type="checkbox" data-missing-filter="packaging"> Packaging</label>
+      <label class="agh-filter-chip"><input type="checkbox" data-missing-filter="delivery"> Delivery</label>
+      <label class="agh-filter-chip"><input type="checkbox" data-missing-filter="amount"> Amount received</label>
+    </div>
+
+    <div class="agh-summary-panel" data-agh-summary-panel hidden>
+    <div class="agh-stats">
+      <div class="agh-card">
+        <div class="agh-stat-row">
+          <div class="agh-stat-icon" style="background:rgba(54,185,204,0.12)">🧮</div>
+          <div>
+            <div class="agh-stat-label">Total Cost</div>
+            <div class="agh-stat-value" style="color:#36b9cc">PKR {{ summary.total_cost|format_number }}</div>
+            <div class="agh-detail" style="max-width:none;">Product cost + packaging + delivery.</div>
+          </div>
+        </div>
+      </div>
+      <div class="agh-card">
+        <div class="agh-stat-row">
+          <div class="agh-stat-icon" style="background:rgba(28,200,138,0.1)">💵</div>
+          <div>
+            <div class="agh-stat-label">Total COD</div>
+            <div class="agh-stat-value" style="color:#1cc88a">PKR {{ summary.total_cod|format_number }}</div>
+            <div class="agh-detail" style="max-width:none;">Total amount received from courier.</div>
+          </div>
+        </div>
+      </div>
+      <div class="agh-card">
+        <div class="agh-stat-row">
+          <div class="agh-stat-icon" style="background:rgba(246,194,62,0.14)">⚖️</div>
+          <div>
+            <div class="agh-stat-label">Balance</div>
+            <div class="agh-stat-value {{ 'agh-positive' if summary.balance >= 0 else 'agh-negative' }}">PKR {{ summary.balance|format_number }}</div>
+            <div class="agh-detail" style="max-width:none;">COD + cash paid - cost.</div>
+          </div>
+        </div>
+      </div>
+      <div class="agh-card" data-received-ledger-open>
+        <div class="agh-stat-row" style="align-items:flex-start;">
+          <div class="agh-stat-icon" style="background:rgba(54,185,204,0.12)">💳</div>
+          <div style="min-width:0; flex:1;">
+            <div class="agh-stat-label">Total Amount Paid in Cash</div>
+            <div class="agh-summary-total">PKR <span data-summary-received-total>{{ summary.total_cash_paid|format_number }}</span></div>
+            <div class="agh-summary-add-row" onclick="event.stopPropagation()">
+            <input
+              class="agh-input agh-summary-input"
+              data-summary-amount-received
+              type="number"
+              step="1"
+              placeholder="Add amount"
+            >
+              <button class="agh-btn primary agh-plus-btn" type="button" onclick="saveAabrooSummaryReceived()" aria-label="Add amount">+</button>
+            </div>
+            <div class="agh-detail" style="margin-top:4px; max-width:none;">
+              Click card to view cash payment entries.
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="agh-card agh-daily-card">
+      <div class="agh-card-head">
+        <div>
+          <div style="font-size:14px;font-weight:800;color:#3a3b45;">Balance movement ledger</div>
+          <div class="agh-detail" style="max-width:none;">Costs use Shopify order date. COD uses the date the amount received row was saved. Cash paid uses the entry date.</div>
+        </div>
+      </div>
+      <div class="agh-daily-wrap">
+        <table class="agh-daily-table">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>COD Received</th>
+              <th>Costs Added</th>
+              <th>Cash Paid</th>
+              <th>Net Movement</th>
+              <th>Running Balance</th>
+              <th>How it changed</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for day in summary.daily_ledger %}
+            <tr>
+              <td>
+                <div class="agh-daily-date">{{ day.date }}</div>
+                <div class="agh-daily-note">
+                  {{ day.order_count }} cost order{{ '' if day.order_count == 1 else 's' }}
+                  · {{ day.cod_order_count }} COD
+                  · {{ day.cash_entry_count }} cash
+                </div>
+              </td>
+              <td><span class="agh-money">PKR {{ day.cod|format_number }}</span></td>
+              <td><span class="agh-money">PKR {{ day.cost|format_number }}</span></td>
+              <td><span class="agh-money">PKR {{ day.cash_paid|format_number }}</span></td>
+              <td><span class="agh-money {{ 'agh-positive' if day.change >= 0 else 'agh-negative' }}">PKR {{ day.change|format_number }}</span></td>
+              <td><span class="agh-money {{ 'agh-positive' if day.running_balance >= 0 else 'agh-negative' }}">PKR {{ day.running_balance|format_number }}</span></td>
+              <td>
+                <details>
+                  <summary class="agh-daily-pill">View details</summary>
+                  <div class="agh-daily-details" style="margin-top:8px;">
+                    {% for detail in day.details %}
+                    <div class="agh-daily-detail-row">
+                      <div>
+                        <strong>{{ detail.label }}</strong>
+                        <div class="agh-daily-muted">{{ detail.note or detail.type|title }}</div>
+                      </div>
+                      <div class="agh-daily-muted">{{ detail.status }}</div>
+                      <div class="agh-money">
+                        {% if detail.type == 'cash' %}
+                          Cash {{ detail.cash_paid|format_number }}
+                        {% elif detail.type == 'cod' %}
+                          COD {{ detail.cod|format_number }}
+                        {% elif detail.type == 'cost' %}
+                          Cost {{ detail.cost|format_number }}
+                        {% else %}
+                          COD {{ detail.cod|format_number }} · Cost {{ detail.cost|format_number }}
+                        {% endif %}
+                      </div>
+                    </div>
+                    {% endfor %}
+                  </div>
+                </details>
+              </td>
+            </tr>
+            {% else %}
+            <tr>
+              <td colspan="7"><div class="agh-empty">No daily balance entries yet.</div></td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    </div>
+
+	    <div class="agh-modal-backdrop" data-received-ledger-modal>
+      <div class="agh-modal" role="dialog" aria-modal="true" aria-labelledby="received-ledger-title">
+        <div class="agh-modal-head">
+          <div class="agh-modal-title" id="received-ledger-title">Net Payment Received Entries</div>
+          <button class="agh-btn" type="button" data-received-ledger-close>Close</button>
+        </div>
+        <div class="agh-entry-list" data-received-ledger-list>
+          {% for entry in summary.net_payment_received_entries %}
+          <div class="agh-entry-row">
+            <div>
+              <strong>PKR {{ entry.amount|format_number }}</strong>
+              <div class="agh-entry-date">{{ entry.created_at or 'Saved entry' }}</div>
+            </div>
+          </div>
+          {% else %}
+          <div class="agh-empty" style="padding:20px 0;">No manual received entries yet.</div>
+          {% endfor %}
+        </div>
+      </div>
+	    </div>
+
+	    <div class="agh-card agh-readonly-panel" data-agh-readonly-panel hidden>
+	      <div class="agh-card-head">
+	        <div>
+	          <div style="font-size:14px;font-weight:700;color:#3a3b45;">All orders overview</div>
+	          <div style="font-size:11px;color:#858796;margin-top:4px;">View-only ledger across every Aabroo order. Totals are repeated at the top and bottom for quick checking.</div>
+	        </div>
+	        <label class="agh-filter-chip">
+	          <input type="checkbox" data-hide-unfulfilled-readonly onchange="applyReadonlyOrderFilters()">
+	          Hide unfulfilled
+	        </label>
+	      </div>
+	      <div class="agh-table-wrap">
+	        <table class="agh-table agh-readonly-table">
+	          <thead>
+	            <tr>
+	              <th>Order Id</th>
+	              <th>Items</th>
+	              <th>Fulfillment</th>
+	              <th>Delivery</th>
+	              <th>Payment</th>
+	              <th>Item Cost</th>
+	              <th>Packaging Cost</th>
+	              <th>Delivery Cost</th>
+	              <th>Price</th>
+	              <th>Order Total</th>
+	              <th>Amount Received</th>
+	              <th>Payable</th>
+	            </tr>
+	            <tr class="agh-total-row" data-readonly-total-mode="all">
+	              <th>Totals · {{ all_order_totals.count|format_number }} orders</th>
+	              <th>{{ all_order_totals.item_qty|format_number }} item{{ '' if all_order_totals.item_qty == 1 else 's' }}</th>
+	              <th></th>
+	              <th></th>
+	              <th></th>
+	              <th>PKR {{ all_order_totals.item_cost|format_number }}</th>
+	              <th>PKR {{ all_order_totals.packaging_cost|format_number }}</th>
+	              <th>PKR {{ all_order_totals.delivery_cost|format_number }}</th>
+	              <th>PKR {{ all_order_totals.price|format_number }}</th>
+	              <th>PKR {{ all_order_totals.order_total|format_number }}</th>
+	              <th>PKR {{ all_order_totals.amount_received|format_number }}</th>
+	              <th>PKR {{ all_order_totals.payable|format_number }}</th>
+	            </tr>
+	            <tr class="agh-total-row" data-readonly-total-mode="fulfilled" hidden>
+	              <th>Fulfilled totals · {{ all_order_fulfilled_totals.count|format_number }} orders</th>
+	              <th>{{ all_order_fulfilled_totals.item_qty|format_number }} item{{ '' if all_order_fulfilled_totals.item_qty == 1 else 's' }}</th>
+	              <th></th>
+	              <th></th>
+	              <th></th>
+	              <th>PKR {{ all_order_fulfilled_totals.item_cost|format_number }}</th>
+	              <th>PKR {{ all_order_fulfilled_totals.packaging_cost|format_number }}</th>
+	              <th>PKR {{ all_order_fulfilled_totals.delivery_cost|format_number }}</th>
+	              <th>PKR {{ all_order_fulfilled_totals.price|format_number }}</th>
+	              <th>PKR {{ all_order_fulfilled_totals.order_total|format_number }}</th>
+	              <th>PKR {{ all_order_fulfilled_totals.amount_received|format_number }}</th>
+	              <th>PKR {{ all_order_fulfilled_totals.payable|format_number }}</th>
+	            </tr>
+	          </thead>
+	          <tbody>
+	            {% for order in orders %}
+	            {% set is_cancelled = order.delivery_status == 'Cancelled' %}
+	            <tr data-readonly-order-row data-readonly-fulfilled="{{ '1' if order.fulfillment_status_raw in ['fulfilled', 'partial', 'partially fulfilled'] else '0' }}">
+	              <td>
+	                <a class="agh-order-id" href="{{ order.shopify_link }}" target="_blank">{{ order.order_id }}</a>
+	                <div class="agh-order-date">{{ order.created_at }}</div>
+	              </td>
+	              <td>
+	                <div class="agh-chip-list">
+	                  {% for item in order['items'] %}
+	                  <div class="agh-item-chip">
+	                    <img src="{{ item.image }}" alt="">
+	                    <div class="agh-item-body">
+	                      <div class="agh-item-title">{{ item.title }}</div>
+	                      <div class="agh-item-meta">Qty {{ item.qty }}</div>
+	                      <div class="agh-item-meta">Cost PKR {{ item.line_cost|format_number }}</div>
+	                    </div>
+	                    <div class="agh-money">PKR {{ item.line_price|format_number }}</div>
+	                  </div>
+	                  {% endfor %}
+	                </div>
+	              </td>
+	              <td>
+	                <span class="agh-pill {{ 'good' if order.fulfillment_status_raw in ['fulfilled', 'partial', 'partially fulfilled'] else 'warn' }}">
+	                  {{ 'Fulfilled' if order.fulfillment_status_raw == 'fulfilled' else 'Partially fulfilled' if order.fulfillment_status_raw in ['partial', 'partially fulfilled'] else 'Unfulfilled' }}
+	                </span>
+	              </td>
+	              <td>
+	                <span class="agh-pill {{ 'bad' if is_cancelled else 'good' if order.delivery_status == 'Delivered' else 'warn' }}">{{ order.delivery_status }}</span>
+	                <div class="agh-detail">{{ order.delivery_status_detail or 'No courier status yet' }}</div>
+	              </td>
+	              <td><span class="agh-pill {{ 'good' if order.payment_status == 'Paid' else 'warn' if order.payment_status == 'Pending' else 'bad' }}">{{ order.payment_status }}</span></td>
+	              <td><span class="agh-money">PKR {{ order.item_cost|format_number }}</span></td>
+	              <td><span class="agh-money">PKR {{ order.packaging_cost|format_number }}</span></td>
+	              <td>
+	                <span class="agh-money {{ 'agh-postex-muted' if order.is_postex else '' }}">PKR {{ order.delivery_cost|format_number }}</span>
+	                {% if order.is_postex %}<div class="agh-postex-note">PostEx - ignored</div>{% endif %}
+	              </td>
+	              <td><span class="agh-money">PKR {{ order.price|format_number }}</span></td>
+	              <td><span class="agh-money">PKR {{ order.order_total|format_number }}</span></td>
+	              <td>
+	                <span class="agh-money {{ 'agh-postex-muted' if order.is_postex else '' }}">PKR {{ order.amount_received|format_number }}</span>
+	                {% if order.is_postex %}<div class="agh-postex-note">PostEx - ignored</div>{% endif %}
+	              </td>
+	              <td><span class="agh-payable">PKR {{ order.payable|format_number }}</span></td>
+	            </tr>
+	            {% endfor %}
+	          </tbody>
+	          <tfoot>
+	            <tr class="agh-total-row" data-readonly-total-mode="all">
+	              <td>Totals · {{ all_order_totals.count|format_number }} orders</td>
+	              <td>{{ all_order_totals.item_qty|format_number }} item{{ '' if all_order_totals.item_qty == 1 else 's' }}</td>
+	              <td></td>
+	              <td></td>
+	              <td></td>
+	              <td>PKR {{ all_order_totals.item_cost|format_number }}</td>
+	              <td>PKR {{ all_order_totals.packaging_cost|format_number }}</td>
+	              <td>PKR {{ all_order_totals.delivery_cost|format_number }}</td>
+	              <td>PKR {{ all_order_totals.price|format_number }}</td>
+	              <td>PKR {{ all_order_totals.order_total|format_number }}</td>
+	              <td>PKR {{ all_order_totals.amount_received|format_number }}</td>
+	              <td>PKR {{ all_order_totals.payable|format_number }}</td>
+	            </tr>
+	            <tr class="agh-total-row" data-readonly-total-mode="fulfilled" hidden>
+	              <td>Fulfilled totals · {{ all_order_fulfilled_totals.count|format_number }} orders</td>
+	              <td>{{ all_order_fulfilled_totals.item_qty|format_number }} item{{ '' if all_order_fulfilled_totals.item_qty == 1 else 's' }}</td>
+	              <td></td>
+	              <td></td>
+	              <td></td>
+	              <td>PKR {{ all_order_fulfilled_totals.item_cost|format_number }}</td>
+	              <td>PKR {{ all_order_fulfilled_totals.packaging_cost|format_number }}</td>
+	              <td>PKR {{ all_order_fulfilled_totals.delivery_cost|format_number }}</td>
+	              <td>PKR {{ all_order_fulfilled_totals.price|format_number }}</td>
+	              <td>PKR {{ all_order_fulfilled_totals.order_total|format_number }}</td>
+	              <td>PKR {{ all_order_fulfilled_totals.amount_received|format_number }}</td>
+	              <td>PKR {{ all_order_fulfilled_totals.payable|format_number }}</td>
+	            </tr>
+	          </tfoot>
+	        </table>
+	      </div>
+	    </div>
+
+	    <div class="agh-card agh-ledger-panel" data-agh-ledger-panel>
+      <div class="agh-card-head">
+        <div>
+          <div style="font-size:14px;font-weight:700;color:#3a3b45;">Aabroo order ledger</div>
+          <div style="font-size:11px;color:#858796;margin-top:4px;">Enter the cost for each item first. The item cost total updates automatically, then save the row costs and payment fields.</div>
+	        </div>
+	        <div class="agh-toolbar agh-bulk-edit">
+	          <input class="agh-input compact" data-bulk-item-cost-value type="number" min="0" step="1" placeholder="Item cost">
+	          <input class="agh-input compact" data-bulk-packaging-value type="number" min="0" step="1" placeholder="Packaging">
+	          <input class="agh-input compact" data-bulk-delivery-value type="number" min="0" step="1" placeholder="Delivery">
+	          <input class="agh-input compact" data-bulk-amount-value type="number" min="0" step="1" placeholder="Received">
+	          <select class="agh-select compact" data-bulk-delivery-status>
+	            <option value="">Delivery status</option>
+	            {% for option in ['Inprocess', 'Delivered', 'Returned', 'Cancelled', 'Other status'] %}
+	            <option value="{{ option }}">{{ option }}</option>
+	            {% endfor %}
+	          </select>
+	          <select class="agh-select compact" data-bulk-payment-status>
+	            <option value="">Payment status</option>
+	            {% for option in ['Pending', 'Paid', 'Not Payable'] %}
+	            <option value="{{ option }}">{{ option }}</option>
+	            {% endfor %}
+	          </select>
+	          <button class="agh-btn success" type="button" data-bulk-apply onclick="applyBulkAabrooValues()">Apply to selected</button>
+	          <button class="agh-btn primary" type="button" data-refresh-tracking onclick="refreshAabrooTrackingStatuses()">Refresh statuses</button>
+	        </div>
+      </div>
+      <div class="agh-table-wrap">
+        <table class="agh-table">
+          <thead>
+            <tr>
+              <th><input class="agh-checkbox" type="checkbox" data-select-visible aria-label="Select visible orders"></th>
+              <th><button class="agh-sort-btn" type="button" data-sort-key="order">Order Id</button></th>
+              <th><button class="agh-sort-btn" type="button" data-sort-key="items">Items</button></th>
+              <th><button class="agh-sort-btn" type="button" data-sort-key="item_cost">Item Cost</button></th>
+              <th><button class="agh-sort-btn" type="button" data-sort-key="packaging_cost">Packaging Cost</button></th>
+              <th><button class="agh-sort-btn" type="button" data-sort-key="delivery_cost">Delivery Cost</button></th>
+              <th><button class="agh-sort-btn" type="button" data-sort-key="price">Price</button></th>
+              <th><button class="agh-sort-btn" type="button" data-sort-key="order_total">Order Total</button></th>
+              <th><button class="agh-sort-btn" type="button" data-sort-key="amount_received">Amount Received</button></th>
+              <th><button class="agh-sort-btn" type="button" data-sort-key="payable">Payable</button></th>
+              <th><button class="agh-sort-btn" type="button" data-sort-key="delivery_status">Delivery Status</button></th>
+              <th><button class="agh-sort-btn" type="button" data-sort-key="payment_status">Payment Status</button></th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for order in orders %}
+            {% set is_cancelled = order.delivery_status == 'Cancelled' %}
+            {% set is_returned = order.delivery_status == 'Returned' %}
+            {% set is_fulfilled_or_partial = order.fulfillment_status_raw in ['fulfilled', 'partial', 'partially fulfilled'] %}
+            {% set row_tab = 'cancelled' if is_cancelled else 'returned' if is_returned else 'closed' if order.payment_status == 'Paid' else 'fulfilled' if is_fulfilled_or_partial else 'unfulfilled' %}
+            <tr
+              data-row-index="{{ loop.index0 }}"
+              data-ledger-tab="{{ row_tab }}"
+              data-is-fulfilled="{{ '1' if is_fulfilled_or_partial else '0' }}"
+              data-payment-state="{{ 'closed' if order.payment_status == 'Paid' else 'open' }}"
+              data-order-id="{{ order.order_id }}"
+              data-original-amount-received="{{ order.amount_received }}"
+              data-original-packaging-cost="{{ order.packaging_cost }}"
+              data-original-delivery-cost="{{ order.delivery_cost }}"
+              data-original-payment-status="{{ order.payment_status }}"
+              data-original-delivery-status="{{ order.delivery_status }}"
+              data-is-postex="{{ '1' if order.is_postex else '0' }}"
+              data-is-lahore="{{ '1' if order.is_lahore else '0' }}"
+              data-courier-name="{{ order.courier_name|lower }}"
+              data-courier-status="{{ (order.delivery_status_detail or '')|lower }}"
+              data-product-titles="{{ order['items']|map(attribute='title')|join(' ')|lower }}"
+              data-price="{{ order.price }}"
+              data-order-total="{{ order.order_total }}"
+            >
+              <td>
+                <input class="agh-checkbox" type="checkbox" data-row-select aria-label="Select {{ order.order_id }}">
+              </td>
+              <td>
+                <a class="agh-order-id" href="{{ order.shopify_link }}" target="_blank">{{ order.order_id }}</a>
+                <div class="agh-order-date">{{ order.created_at }}</div>
+              </td>
+              <td>
+                <div class="agh-chip-list">
+                  {% for item in order['items'] %}
+                  <div class="agh-item-chip">
+                    <img src="{{ item.image }}" alt="">
+                    <div class="agh-item-body">
+                      <div class="agh-item-title">{{ item.title }}</div>
+                      <div class="agh-item-meta">Qty {{ item.qty }}</div>
+                      <div class="agh-item-cost-row">
+                        <span class="agh-item-cost-label">Cost</span>
+                        <input
+                          class="agh-input agh-item-cost-input"
+                          data-aabroo-item-cost
+                          data-cost-key="{{ item.cost_key }}"
+                          data-product-id="{{ item.product_id or '' }}"
+                          data-variant-id="{{ item.variant_id or '' }}"
+                          data-title="{{ item.title }}"
+                          data-qty="{{ item.qty }}"
+                          data-original="{{ item.unit_cost }}"
+                          type="number"
+                          min="0"
+                          step="1"
+                          placeholder="Cost / item"
+                          value="{{ item.unit_cost|round(0)|int }}"
+                          disabled
+                          oninput="recalculateAabrooRow(this.closest('tr'))"
+                        >
+                        <span class="agh-line-cost">Line: <span data-item-line-cost>{{ item.line_cost|format_number }}</span></span>
+                      </div>
+                    </div>
+                    <div class="agh-money">PKR {{ item.line_price|format_number }}</div>
+                  </div>
+                  {% endfor %}
+                </div>
+              </td>
+              <td><span class="agh-money" data-item-cost-summary>PKR {{ order.item_cost|format_number }}</span></td>
+              <td>
+                <input
+                  class="agh-input"
+                  data-aabroo-field="packaging_cost"
+                  type="number"
+                  min="0"
+                  step="1"
+                  value="{{ order.packaging_cost|round(0)|int }}"
+                  disabled
+                  oninput="recalculateAabrooRow(this.closest('tr'))"
+                >
+              </td>
+              <td>
+                <input
+                  class="agh-input {{ 'agh-postex-locked' if order.is_postex else '' }}"
+                  data-aabroo-field="delivery_cost"
+                  type="number"
+                  min="0"
+                  step="1"
+                  value="{{ order.delivery_cost|round(0)|int }}"
+                  disabled
+                  oninput="recalculateAabrooRow(this.closest('tr'))"
+                >
+                {% if order.is_postex %}<div class="agh-postex-note">PostEx delivery cost is ignored.</div>{% endif %}
+              </td>
+              <td><span class="agh-money">PKR {{ order.price|format_number }}</span></td>
+              <td><span class="agh-money">PKR {{ order.order_total|format_number }}</span></td>
+              <td>
+                <input
+                  class="agh-input {{ 'agh-postex-locked' if order.is_postex else '' }}"
+                  data-aabroo-field="amount_received"
+                  type="number"
+                  min="0"
+                  step="1"
+                  value="{{ order.amount_received|round(0)|int }}"
+                  disabled
+                  oninput="recalculateAabrooRow(this.closest('tr'))"
+                >
+                {% if order.is_postex %}<div class="agh-postex-note">PostEx amount received is ignored.</div>{% endif %}
+              </td>
+              <td>
+                <span class="agh-payable" data-payable-value="{{ order.payable }}">PKR {{ order.payable|format_number }}</span>
+              </td>
+              <td>
+                <select
+                  class="agh-select"
+                  data-aabroo-field="delivery_status"
+                  disabled
+                  onchange="handleAabrooStatusChange(this.closest('tr'))"
+                >
+                  {% for option in ['Inprocess', 'Delivered', 'Returned', 'Cancelled', 'Other status'] %}
+                  <option value="{{ option }}" {% if order.delivery_status == option %}selected{% endif %}>{{ option }}</option>
+                  {% endfor %}
+                </select>
+                {% if order.is_lahore %}<div><span class="agh-pill lahore">Lahore</span></div>{% endif %}
+                <div class="agh-detail" data-courier-status-detail>{{ order.delivery_status_detail or 'No courier status yet' }}</div>
+              </td>
+              <td>
+                <select
+                  class="agh-select"
+                  data-aabroo-field="payment_status"
+                  disabled
+                  onchange="recalculateAabrooRow(this.closest('tr'))"
+                >
+                  {% for option in ['Pending', 'Paid', 'Not Payable'] %}
+                  <option value="{{ option }}" {% if order.payment_status == option %}selected{% endif %}>{{ option }}</option>
+                  {% endfor %}
+                </select>
+              </td>
+              <td>
+                <div class="agh-actions">
+                  <button class="agh-btn" data-edit onclick="toggleAabrooRow({{ loop.index0 }}, true)">Edit</button>
+                  <button class="agh-btn warning" data-cancel hidden onclick="toggleAabrooRow({{ loop.index0 }}, false)">Cancel</button>
+                  <button class="agh-btn success" data-save hidden onclick="saveAabrooRow({{ loop.index0 }})">Save</button>
+                </div>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% if not orders %}
+        <div class="agh-empty">No Aabroo orders found for the selected date range.</div>
+        {% endif %}
+        <div class="agh-empty" data-agh-tab-empty hidden>No orders in this tab.</div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let currentAabrooTab = 'fulfilled';
+let fulfilledPaymentFilter = 'all';
+let courierFilters = new Set();
+let productFilterTerm = '';
+let courierStatusFilterTerm = '';
+let currentLedgerSort = { key: '', direction: 'asc' };
+
+function aabrooMoney(value) {
+  return `PKR ${Number(value || 0).toLocaleString('en-PK', { maximumFractionDigits: 0 })}`;
+}
+
+function parseAabrooNumber(value) {
+  const parsed = Number(String(value || '').replace(/[^\d.-]/g, ''));
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function getAabrooRowInputs(row) {
+  return {
+    amount: row.querySelector('[data-aabroo-field="amount_received"]'),
+    packaging: row.querySelector('[data-aabroo-field="packaging_cost"]'),
+    delivery: row.querySelector('[data-aabroo-field="delivery_cost"]'),
+    payment: row.querySelector('[data-aabroo-field="payment_status"]'),
+    deliveryStatus: row.querySelector('[data-aabroo-field="delivery_status"]'),
+  };
+}
+
+function getAabrooItemCostInputs(row) {
+  return Array.from(row.querySelectorAll('[data-aabroo-item-cost]'));
+}
+
+function normalizeProductFilterText(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function isPostexRow(row) {
+  return row?.dataset?.isPostex === '1';
+}
+
+function isLahoreRow(row) {
+  return row?.dataset?.isLahore === '1';
+}
+
+function applyPostexLocks(row) {
+  if (!isPostexRow(row)) return;
+  const inputs = getAabrooRowInputs(row);
+  if (inputs.amount) {
+    inputs.amount.value = '0';
+    inputs.amount.disabled = true;
+  }
+  if (inputs.delivery) {
+    inputs.delivery.value = '0';
+    inputs.delivery.disabled = true;
+  }
+}
+
+function toggleAabrooRow(index, editable, options = {}) {
+  const { skipFocus = false } = options;
+  const row = document.querySelector(`[data-row-index="${index}"]`);
+  if (!row) return;
+  const inputs = getAabrooRowInputs(row);
+  Object.values(inputs).forEach((el) => {
+    if (el) el.disabled = !editable;
+  });
+  applyPostexLocks(row);
+  getAabrooItemCostInputs(row).forEach((el) => {
+    el.disabled = !editable;
+  });
+  row.querySelector('[data-edit]').hidden = editable;
+  row.querySelector('[data-cancel]').hidden = !editable;
+  row.querySelector('[data-save]').hidden = !editable;
+  if (!editable) {
+    resetAabrooRow(row);
+  } else {
+    recalculateAabrooRow(row);
+    if (skipFocus) return;
+    const firstCostInput = row.querySelector('[data-aabroo-item-cost]');
+    if (firstCostInput) {
+      firstCostInput.focus();
+      firstCostInput.select();
+    } else {
+      inputs.amount?.focus();
+    }
+  }
+}
+
+function resetAabrooRow(row) {
+  if (!row) return;
+  const inputs = getAabrooRowInputs(row);
+  if (inputs.amount) inputs.amount.value = row.dataset.originalAmountReceived || '0';
+  if (inputs.packaging) inputs.packaging.value = row.dataset.originalPackagingCost || '0';
+  if (inputs.delivery) inputs.delivery.value = row.dataset.originalDeliveryCost || '0';
+  if (inputs.payment) inputs.payment.value = row.dataset.originalPaymentStatus || 'Pending';
+  if (inputs.deliveryStatus) inputs.deliveryStatus.value = row.dataset.originalDeliveryStatus || 'Inprocess';
+  getAabrooItemCostInputs(row).forEach((input) => {
+    input.value = input.dataset.original || '0';
+    const lineCost = Number(input.value || 0) * Number(input.dataset.qty || 0);
+    const lineCostEl = input.closest('.agh-item-chip')?.querySelector('[data-item-line-cost]');
+    if (lineCostEl) lineCostEl.textContent = Number(lineCost).toLocaleString('en-PK', { maximumFractionDigits: 0 });
+  });
+  applyPostexLocks(row);
+  recalculateAabrooRow(row);
+}
+
+function handleAabrooStatusChange(row) {
+  if (!row) return;
+  const inputs = getAabrooRowInputs(row);
+  if (!inputs.deliveryStatus) return;
+  if (inputs.deliveryStatus.value === 'Cancelled') {
+    if (inputs.amount) inputs.amount.value = '0';
+    if (inputs.packaging) inputs.packaging.value = '0';
+    if (inputs.delivery) inputs.delivery.value = '0';
+    if (inputs.payment) inputs.payment.value = 'Not Payable';
+  }
+  applyPostexLocks(row);
+  recalculateAabrooRow(row);
+}
+
+function recalculateAabrooRow(row) {
+  if (!row) return;
+  const inputs = getAabrooRowInputs(row);
+  let itemCost = 0;
+  let hasMissingItemCost = false;
+  getAabrooItemCostInputs(row).forEach((input) => {
+    const unitCost = Number(input.value || 0);
+    const qty = Number(input.dataset.qty || 0);
+    if (qty > 0 && unitCost <= 0) hasMissingItemCost = true;
+    const lineCost = unitCost * qty;
+    itemCost += lineCost;
+    const lineCostEl = input.closest('.agh-item-chip')?.querySelector('[data-item-line-cost]');
+    if (lineCostEl) {
+      lineCostEl.textContent = Number(lineCost).toLocaleString('en-PK', { maximumFractionDigits: 0 });
+    }
+  });
+  const itemCostSummary = row.querySelector('[data-item-cost-summary]');
+  if (itemCostSummary) {
+    itemCostSummary.textContent = aabrooMoney(itemCost);
+  }
+  const postexRow = isPostexRow(row);
+  if (postexRow) applyPostexLocks(row);
+  const amount = postexRow ? 0 : Number(inputs.amount?.value || 0);
+  const packaging = Number(inputs.packaging?.value || 0);
+  const delivery = postexRow ? 0 : Number(inputs.delivery?.value || 0);
+  const deliveryStatus = String(inputs.deliveryStatus?.value || '');
+  const paymentStatus = String(inputs.payment?.value || '');
+  let payable = 0;
+  if (deliveryStatus !== 'Cancelled' && paymentStatus !== 'Not Payable') {
+    payable = amount - itemCost - packaging - delivery;
+  }
+  const payableEl = row.querySelector('[data-payable-value]');
+  if (payableEl) {
+    payableEl.dataset.payableValue = String(payable);
+    payableEl.textContent = aabrooMoney(payable);
+    payableEl.classList.toggle('agh-positive', payable >= 0);
+    payableEl.classList.toggle('agh-negative', payable < 0);
+  }
+  row.dataset.missingItemCost = hasMissingItemCost || itemCost <= 0 ? '1' : '0';
+  row.dataset.missingPackagingCost = packaging <= 0 ? '1' : '0';
+  row.dataset.missingDeliveryCost = !postexRow && delivery <= 0 ? '1' : '0';
+  row.dataset.missingAmountReceived = !postexRow && amount <= 0 ? '1' : '0';
+}
+
+async function saveAabrooRow(index, options = {}) {
+  const { silent = false } = options;
+  const row = document.querySelector(`[data-row-index="${index}"]`);
+  if (!row) return;
+  const inputs = getAabrooRowInputs(row);
+  const payload = {
+    order_id: row.dataset.orderId,
+    amount_received: isPostexRow(row) ? 0 : Number(inputs.amount?.value || 0),
+    packaging_cost: Number(inputs.packaging?.value || 0),
+    delivery_cost: isPostexRow(row) ? 0 : Number(inputs.delivery?.value || 0),
+    payment_status: inputs.payment?.value || 'Pending',
+    delivery_status: inputs.deliveryStatus?.value || 'Inprocess',
+    is_postex: isPostexRow(row),
+    item_costs: getAabrooItemCostInputs(row).map((input) => ({
+      cost_key: input.dataset.costKey || '',
+      product_id: input.dataset.productId || null,
+      variant_id: input.dataset.variantId || null,
+      title: input.dataset.title || '',
+      cost: Number(input.value || 0),
+    })),
+  };
+
+  const saveBtn = row.querySelector('[data-save]');
+  const oldLabel = saveBtn.textContent;
+  saveBtn.disabled = true;
+  saveBtn.textContent = 'Saving...';
+
+  try {
+    const response = await fetch('/aabroo-orders/update', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const result = await response.json();
+    if (!result.success) {
+      showToast(result.error || 'Could not save order');
+      saveBtn.disabled = false;
+      saveBtn.textContent = oldLabel;
+      return;
+    }
+    row.dataset.originalAmountReceived = String(result.amount_received);
+    row.dataset.originalPackagingCost = String(result.packaging_cost);
+    row.dataset.originalDeliveryCost = String(result.delivery_cost);
+    row.dataset.originalPaymentStatus = String(result.payment_status);
+    row.dataset.originalDeliveryStatus = String(result.delivery_status);
+    getAabrooItemCostInputs(row).forEach((input) => {
+      input.dataset.original = String(Number(input.value || 0));
+    });
+    row.dataset.paymentState = result.payment_status === 'Paid' ? 'closed' : 'open';
+    toggleAabrooRow(index, false);
+    applyAabrooLedgerFilters();
+    if (!silent) showToast('Aabroo order updated');
+    return { success: true, result };
+  } catch (error) {
+    if (!silent) showToast('Could not save order');
+    return { success: false, error: 'Could not save order' };
+  } finally {
+    saveBtn.disabled = false;
+    saveBtn.textContent = oldLabel;
+  }
+}
+
+async function saveAabrooSummaryReceived() {
+  const input = document.querySelector('[data-summary-amount-received]');
+  if (!input) return;
+  const value = Number(input.value || 0);
+  if (!Number.isFinite(value) || value === 0) {
+    showToast('Enter a non-zero amount');
+    return;
+  }
+  input.disabled = true;
+  try {
+    const response = await fetch('/aabroo-orders/update-summary', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ amount_received: value }),
+    });
+    const result = await response.json();
+    if (!result.success) {
+      showToast(result.error || 'Could not add received amount');
+      return;
+    }
+    input.value = '';
+    const totalEl = document.querySelector('[data-summary-received-total]');
+    if (totalEl) totalEl.textContent = aabrooMoney(result.total_received || 0).replace('PKR ', '');
+    renderReceivedLedgerEntries(result.entries || []);
+    showToast('Received amount added');
+    setTimeout(() => window.location.reload(), 500);
+  } catch (error) {
+    showToast('Could not add received amount');
+  } finally {
+    input.disabled = false;
+  }
+}
+
+async function refreshAabrooTrackingStatuses() {
+  const button = document.querySelector('[data-refresh-tracking]');
+  const oldLabel = button?.textContent || 'Refresh statuses';
+  if (button) {
+    button.disabled = true;
+    button.textContent = 'Refreshing...';
+  }
+  try {
+    const response = await fetch('/aabroo-orders/refresh', { method: 'POST' });
+    const result = await response.json();
+    if (!result.success) {
+      showToast(result.error || 'Could not refresh statuses');
+      return;
+    }
+    showToast(result.message || 'Statuses refreshed');
+    setTimeout(() => window.location.reload(), 700);
+  } catch (error) {
+    showToast('Could not refresh statuses');
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.textContent = oldLabel;
+    }
+  }
+}
+
+function renderReceivedLedgerEntries(entries) {
+  const list = document.querySelector('[data-received-ledger-list]');
+  if (!list) return;
+  if (!entries.length) {
+    list.innerHTML = '<div class="agh-empty" style="padding:20px 0;">No manual received entries yet.</div>';
+    return;
+  }
+  list.innerHTML = entries.map((entry) => `
+    <div class="agh-entry-row">
+      <div>
+        <strong>${aabrooMoney(entry.amount || 0)}</strong>
+        <div class="agh-entry-date">${entry.created_at || 'Saved entry'}</div>
+      </div>
+    </div>
+  `).join('');
+}
+
+function getActiveMissingFilters() {
+  return Array.from(document.querySelectorAll('[data-missing-filter]:checked')).map((input) => input.dataset.missingFilter);
+}
+
+function rowMatchesMissingFilters(row) {
+  const filters = getActiveMissingFilters();
+  if (!filters.length) return true;
+  return filters.every((filterName) => {
+    if (filterName === 'item') return row.dataset.missingItemCost === '1';
+    if (filterName === 'packaging') return row.dataset.missingPackagingCost === '1';
+    if (filterName === 'delivery') return row.dataset.missingDeliveryCost === '1';
+    if (filterName === 'amount') return row.dataset.missingAmountReceived === '1';
+    return true;
+  });
+}
+
+function rowMatchesCourierFilters(row) {
+  if (!courierFilters.size) return true;
+  const courierName = normalizeProductFilterText(row.dataset.courierName);
+  return Array.from(courierFilters).some((filterName) => {
+    if (filterName === 'postex') return isPostexRow(row) || courierName.includes('postex');
+    if (filterName === 'call-courier') return courierName.includes('call') && courierName.includes('courier');
+    if (filterName === 'leopards') return courierName.includes('leopard');
+    if (filterName === 'lahore') return isLahoreRow(row);
+    return false;
+  });
+}
+
+function rowMatchesProductFilter(row) {
+  if (!productFilterTerm) return true;
+  return normalizeProductFilterText(row.dataset.productTitles).includes(productFilterTerm);
+}
+
+function getActualCourierStatusText(row) {
+  return normalizeProductFilterText(
+    row.dataset.courierStatus
+    || row.querySelector('[data-courier-status-detail]')?.textContent
+    || ''
+  );
+}
+
+function rowMatchesCourierStatusFilter(row) {
+  if (!courierStatusFilterTerm) return true;
+  return getActualCourierStatusText(row).includes(courierStatusFilterTerm);
+}
+
+function getAabrooSortValue(row, key) {
+  const inputs = getAabrooRowInputs(row);
+  if (key === 'order') return normalizeProductFilterText(row.dataset.orderId);
+  if (key === 'items') return normalizeProductFilterText(row.dataset.productTitles);
+  if (key === 'item_cost') return parseAabrooNumber(row.querySelector('[data-item-cost-summary]')?.textContent);
+  if (key === 'packaging_cost') return parseAabrooNumber(inputs.packaging?.value);
+  if (key === 'delivery_cost') return parseAabrooNumber(inputs.delivery?.value);
+  if (key === 'price') return parseAabrooNumber(row.dataset.price);
+  if (key === 'order_total') return parseAabrooNumber(row.dataset.orderTotal);
+  if (key === 'amount_received') return parseAabrooNumber(inputs.amount?.value);
+  if (key === 'payable') return parseAabrooNumber(row.querySelector('[data-payable-value]')?.dataset.payableValue);
+  if (key === 'delivery_status') {
+    return getActualCourierStatusText(row) || normalizeProductFilterText(inputs.deliveryStatus?.value);
+  }
+  if (key === 'payment_status') return normalizeProductFilterText(inputs.payment?.value);
+  return '';
+}
+
+function updateAabrooSortIndicators() {
+  document.querySelectorAll('[data-sort-key]').forEach((button) => {
+    const active = button.dataset.sortKey === currentLedgerSort.key;
+    button.classList.toggle('active', active);
+    button.classList.toggle('asc', active && currentLedgerSort.direction === 'asc');
+    button.classList.toggle('desc', active && currentLedgerSort.direction === 'desc');
+  });
+}
+
+function applyAabrooLedgerSort() {
+  if (!currentLedgerSort.key) return;
+  const tbody = document.querySelector('.agh-ledger-panel tbody');
+  if (!tbody) return;
+  const direction = currentLedgerSort.direction === 'desc' ? -1 : 1;
+  const rows = Array.from(tbody.querySelectorAll('[data-row-index]'));
+  rows.sort((a, b) => {
+    const aValue = getAabrooSortValue(a, currentLedgerSort.key);
+    const bValue = getAabrooSortValue(b, currentLedgerSort.key);
+    if (typeof aValue === 'number' && typeof bValue === 'number') {
+      return (aValue - bValue) * direction;
+    }
+    return String(aValue).localeCompare(String(bValue), undefined, { numeric: true, sensitivity: 'base' }) * direction;
+  });
+  rows.forEach((row) => tbody.appendChild(row));
+  syncVisibleSelectCheckbox();
+}
+
+function setAabrooLedgerSort(key) {
+  if (currentLedgerSort.key === key) {
+    currentLedgerSort.direction = currentLedgerSort.direction === 'asc' ? 'desc' : 'asc';
+  } else {
+    currentLedgerSort = { key, direction: 'asc' };
+  }
+  updateAabrooSortIndicators();
+  applyAabrooLedgerSort();
+}
+
+function applyAabrooLedgerFilters() {
+  const isSummary = currentAabrooTab === 'summary';
+  const isAllOrders = currentAabrooTab === 'all-orders';
+  const filterPanel = document.querySelector('[data-fulfilled-filter-panel]');
+  if (filterPanel) filterPanel.hidden = currentAabrooTab !== 'fulfilled';
+  if (isSummary || isAllOrders) return;
+
+  let visibleCount = 0;
+  document.querySelectorAll('[data-ledger-tab]').forEach((row) => {
+    let show = false;
+    if (currentAabrooTab === 'fulfilled') {
+      show = row.dataset.isFulfilled === '1';
+      if (show && fulfilledPaymentFilter !== 'all') {
+        show = row.dataset.paymentState === fulfilledPaymentFilter;
+      }
+      if (show) {
+        show = rowMatchesCourierFilters(row);
+      }
+      if (show) {
+        show = rowMatchesProductFilter(row);
+      }
+      if (show) {
+        show = rowMatchesCourierStatusFilter(row);
+      }
+      if (show) {
+        show = rowMatchesMissingFilters(row);
+      }
+    } else {
+      show = row.dataset.ledgerTab === currentAabrooTab;
+    }
+    row.hidden = !show;
+    if (show) visibleCount += 1;
+  });
+  const emptyState = document.querySelector('[data-agh-tab-empty]');
+  if (emptyState) emptyState.hidden = visibleCount > 0;
+  applyAabrooLedgerSort();
+  syncVisibleSelectCheckbox();
+}
+
+function setAabrooLedgerTab(tabName) {
+  currentAabrooTab = tabName;
+  const isSummary = tabName === 'summary';
+  const isAllOrders = tabName === 'all-orders';
+  document.querySelectorAll('[data-agh-tab]').forEach((button) => {
+    button.classList.toggle('active', button.dataset.aghTab === tabName);
+  });
+
+  const summaryPanel = document.querySelector('[data-agh-summary-panel]');
+  const ledgerPanel = document.querySelector('[data-agh-ledger-panel]');
+  const readonlyPanel = document.querySelector('[data-agh-readonly-panel]');
+  if (summaryPanel) summaryPanel.hidden = !isSummary;
+  if (ledgerPanel) ledgerPanel.hidden = isSummary || isAllOrders;
+  if (readonlyPanel) readonlyPanel.hidden = !isAllOrders;
+
+  applyAabrooLedgerFilters();
+  if (isAllOrders) applyReadonlyOrderFilters();
+}
+
+function applyReadonlyOrderFilters() {
+  const hideUnfulfilled = document.querySelector('[data-hide-unfulfilled-readonly]')?.checked || false;
+  document.querySelectorAll('[data-readonly-order-row]').forEach((row) => {
+    row.hidden = hideUnfulfilled && row.dataset.readonlyFulfilled !== '1';
+  });
+  document.querySelectorAll('[data-readonly-total-mode]').forEach((row) => {
+    row.hidden = hideUnfulfilled
+      ? row.dataset.readonlyTotalMode !== 'fulfilled'
+      : row.dataset.readonlyTotalMode !== 'all';
+  });
+}
+
+function syncVisibleSelectCheckbox() {
+  const selectVisible = document.querySelector('[data-select-visible]');
+  if (!selectVisible) return;
+  const visibleRows = Array.from(document.querySelectorAll('[data-row-index]')).filter((row) => !row.hidden);
+  const selectedVisibleRows = visibleRows.filter((row) => row.querySelector('[data-row-select]')?.checked);
+  selectVisible.checked = visibleRows.length > 0 && selectedVisibleRows.length === visibleRows.length;
+  selectVisible.indeterminate = selectedVisibleRows.length > 0 && selectedVisibleRows.length < visibleRows.length;
+}
+
+function getSelectedVisibleRows() {
+  return Array.from(document.querySelectorAll('[data-row-index]')).filter((row) => {
+    return !row.hidden && row.querySelector('[data-row-select]')?.checked;
+  });
+}
+
+	function readBulkNumber(selector, label) {
+	  const input = document.querySelector(selector);
+	  const rawValue = String(input?.value ?? '').trim();
+	  if (!rawValue) return { input, hasValue: false, value: null };
+	  const value = Number(rawValue);
+	  if (!Number.isFinite(value) || value < 0) {
+	    return { input, hasValue: true, value: null, error: `Enter a valid ${label}` };
+	  }
+	  return { input, hasValue: true, value };
+	}
+
+	async function applyBulkAabrooValues() {
+	  const bulkValues = {
+	    itemCost: readBulkNumber('[data-bulk-item-cost-value]', 'item cost'),
+	    packaging: readBulkNumber('[data-bulk-packaging-value]', 'packaging cost'),
+	    delivery: readBulkNumber('[data-bulk-delivery-value]', 'delivery cost'),
+	    amount: readBulkNumber('[data-bulk-amount-value]', 'amount received'),
+	  };
+	  const bulkDeliveryStatus = document.querySelector('[data-bulk-delivery-status]');
+	  const bulkPaymentStatus = document.querySelector('[data-bulk-payment-status]');
+	  const deliveryStatusValue = bulkDeliveryStatus?.value || '';
+	  const paymentStatusValue = bulkPaymentStatus?.value || '';
+	  const invalidValue = Object.values(bulkValues).find((entry) => entry.error);
+	  if (invalidValue) {
+	    showToast(invalidValue.error);
+	    return;
+	  }
+	  const hasAnyValue = Object.values(bulkValues).some((entry) => entry.hasValue) || deliveryStatusValue || paymentStatusValue;
+	  if (!hasAnyValue) {
+	    showToast('Add at least one bulk value');
+	    return;
+	  }
+	  const rows = getSelectedVisibleRows();
+	  if (!rows.length) {
+	    showToast('Select at least one visible order');
+	    return;
+	  }
+	  const button = document.querySelector('[data-bulk-apply]');
+	  const oldLabel = button?.textContent || 'Apply to selected';
+	  if (button) {
+	    button.disabled = true;
+    button.textContent = 'Saving...';
+  }
+  let saved = 0;
+  for (const row of rows) {
+	    const index = row.dataset.rowIndex;
+	    toggleAabrooRow(index, true, { skipFocus: true });
+	    const inputs = getAabrooRowInputs(row);
+	    if (bulkValues.itemCost.hasValue) {
+	      getAabrooItemCostInputs(row).forEach((input) => {
+	        input.value = String(bulkValues.itemCost.value);
+	      });
+	    }
+	    if (bulkValues.packaging.hasValue && inputs.packaging) inputs.packaging.value = String(bulkValues.packaging.value);
+	    if (bulkValues.delivery.hasValue && inputs.delivery && !isPostexRow(row)) inputs.delivery.value = String(bulkValues.delivery.value);
+	    if (bulkValues.amount.hasValue && inputs.amount && !isPostexRow(row)) inputs.amount.value = String(bulkValues.amount.value);
+	    if (deliveryStatusValue && inputs.deliveryStatus) inputs.deliveryStatus.value = deliveryStatusValue;
+	    if (paymentStatusValue && inputs.payment) inputs.payment.value = paymentStatusValue;
+	    if (deliveryStatusValue) handleAabrooStatusChange(row);
+	    applyPostexLocks(row);
+	    recalculateAabrooRow(row);
+	    const result = await saveAabrooRow(index, { silent: true });
+    if (!result || !result.success) {
+      if (button) {
+        button.disabled = false;
+        button.textContent = oldLabel;
+      }
+      showToast(`Stopped after ${saved} saved order${saved === 1 ? '' : 's'}`);
+      return;
+    }
+    saved += 1;
+  }
+	  Object.values(bulkValues).forEach((entry) => {
+	    if (entry.input) entry.input.value = '';
+	  });
+	  if (bulkDeliveryStatus) bulkDeliveryStatus.value = '';
+	  if (bulkPaymentStatus) bulkPaymentStatus.value = '';
+	  if (button) {
+	    button.disabled = false;
+	    button.textContent = oldLabel;
+	  }
+	  showToast(`Bulk values updated for ${saved} order${saved === 1 ? '' : 's'}`);
+	  applyAabrooLedgerFilters();
+	}
+
+document.addEventListener('DOMContentLoaded', () => {
+  const ledgerModal = document.querySelector('[data-received-ledger-modal]');
+  document.querySelector('[data-received-ledger-open]')?.addEventListener('click', () => ledgerModal?.classList.add('open'));
+  document.querySelector('[data-received-ledger-close]')?.addEventListener('click', () => ledgerModal?.classList.remove('open'));
+  ledgerModal?.addEventListener('click', (event) => {
+    if (event.target === ledgerModal) ledgerModal.classList.remove('open');
+  });
+  document.querySelectorAll('[data-row-index]').forEach((row) => {
+    recalculateAabrooRow(row);
+    row.querySelector('[data-row-select]')?.addEventListener('change', syncVisibleSelectCheckbox);
+  });
+  document.querySelectorAll('[data-agh-tab]').forEach((button) => {
+    button.addEventListener('click', () => setAabrooLedgerTab(button.dataset.aghTab));
+  });
+  document.querySelectorAll('[data-sort-key]').forEach((button) => {
+    button.addEventListener('click', () => setAabrooLedgerSort(button.dataset.sortKey));
+  });
+  document.querySelectorAll('[data-fulfilled-payment-filter]').forEach((button) => {
+    button.addEventListener('click', () => {
+      fulfilledPaymentFilter = button.dataset.fulfilledPaymentFilter || 'all';
+      document.querySelectorAll('[data-fulfilled-payment-filter]').forEach((item) => {
+        item.classList.toggle('active', item === button);
+      });
+      applyAabrooLedgerFilters();
+    });
+  });
+  document.querySelectorAll('[data-missing-filter]').forEach((input) => {
+    input.addEventListener('change', () => {
+      input.closest('.agh-filter-chip')?.classList.toggle('active', input.checked);
+      applyAabrooLedgerFilters();
+    });
+  });
+  document.querySelectorAll('[data-courier-filter]').forEach((input) => {
+    input.addEventListener('change', () => {
+      if (input.checked) {
+        courierFilters.add(input.dataset.courierFilter);
+      } else {
+        courierFilters.delete(input.dataset.courierFilter);
+      }
+      input.closest('.agh-filter-chip')?.classList.toggle('active', input.checked);
+      applyAabrooLedgerFilters();
+    });
+  });
+  document.querySelector('[data-product-filter]')?.addEventListener('input', (event) => {
+    productFilterTerm = normalizeProductFilterText(event.target.value);
+    applyAabrooLedgerFilters();
+  });
+  document.querySelector('[data-courier-status-filter]')?.addEventListener('input', (event) => {
+    courierStatusFilterTerm = normalizeProductFilterText(event.target.value);
+    applyAabrooLedgerFilters();
+  });
+  document.querySelector('[data-select-visible]')?.addEventListener('change', (event) => {
+    document.querySelectorAll('[data-row-index]').forEach((row) => {
+      if (!row.hidden) {
+        const checkbox = row.querySelector('[data-row-select]');
+        if (checkbox) checkbox.checked = event.target.checked;
+      }
+    });
+    syncVisibleSelectCheckbox();
+  });
+  setAabrooLedgerTab('fulfilled');
+});
+</script>
+{% endblock %}

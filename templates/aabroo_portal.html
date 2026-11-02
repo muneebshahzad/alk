@@ -1,11 +1,1113 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#21352c"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Aabroo"><title>Aabroo Portal</title><link rel="manifest" href="/aabroo-portal-manifest.webmanifest"><style>
-:root{--ink:#21352c;--muted:#68736d;--paper:#fffdfa;--line:#e4ddd3;--green:#2d7451;--gold:#b7893d;--red:#aa433d}*{box-sizing:border-box}body{margin:0;background:linear-gradient(145deg,#f3eee5,#e9f0eb);color:var(--ink);font-family:Inter,system-ui,sans-serif;min-height:100vh}.shell{max-width:980px;margin:auto;padding:22px}.card,.hero,.tabs{background:rgba(255,253,250,.94);border:1px solid var(--line);border-radius:20px;box-shadow:0 14px 35px #21352c14}.login{max-width:430px;margin:12vh auto;padding:28px}h1,h2,p{margin-top:0}.muted{color:var(--muted)}input,button{font:inherit;border-radius:12px;padding:12px;border:1px solid var(--line)}input{width:100%;margin:10px 0}button{background:var(--ink);color:white;font-weight:700;cursor:pointer}.hero{padding:22px;display:flex;justify-content:space-between;gap:20px;align-items:center}.brand small{color:var(--gold);font-weight:800;text-transform:uppercase;letter-spacing:.12em}.hero form{margin:0}.tabs{display:flex;gap:8px;padding:8px;margin:14px 0;overflow:auto}.tab{white-space:nowrap;background:white;color:var(--ink)}.tab.active{background:var(--ink);color:white}.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:14px 0}.metric{padding:16px}.metric b{display:block;font-size:22px;margin-top:5px}.panel{display:none}.panel.active{display:block}.order{padding:18px;margin:10px 0}.order-head{display:flex;justify-content:space-between;gap:12px;align-items:start}.chips{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0}.chip{font-size:12px;padding:5px 8px;border-radius:99px;background:#edf2ef}.chip.delivered,.positive{color:var(--green)}.chip.returned,.negative{color:var(--red)}.grid{display:grid;grid-template-columns:1.2fr 1fr 1fr;gap:16px;margin-top:12px}.money div{display:flex;justify-content:space-between;border-bottom:1px dashed var(--line);padding:5px 0}.item{font-size:13px;color:var(--muted);padding:3px 0}.error{background:#fff0ed;color:var(--red);padding:12px;border-radius:12px}.empty{text-align:center;color:var(--muted);padding:35px}.settlement{display:flex;justify-content:space-between;padding:10px;border-bottom:1px solid var(--line)}@media(max-width:720px){.shell{padding:12px}.metrics{grid-template-columns:1fr 1fr}.grid{grid-template-columns:1fr}.hero{align-items:flex-start}.order-head{display:block}}
-</style></head><body><main class="shell">
-{% if view == 'login' %}<form class="card login" method="post" action="/aabroo_portal"><div class="brand"><small>Al Karamat × Aabroo</small><h1>Aabroo Portal</h1></div><p class="muted">Your private order, fulfillment and accounts view.</p><input type="password" name="password" placeholder="Portal password" autocomplete="current-password" required>{% if login_error %}<p class="negative">{{ login_error }}</p>{% endif %}<button type="submit">Open portal</button></form>
-{% else %}<header class="hero"><div class="brand"><small>Managed by Al Karamat</small><h1>Aabroo Orders</h1><p class="muted">Live Shopify orders and settlement position</p></div><form method="post" action="/aabroo_portal/logout"><button>Log out</button></form></header>
-{% if error_message %}<p class="error">Could not fetch Aabroo orders: {{ error_message }}</p>{% endif %}
-<section class="metrics"><div class="card metric"><span>Fulfilled</span><b>{{summary.fulfilled_orders}}</b></div><div class="card metric"><span>Unfulfilled</span><b>{{summary.unfulfilled_orders}}</b></div><div class="card metric"><span>Total cost</span><b>PKR {{summary.total_cost|format_number}}</b></div><div class="card metric"><span>Balance</span><b class="{{'positive' if summary.balance >= 0 else 'negative'}}">PKR {{summary.balance|format_number}}</b></div><div class="card metric"><span>COD received</span><b>PKR {{summary.total_cod|format_number}}</b></div><div class="card metric"><span>Cash paid</span><b>PKR {{summary.total_cash_paid|format_number}}</b></div><div class="card metric"><span>Delivered</span><b>{{summary.delivered_orders}}</b></div><div class="card metric"><span>Returned</span><b>{{summary.returned_orders}}</b></div></section>
-<nav class="tabs"><button class="tab active" data-tab="fulfilled">Fulfilled ({{summary.fulfilled_orders}})</button><button class="tab" data-tab="unfulfilled">Unfulfilled ({{summary.unfulfilled_orders}})</button><button class="tab" data-tab="closed">Closed ({{summary.closed_orders}})</button><button class="tab" data-tab="settlements">Settlements</button></nav>
-{% for key, rows in [('fulfilled',fulfilled_orders),('unfulfilled',unfulfilled_orders),('closed',closed_orders)] %}<section class="panel {{'active' if key=='fulfilled'}}" id="{{key}}">{% for order in rows %}<article class="card order"><div class="order-head"><div><a href="{{order.shopify_link}}" target="_blank"><strong>{{order.order_id}}</strong></a><div class="muted">{{order.created_at}}</div></div><div class="chips"><span class="chip">{{order.fulfillment_status}}</span><span class="chip {{order.delivery_status|lower}}">{{order.delivery_status}}</span><span class="chip">{{order.payment_status}}</span></div></div><div class="grid"><div><strong>{{order.customer_name or 'Customer'}}</strong><div class="muted">{{order.customer_phone}}{% if order.customer_city %} · {{order.customer_city}}{% endif %}</div>{% if order.tracking_number %}<p><strong>{{order.courier_name}}</strong> · {{order.tracking_number}}<br><span class="muted">{{order.delivery_status_detail}}</span></p>{% endif %}</div><div><strong>Items</strong>{% for item in order['items'] %}<div class="item">{{item.qty}} × {{item.title}} — PKR {{item.line_cost|format_number}}</div>{% endfor %}</div><div class="money"><div><span>Product cost</span><b>{{order.item_cost|format_number}}</b></div><div><span>Packaging</span><b>{{order.packaging_cost|format_number}}</b></div><div><span>Delivery</span><b>{{order.delivery_cost|format_number}}</b></div><div><span>Received</span><b>{{order.amount_received|format_number}}</b></div><div><span>Payable</span><b>{{order.payable|format_number}}</b></div></div></div></article>{% else %}<div class="card empty">No {{key}} orders.</div>{% endfor %}</section>{% endfor %}
-<section class="panel card" id="settlements">{% for entry in summary.net_payment_received_entries %}<div class="settlement"><span>{{entry.created_at or entry.date or 'Settlement'}}</span><b>PKR {{entry.amount|format_number}}</b></div>{% else %}<div class="empty">No cash settlements recorded yet.</div>{% endfor %}</section>
-<script>document.querySelectorAll('.tab').forEach(b=>b.onclick=()=>{document.querySelectorAll('.tab,.panel').forEach(x=>x.classList.remove('active'));b.classList.add('active');document.getElementById(b.dataset.tab).classList.add('active')});if('serviceWorker'in navigator)navigator.serviceWorker.register('/aabroo-portal-sw.js').catch(()=>{});</script>{% endif %}</main></body></html>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#14213d">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Aabroo">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <title>Aabroo Portal</title>
+  <link rel="manifest" href="/aabroo-portal-manifest.webmanifest">
+  <link rel="icon" href="/static/employee-portal-icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/static/employee-portal-icon.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #f4efe6;
+      --ink: #14213d;
+      --muted: #6f6a63;
+      --line: rgba(20, 33, 61, 0.12);
+      --panel: rgba(255, 252, 247, 0.94);
+      --shadow: 0 18px 40px rgba(20, 33, 61, 0.14);
+      --blue: #2667ff;
+      --green: #2a9d5b;
+      --red: #cf3f3f;
+      --gold: #f2b632;
+      --teal: #22b8cf;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; }
+    body {
+      font-family: 'DM Sans', sans-serif;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at top left, rgba(242, 182, 50, 0.20), transparent 30%),
+        radial-gradient(circle at top right, rgba(38, 103, 255, 0.12), transparent 28%),
+        linear-gradient(180deg, #fbf7f0 0%, #f4efe6 55%, #efe6da 100%);
+      padding: 16px 12px 28px;
+    }
+    .shell {
+      max-width: 760px;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+    .card, .hero, .portal-card, .login-card, .order-card, .summary-card, .tab-bar {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 20px;
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(10px);
+    }
+    .hero {
+      padding: 16px;
+    }
+    .hero-top {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .brand {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      min-width: 0;
+    }
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: rgba(20, 33, 61, 0.06);
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      width: fit-content;
+    }
+    h1 {
+      margin: 0;
+      font-size: 28px;
+      line-height: 1.05;
+      letter-spacing: -0.02em;
+    }
+    .subcopy {
+      margin: 0;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.45;
+    }
+    .hero-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-shrink: 0;
+    }
+    .icon-btn, .ghost-btn, .primary-btn, .login-btn, .tab-btn, .refresh-btn {
+      border: 0;
+      cursor: pointer;
+      font-family: inherit;
+    }
+    .ghost-btn, .icon-btn, .tab-btn, .login-field, .login-btn, .refresh-btn {
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--ink);
+    }
+    .icon-btn {
+      width: 42px;
+      height: 42px;
+      border-radius: 14px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+    }
+    .ghost-btn, .login-btn, .refresh-btn {
+      border-radius: 14px;
+      min-height: 44px;
+      padding: 12px 14px;
+      font-size: 14px;
+      font-weight: 700;
+    }
+    .refresh-btn:disabled {
+      opacity: 0.58;
+      cursor: progress;
+    }
+    .primary-btn {
+      border-radius: 14px;
+      min-height: 44px;
+      padding: 12px 14px;
+      font-size: 14px;
+      font-weight: 700;
+      color: #fff;
+      background: var(--ink);
+    }
+    .tab-bar {
+      padding: 8px;
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 8px;
+    }
+    .tab-btn {
+      border-radius: 14px;
+      min-height: 48px;
+      padding: 10px 12px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+      font-size: 13px;
+      font-weight: 800;
+      color: var(--ink);
+      transition: transform .15s ease, box-shadow .15s ease, border-color .15s ease, background .15s ease;
+    }
+    .tab-btn.active {
+      background: rgba(38, 103, 255, 0.10);
+      border-color: rgba(38, 103, 255, 0.25);
+      color: var(--blue);
+      box-shadow: 0 12px 24px rgba(38, 103, 255, 0.10);
+      transform: translateY(-1px);
+    }
+    .tab-subvalue {
+      color: var(--muted);
+      font-size: 10px;
+      font-weight: 900;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+    }
+    .tab-btn.active .tab-subvalue { color: var(--blue); }
+    .status-filter-bar {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-bottom: 14px;
+    }
+    .status-filter-btn {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 2px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,.82);
+      color: var(--ink);
+      border-radius: 999px;
+      min-height: 58px;
+      min-width: 122px;
+      padding: 9px 16px;
+      font-size: 12px;
+      font-weight: 900;
+      cursor: pointer;
+      transition: background .15s ease, border-color .15s ease, color .15s ease;
+    }
+    .status-filter-value {
+      color: var(--muted);
+      font-size: 10px;
+      font-weight: 900;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+    }
+    .status-filter-btn.active {
+      background: rgba(38,103,255,.11);
+      border-color: rgba(38,103,255,.28);
+      color: var(--blue);
+    }
+    .status-filter-btn.active .status-filter-value { color: var(--blue); }
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+    .section {
+      padding: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+    }
+    .summary-card {
+      padding: 14px;
+      border-radius: 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      min-width: 0;
+    }
+    .summary-card .label {
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+    .summary-card .value {
+      font-size: 20px;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      line-height: 1.1;
+    }
+    .summary-card .value.positive { color: var(--green); }
+    .summary-card .value.red { color: var(--red); }
+    .summary-card .small {
+      font-size: 11px;
+      color: var(--muted);
+      line-height: 1.45;
+    }
+    .summary-card.blue .value { color: var(--blue); }
+    .summary-card.green .value { color: var(--green); }
+    .summary-card.red .value { color: var(--red); }
+    .summary-card.teal .value { color: var(--teal); }
+    .summary-card.gold .value { color: var(--gold); }
+    .daily-ledger { margin-top:18px; display:grid; gap:12px; }
+    .daily-row { border:1px solid var(--line); border-radius:20px; background:rgba(255,255,255,.72); padding:16px; }
+    .daily-row-head { display:flex; justify-content:space-between; gap:12px; align-items:flex-start; margin-bottom:12px; }
+    .daily-date { font-size:18px; font-weight:900; color:var(--ink); }
+    .daily-change { font-size:20px; font-weight:900; }
+    .daily-metrics { display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:10px; }
+    .daily-metric { border-radius:14px; background:rgba(247,247,245,.9); padding:10px; }
+    .daily-metric span { display:block; color:var(--muted); font-size:11px; font-weight:900; letter-spacing:.06em; text-transform:uppercase; margin-bottom:4px; }
+    .daily-metric strong { color:var(--ink); font-size:14px; font-weight:900; }
+    .daily-details { margin-top:12px; color:var(--soft); font-size:13px; }
+    .daily-details summary { cursor:pointer; color:var(--blue); font-weight:900; }
+    .daily-detail-line { display:flex; justify-content:space-between; gap:10px; padding:8px 0; border-bottom:1px solid rgba(20,33,61,.08); }
+    .daily-detail-line:last-child { border-bottom:0; }
+    .order-list, .account-grid, .metric-grid {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .order-card {
+      overflow: hidden;
+    }
+    .order-head {
+      padding: 14px 14px 10px;
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .order-id {
+      font-family: 'Space Mono', monospace;
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--ink);
+      text-decoration: none;
+    }
+    .order-date {
+      margin-top: 4px;
+      font-size: 11px;
+      color: var(--muted);
+    }
+    .chip-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      justify-content: flex-end;
+    }
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 7px 10px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 800;
+      white-space: nowrap;
+      line-height: 1;
+    }
+    .chip.fulfilled { background: rgba(28, 200, 138, 0.12); color: #1b6f41; }
+    .chip.partial { background: rgba(242, 182, 50, 0.18); color: #8b5a00; }
+    .chip.unfulfilled { background: rgba(20, 33, 61, 0.08); color: var(--ink); }
+    .chip.delivered { background: rgba(28, 200, 138, 0.12); color: #1b6f41; }
+    .chip.returned { background: rgba(207, 63, 63, 0.12); color: #8f2b2b; }
+    .chip.cancelled { background: rgba(207, 63, 63, 0.12); color: #8f2b2b; }
+    .chip.pending { background: rgba(20, 33, 61, 0.08); color: var(--ink); }
+    .chip.paid { background: rgba(28, 200, 138, 0.12); color: #1b6f41; }
+    .chip.notpayable { background: rgba(207, 63, 63, 0.12); color: #8f2b2b; }
+    .chip.shopify { background: rgba(42, 157, 91, 0.12); color: #1b6f41; }
+    .chip.leopards { background:#e6f6f8; color:#0a5c6e; box-shadow:inset 0 0 0 1px rgba(10,92,110,.12); }
+    .tracking-chip {
+      border: 0;
+      font-family: 'Space Mono', monospace;
+      cursor: pointer;
+    }
+    .tracking-chip:hover {
+      box-shadow: 0 0 0 2px rgba(38, 103, 255, 0.14);
+    }
+    .order-body {
+      border-top: 1px solid #eef0f6;
+      padding: 12px 14px 14px;
+      display: grid;
+      grid-template-columns: 1.1fr .9fr;
+      gap: 12px;
+    }
+    .items {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .item {
+      display: grid;
+      grid-template-columns: 48px 1fr;
+      gap: 10px;
+      align-items: center;
+      padding: 10px;
+      border-radius: 14px;
+      background: rgba(20, 33, 61, 0.04);
+    }
+    .item img {
+      width: 48px;
+      height: 48px;
+      border-radius: 10px;
+      object-fit: cover;
+      background: #f2f4f8;
+    }
+    .item-title {
+      font-size: 13px;
+      font-weight: 700;
+      color: #2d2e36;
+      line-height: 1.25;
+    }
+    .item-meta {
+      margin-top: 4px;
+      font-size: 11px;
+      color: var(--muted);
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .panel-side {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .mini-block {
+      padding: 12px;
+      border-radius: 14px;
+      border: 1px solid #e8eaef;
+      background: #fff;
+    }
+    .mini-label {
+      font-size: 10px;
+      color: var(--muted);
+      font-weight: 800;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      margin-bottom: 6px;
+    }
+    .mini-value {
+      font-size: 12px;
+      line-height: 1.45;
+      color: #2d2e36;
+    }
+    .courier-status {
+      display: inline-flex;
+      width: fit-content;
+      align-items: center;
+      padding: 7px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 800;
+      line-height: 1.15;
+      margin-top: 6px;
+    }
+    .courier-status.delivered { background: rgba(28, 200, 138, 0.14); color: #16683a; }
+    .courier-status.returned { background: rgba(207, 63, 63, 0.12); color: #8f2b2b; }
+    .courier-status.cancelled { background: rgba(207, 63, 63, 0.12); color: #8f2b2b; }
+    .courier-status.pending { background: rgba(20, 33, 61, 0.08); color: var(--ink); }
+    .courier-status.other { background: rgba(242, 182, 50, 0.16); color: #8b5a00; }
+    .line {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      font-size: 11px;
+      color: var(--muted);
+      margin-top: 6px;
+    }
+    .line strong {
+      color: #2d2e36;
+      font-family: 'Space Mono', monospace;
+      font-size: 12px;
+    }
+    .detail {
+      font-size: 11px;
+      color: var(--muted);
+      line-height: 1.45;
+      margin-top: 6px;
+    }
+    .empty {
+      padding: 32px 16px;
+      text-align: center;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .login-wrap {
+      min-height: calc(100vh - 32px);
+      display: grid;
+      place-items: center;
+    }
+    .login-card {
+      width: 100%;
+      max-width: 420px;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+    .login-title {
+      margin: 0;
+      font-size: 24px;
+      line-height: 1.05;
+    }
+    .login-field {
+      width: 100%;
+      border-radius: 14px;
+      min-height: 52px;
+      padding: 0 14px;
+      font-size: 15px;
+      outline: none;
+    }
+    .login-error {
+      padding: 10px 12px;
+      border-radius: 12px;
+      background: rgba(207, 63, 63, 0.10);
+      border: 1px solid rgba(207, 63, 63, 0.18);
+      color: var(--red);
+      font-size: 13px;
+      font-weight: 700;
+    }
+    .login-actions {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+    .muted-note {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.5;
+    }
+    .ledger-modal-backdrop { position: fixed; inset: 0; background: rgba(20, 33, 61, 0.38); display: none; align-items: center; justify-content: center; z-index: 1000; padding: 18px; }
+    .ledger-modal-backdrop.open { display: flex; }
+    .ledger-modal { width: min(420px, 100%); max-height: 80vh; overflow: auto; background: #fff; border-radius: 20px; border: 1px solid var(--line); box-shadow: var(--shadow); }
+    .ledger-modal-head { padding: 16px 18px; border-bottom: 1px solid rgba(20,33,61,.08); display:flex; align-items:center; justify-content:space-between; gap:12px; }
+    .ledger-modal-title { font-weight: 800; font-size: 15px; }
+    .ledger-entry-list { padding: 10px 18px 18px; display:flex; flex-direction:column; gap:8px; }
+    .ledger-entry-row { display:flex; justify-content:space-between; padding:10px 0; border-bottom:1px solid rgba(20,33,61,.08); }
+    .ledger-entry-row:last-child { border-bottom:0; }
+    .ledger-entry-date { color:var(--muted); font-size:11px; margin-top:4px; }
+    .tracking-modal-backdrop { position: fixed; inset: 0; background: rgba(20, 33, 61, 0.38); display: none; align-items: center; justify-content: center; z-index: 1000; padding: 18px; }
+    .tracking-modal-backdrop.open { display: flex; }
+    .tracking-modal { width: min(420px, 100%); max-height: 82vh; overflow: auto; background: #fff; border-radius: 20px; border: 1px solid var(--line); box-shadow: var(--shadow); padding: 14px; }
+    .tracking-modal-head { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; margin-bottom:12px; }
+    .tracking-title { font-family:'Space Mono', monospace; font-size:18px; font-weight:800; color:var(--ink); }
+    .tracking-status { display:inline-flex; width:fit-content; border-radius:999px; padding:6px 10px; background:rgba(242,182,50,.18); color:#8b5a00; font-size:12px; font-weight:800; margin:6px 0 8px; }
+    .tracking-meta { font-size:12px; color:var(--muted); line-height:1.5; }
+    .tracking-events { display:flex; flex-direction:column; gap:8px; margin-top:12px; }
+    .tracking-event { display:grid; grid-template-columns:24px 1fr; gap:8px; align-items:start; }
+    .tracking-dot { width:24px; height:24px; border-radius:999px; background:rgba(38,103,255,.12); color:var(--blue); display:inline-flex; align-items:center; justify-content:center; font-size:11px; font-weight:800; }
+    .tracking-event-card { border:1px solid var(--line); border-radius:14px; padding:9px 10px; background:#fffaf3; }
+    .tracking-event-title { font-size:12px; font-weight:800; color:#2d2e36; }
+    .tracking-event-meta { margin-top:3px; font-size:11px; color:var(--muted); line-height:1.45; }
+    @media (max-width: 820px) {
+      .order-body { grid-template-columns: 1fr; }
+      .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .daily-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+    @media (max-width: 640px) {
+      body { padding: 12px 10px 24px; }
+      .hero { padding: 14px; }
+      .hero-top { flex-direction: column; }
+      .hero-actions { width: 100%; justify-content: space-between; }
+      .tab-bar { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .summary-grid { grid-template-columns: 1fr; }
+      .chip-row { justify-content: flex-start; }
+      .order-head { flex-direction: column; }
+      .chip-row { justify-content: flex-start; }
+    }
+  </style>
+</head>
+<body>
+  {% if view == 'login' %}
+  <div class="login-wrap">
+    <form class="login-card" method="post" action="/aabroo_portal">
+      <div class="eyebrow">Aabroo</div>
+      <h1 class="login-title">Aabroo Portal</h1>
+      <p class="subcopy">Read-only tracking and accounts summary for the Aabroo store.</p>
+      {% if login_error %}
+      <div class="login-error">{{ login_error }}</div>
+      {% endif %}
+      <input class="login-field" type="password" name="password" placeholder="Password" autocomplete="current-password" autofocus>
+      <div class="login-actions">
+        <button class="login-btn" type="submit">Open portal</button>
+      </div>
+      <p class="muted-note">Simple password access. No sidebar, no extra controls, just the portal view.</p>
+    </form>
+  </div>
+  {% else %}
+  <div class="shell">
+    <div class="hero">
+      <div class="hero-top">
+        <div class="brand">
+          <h1>Aabroo Orders</h1>
+        </div>
+        <div class="hero-actions">
+          <button class="refresh-btn" type="button" data-refresh-tracking>Refresh Tracking</button>
+          <form method="post" action="/aabroo_portal/logout">
+            <button class="ghost-btn" type="submit">Logout</button>
+          </form>
+        </div>
+      </div>
+    </div>
+
+    <div class="tab-bar">
+      <button class="tab-btn active" type="button" data-tab-btn="fulfilled">
+        <span>Fulfilled ({{ fulfilled_orders|length }})</span>
+        <span class="tab-subvalue">Rs {{ summary.fulfilled_unpaid_value|format_number }}</span>
+      </button>
+      <button class="tab-btn" type="button" data-tab-btn="unfulfilled">
+        <span>Unfulfilled ({{ unfulfilled_orders|length }})</span>
+        <span class="tab-subvalue">Rs {{ summary.unfulfilled_unpaid_value|format_number }}</span>
+      </button>
+      <button class="tab-btn" type="button" data-tab-btn="closed">
+        <span>Closed ({{ closed_orders|length }})</span>
+        <span class="tab-subvalue">Rs {{ summary.closed_received_value|format_number }}</span>
+      </button>
+      <button class="tab-btn" type="button" data-tab-btn="summary">Summary</button>
+    </div>
+
+    {% if error_message %}
+    <div class="portal-card" style="padding:12px 14px; border-radius:18px; border-color:#f4c7c3; background:#fef3f2; color:#a33a2e; font-size:13px; font-weight:700;">
+      Could not fetch Aabroo orders: {{ error_message }}
+    </div>
+    {% endif %}
+
+    <div class="tab-panel" data-tab-panel="summary">
+      <div class="section">
+        <div class="summary-grid">
+          <div class="summary-card blue">
+            <div class="label">Fulfilled Orders</div>
+            <div class="value">{{ summary.fulfilled_orders }}</div>
+            <div class="small">Orders that are already fulfilled in Shopify.</div>
+          </div>
+          <div class="summary-card gold">
+            <div class="label">Unfulfilled Orders</div>
+            <div class="value">{{ summary.unfulfilled_orders }}</div>
+            <div class="small">Orders still waiting for dispatch or courier movement.</div>
+          </div>
+          <div class="summary-card green">
+            <div class="label">Total Items</div>
+            <div class="value">{{ summary.total_items_qty }}</div>
+            <div class="small">All item quantities across the current ledger.</div>
+          </div>
+          <div class="summary-card teal">
+            <div class="label">Delivered</div>
+            <div class="value">{{ summary.delivered_orders }}</div>
+            <div class="small">Orders with delivered courier or Shopify completion status.</div>
+          </div>
+          <div class="summary-card red">
+            <div class="label">Returned</div>
+            <div class="value">{{ summary.returned_orders }}</div>
+            <div class="small">Cancelled orders are excluded from this portal.</div>
+          </div>
+          <div class="summary-card green">
+            <div class="label">Total Cost</div>
+            <div class="value">PKR {{ summary.total_cost|format_number }}</div>
+            <div class="small">Product cost + packaging + delivery.</div>
+          </div>
+          <div class="summary-card teal">
+            <div class="label">Total COD</div>
+            <div class="value">PKR {{ summary.total_cod|format_number }}</div>
+            <div class="small">Total amount received from courier.</div>
+          </div>
+          <div class="summary-card" data-received-ledger-open style="cursor:pointer;">
+            <div class="label">Total Amount Paid in Cash</div>
+            <div class="value teal">PKR {{ summary.total_cash_paid|format_number }}</div>
+            <div class="small">Click to view cash payment entries.</div>
+          </div>
+          <div class="summary-card green">
+            <div class="label">Balance</div>
+            <div class="value {% if summary.balance >= 0 %}positive{% else %}red{% endif %}">PKR {{ summary.balance|format_number }}</div>
+            <div class="small">COD + cash paid - cost.</div>
+          </div>
+        </div>
+
+        <div class="card" style="padding:14px;">
+          <div class="mini-label">Accounts snapshot</div>
+          <div class="summary-grid">
+            <div class="summary-card">
+              <div class="label">Paid Orders</div>
+              <div class="value green">{{ summary.paid_orders }}</div>
+              <div class="small">Manually marked or auto-set as paid.</div>
+            </div>
+            <div class="summary-card">
+              <div class="label">Pending Orders</div>
+              <div class="value">{{ summary.pending_orders }}</div>
+              <div class="small">Waiting for payment confirmation.</div>
+            </div>
+            <div class="summary-card">
+              <div class="label">Other Status</div>
+              <div class="value">{{ summary.other_status_orders }}</div>
+              <div class="small">Courier statuses that are neither delivered nor returned.</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card" style="padding:14px;">
+          <div class="mini-label">Daily balance record</div>
+          <div class="small" style="margin-bottom:12px;">COD, fulfilled costs, cash paid entries, and balance movement by date.</div>
+          <div class="daily-ledger">
+            {% for day in summary.daily_ledger %}
+            <div class="daily-row">
+              <div class="daily-row-head">
+                <div>
+                  <div class="daily-date">{{ day.date }}</div>
+                  <div class="small">{{ day.order_count }} order{{ '' if day.order_count == 1 else 's' }}</div>
+                </div>
+                <div class="daily-change {% if day.change >= 0 %}positive{% else %}red{% endif %}">PKR {{ day.change|format_number }}</div>
+              </div>
+              <div class="daily-metrics">
+                <div class="daily-metric"><span>COD</span><strong>PKR {{ day.cod|format_number }}</strong></div>
+                <div class="daily-metric"><span>Cost</span><strong>PKR {{ day.cost|format_number }}</strong></div>
+                <div class="daily-metric"><span>Cash Paid</span><strong>PKR {{ day.cash_paid|format_number }}</strong></div>
+                <div class="daily-metric"><span>Running</span><strong>PKR {{ day.running_balance|format_number }}</strong></div>
+              </div>
+              <details class="daily-details">
+                <summary>View details</summary>
+                {% for detail in day.details %}
+                <div class="daily-detail-line">
+                  <div>
+                    <strong>{{ detail.label }}</strong>
+                    <div>{{ detail.status }}</div>
+                  </div>
+                  <div>
+                    {% if detail.type == 'cash' %}
+                      Cash {{ detail.cash_paid|format_number }}
+                    {% else %}
+                      COD {{ detail.cod|format_number }} · Cost {{ detail.cost|format_number }}
+                    {% endif %}
+                  </div>
+                </div>
+                {% endfor %}
+              </details>
+            </div>
+            {% else %}
+            <div class="empty">No daily balance entries yet.</div>
+            {% endfor %}
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="tab-panel active" data-tab-panel="fulfilled">
+      <div class="section">
+        <div class="status-filter-bar" aria-label="Fulfilled order status filters">
+          <button class="status-filter-btn active" type="button" data-fulfilled-filter="delivered">
+            <span>Delivered</span>
+            <span class="status-filter-value">Rs {{ summary.fulfilled_filter_values.delivered|format_number }}</span>
+          </button>
+          <button class="status-filter-btn" type="button" data-fulfilled-filter="out-for-delivery">
+            <span>Out For Delivery</span>
+            <span class="status-filter-value">Rs {{ summary.fulfilled_filter_values.out_for_delivery|format_number }}</span>
+          </button>
+          <button class="status-filter-btn" type="button" data-fulfilled-filter="in-transit">
+            <span>In-Transit</span>
+            <span class="status-filter-value">Rs {{ summary.fulfilled_filter_values.in_transit|format_number }}</span>
+          </button>
+        </div>
+        <div class="order-list">
+          {% for order in fulfilled_orders %}
+          <div class="order-card" data-fulfilled-status="{{ order.fulfilled_filter_status }}">
+            <div class="order-head">
+              <div>
+                <a class="order-id" href="{{ order.shopify_link }}" target="_blank">{{ order.order_id }}</a>
+                <div class="order-date">{{ order.created_at }}</div>
+                <div class="chip-row" style="margin-top:8px;">
+                  <span class="chip {% if order.fulfillment_status == 'Fulfilled' %}fulfilled{% elif 'Partially' in order.fulfillment_status %}partial{% else %}unfulfilled{% endif %}">{{ order.fulfillment_status }}</span>
+                  <span class="chip {% if order.delivery_status == 'Delivered' %}delivered{% elif order.delivery_status == 'Returned' %}returned{% elif order.delivery_status == 'Cancelled' %}cancelled{% else %}pending{% endif %}">{{ order.delivery_status }}</span>
+                  <span class="chip {% if order.payment_status == 'Paid' %}paid{% elif order.payment_status == 'Not Payable' %}notpayable{% else %}pending{% endif %}">{{ order.payment_status }}</span>
+                </div>
+              </div>
+              <div class="chip-row">
+                <span class="chip shopify">Shopify</span>
+                {% if order.tracking_number %}
+                <button class="chip {% if order.courier_name == 'Leopards' or order.tracking_number[:2]|upper == 'LE' %}leopards{% else %}pending{% endif %} tracking-chip" type="button" data-tracking-number="{{ order.tracking_number }}">{% if order.courier_name == 'Leopards' or order.tracking_number[:2]|upper == 'LE' %}Leopards · {% endif %}{{ order.tracking_number }}</button>
+                {% endif %}
+              </div>
+            </div>
+            <div class="order-body">
+              <div class="items">
+                {% for item in order['items'] %}
+                <div class="item">
+                  {% if item.image %}<img src="{{ item.image }}" alt="">{% else %}<div style="width:48px;height:48px;border-radius:10px;background:#e3e6f0;display:flex;align-items:center;justify-content:center;">📦</div>{% endif %}
+                  <div>
+                    <div class="item-title">{{ item.title }}</div>
+                    <div class="item-meta">
+                      <span>Qty {{ item.qty }}</span>
+                      <span>Price PKR {{ item.line_price|format_number }}</span>
+                      <span>Cost PKR {{ item.line_cost|format_number }}</span>
+                    </div>
+                  </div>
+                </div>
+                {% endfor %}
+              </div>
+              <div class="panel-side">
+                <div class="mini-block">
+                  <div class="mini-label">Customer</div>
+                  <div class="mini-value">
+                    {{ order.customer_name or 'No customer name' }}
+                    {% if order.customer_phone %}<br>{{ order.customer_phone }}{% endif %}
+                    {% if order.customer_city %}<br>{{ order.customer_city }}{% endif %}
+                  </div>
+                </div>
+                <div class="mini-block">
+                  <div class="mini-label">Tracking</div>
+                  <div class="mini-value">
+                    {% if order.courier_name %}{{ order.courier_name }}<br>{% endif %}
+                    {% set courier_status = order.delivery_status_detail or order.delivery_status or 'No courier status yet' %}
+                    <span class="courier-status {% if order.delivery_status == 'Delivered' %}delivered{% elif order.delivery_status == 'Returned' %}returned{% elif order.delivery_status == 'Cancelled' %}cancelled{% elif order.delivery_status == 'Inprocess' %}pending{% else %}other{% endif %}">{{ courier_status }}</span>
+                    {% if order.tracking_number %}
+                    <br><button class="chip {% if order.courier_name == 'Leopards' or order.tracking_number[:2]|upper == 'LE' %}leopards{% else %}pending{% endif %} tracking-chip" type="button" data-tracking-number="{{ order.tracking_number }}" style="margin-top:6px;">{% if order.courier_name == 'Leopards' or order.tracking_number[:2]|upper == 'LE' %}Leopards · {% endif %}{{ order.tracking_number }}</button>
+                    {% endif %}
+                  </div>
+                </div>
+                <div class="mini-block">
+                  <div class="mini-label">Money</div>
+                  <div class="line"><span>Product Cost</span><strong>PKR {{ order.item_cost|format_number }}</strong></div>
+                  <div class="line"><span>Packaging Cost</span><strong>PKR {{ order.packaging_cost|format_number }}</strong></div>
+                  <div class="line"><span>Delivery Cost</span><strong>PKR {{ order.delivery_cost|format_number }}</strong></div>
+                  <div class="line"><span>Subtotal</span><strong>PKR {{ order.price|format_number }}</strong></div>
+                  <div class="line"><span>Order Total</span><strong>PKR {{ order.order_total|format_number }}</strong></div>
+                  <div class="line"><span>Amount Received</span><strong>PKR {{ order.amount_received|format_number }}</strong></div>
+                  <div class="line"><span>Payable</span><strong>PKR {{ order.payable|format_number }}</strong></div>
+                </div>
+              </div>
+            </div>
+          </div>
+          {% else %}
+          <div class="empty" data-fulfilled-empty-source>No fulfilled Aabroo orders found for the selected date range.</div>
+          {% endfor %}
+          <div class="empty" data-fulfilled-filter-empty style="display:none;">No fulfilled orders match this status filter.</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="tab-panel" data-tab-panel="closed">
+      <div class="section">
+        <div class="order-list">
+          {% for order in closed_orders %}
+          <div class="order-card">
+            <div class="order-head">
+              <div>
+                <a class="order-id" href="{{ order.shopify_link }}" target="_blank">{{ order.order_id }}</a>
+                <div class="order-date">{{ order.created_at }}</div>
+                <div class="chip-row" style="margin-top:8px;">
+                  <span class="chip paid">Closed</span>
+                  <span class="chip {% if order.delivery_status == 'Delivered' %}delivered{% elif order.delivery_status == 'Returned' %}returned{% else %}pending{% endif %}">{{ order.delivery_status }}</span>
+                  <span class="chip paid">{{ order.payment_status }}</span>
+                </div>
+              </div>
+              <div class="chip-row">
+                <span class="chip shopify">Shopify</span>
+                {% if order.tracking_number %}
+                <button class="chip {% if order.courier_name == 'Leopards' or order.tracking_number[:2]|upper == 'LE' %}leopards{% else %}pending{% endif %} tracking-chip" type="button" data-tracking-number="{{ order.tracking_number }}">{% if order.courier_name == 'Leopards' or order.tracking_number[:2]|upper == 'LE' %}Leopards · {% endif %}{{ order.tracking_number }}</button>
+                {% endif %}
+              </div>
+            </div>
+            <div class="order-body">
+              <div class="items">
+                {% for item in order['items'] %}
+                <div class="item">
+                  {% if item.image %}<img src="{{ item.image }}" alt="">{% else %}<div style="width:48px;height:48px;border-radius:10px;background:#e3e6f0;display:flex;align-items:center;justify-content:center;">📦</div>{% endif %}
+                  <div>
+                    <div class="item-title">{{ item.title }}</div>
+                    <div class="item-meta">
+                      <span>Qty {{ item.qty }}</span>
+                      <span>Price PKR {{ item.line_price|format_number }}</span>
+                      <span>Cost PKR {{ item.line_cost|format_number }}</span>
+                    </div>
+                  </div>
+                </div>
+                {% endfor %}
+              </div>
+              <div class="panel-side">
+                <div class="mini-block">
+                  <div class="mini-label">Customer</div>
+                  <div class="mini-value">
+                    {{ order.customer_name or 'No customer name' }}
+                    {% if order.customer_phone %}<br>{{ order.customer_phone }}{% endif %}
+                    {% if order.customer_city %}<br>{{ order.customer_city }}{% endif %}
+                  </div>
+                </div>
+                <div class="mini-block">
+                  <div class="mini-label">Tracking</div>
+                  <div class="mini-value">
+                    {% if order.courier_name %}{{ order.courier_name }}<br>{% endif %}
+                    {% set courier_status = order.delivery_status_detail or order.delivery_status or 'No courier status yet' %}
+                    <span class="courier-status {% if order.delivery_status == 'Delivered' %}delivered{% elif order.delivery_status == 'Returned' %}returned{% elif order.delivery_status == 'Inprocess' %}pending{% else %}other{% endif %}">{{ courier_status }}</span>
+                    {% if order.tracking_number %}
+                    <br><button class="chip {% if order.courier_name == 'Leopards' or order.tracking_number[:2]|upper == 'LE' %}leopards{% else %}pending{% endif %} tracking-chip" type="button" data-tracking-number="{{ order.tracking_number }}" style="margin-top:6px;">{% if order.courier_name == 'Leopards' or order.tracking_number[:2]|upper == 'LE' %}Leopards · {% endif %}{{ order.tracking_number }}</button>
+                    {% endif %}
+                  </div>
+                </div>
+                <div class="mini-block">
+                  <div class="mini-label">Money</div>
+                  <div class="line"><span>Product Cost</span><strong>PKR {{ order.item_cost|format_number }}</strong></div>
+                  <div class="line"><span>Packaging Cost</span><strong>PKR {{ order.packaging_cost|format_number }}</strong></div>
+                  <div class="line"><span>Delivery Cost</span><strong>PKR {{ order.delivery_cost|format_number }}</strong></div>
+                  <div class="line"><span>Subtotal</span><strong>PKR {{ order.price|format_number }}</strong></div>
+                  <div class="line"><span>Order Total</span><strong>PKR {{ order.order_total|format_number }}</strong></div>
+                  <div class="line"><span>Amount Received</span><strong>PKR {{ order.amount_received|format_number }}</strong></div>
+                  <div class="line"><span>Payable</span><strong>PKR {{ order.payable|format_number }}</strong></div>
+                </div>
+              </div>
+            </div>
+          </div>
+          {% else %}
+          <div class="empty">No closed Aabroo orders yet.</div>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+
+    <div class="tab-panel" data-tab-panel="unfulfilled">
+      <div class="section">
+        <div class="order-list">
+          {% for order in unfulfilled_orders %}
+          <div class="order-card">
+            <div class="order-head">
+              <div>
+                <a class="order-id" href="{{ order.shopify_link }}" target="_blank">{{ order.order_id }}</a>
+                <div class="order-date">{{ order.created_at }}</div>
+                <div class="chip-row" style="margin-top:8px;">
+                  <span class="chip {% if order.fulfillment_status == 'Fulfilled' %}fulfilled{% elif 'Partially' in order.fulfillment_status %}partial{% else %}unfulfilled{% endif %}">{{ order.fulfillment_status }}</span>
+                  <span class="chip {% if order.delivery_status == 'Delivered' %}delivered{% elif order.delivery_status == 'Returned' %}returned{% elif order.delivery_status == 'Cancelled' %}cancelled{% else %}pending{% endif %}">{{ order.delivery_status }}</span>
+                  <span class="chip {% if order.payment_status == 'Paid' %}paid{% elif order.payment_status == 'Not Payable' %}notpayable{% else %}pending{% endif %}">{{ order.payment_status }}</span>
+                </div>
+              </div>
+              <div class="chip-row">
+                <span class="chip pending">Not Dispatched</span>
+                {% if order.tracking_number %}
+                <button class="chip {% if order.courier_name == 'Leopards' or order.tracking_number[:2]|upper == 'LE' %}leopards{% else %}shopify{% endif %} tracking-chip" type="button" data-tracking-number="{{ order.tracking_number }}">{% if order.courier_name == 'Leopards' or order.tracking_number[:2]|upper == 'LE' %}Leopards · {% endif %}{{ order.tracking_number }}</button>
+                {% endif %}
+              </div>
+            </div>
+            <div class="order-body">
+              <div class="items">
+                {% for item in order['items'] %}
+                <div class="item">
+                  {% if item.image %}<img src="{{ item.image }}" alt="">{% else %}<div style="width:48px;height:48px;border-radius:10px;background:#e3e6f0;display:flex;align-items:center;justify-content:center;">📦</div>{% endif %}
+                  <div>
+                    <div class="item-title">{{ item.title }}</div>
+                    <div class="item-meta">
+                      <span>Qty {{ item.qty }}</span>
+                      <span>Price PKR {{ item.line_price|format_number }}</span>
+                      <span>Cost PKR {{ item.line_cost|format_number }}</span>
+                    </div>
+                  </div>
+                </div>
+                {% endfor %}
+              </div>
+              <div class="panel-side">
+                <div class="mini-block">
+                  <div class="mini-label">Customer</div>
+                  <div class="mini-value">
+                    {{ order.customer_name or 'No customer name' }}
+                    {% if order.customer_phone %}<br>{{ order.customer_phone }}{% endif %}
+                    {% if order.customer_city %}<br>{{ order.customer_city }}{% endif %}
+                  </div>
+                </div>
+                <div class="mini-block">
+                  <div class="mini-label">Tracking</div>
+                  <div class="mini-value">
+                    {% if order.courier_name %}{{ order.courier_name }}<br>{% endif %}
+                    {% set courier_status = order.delivery_status_detail or order.delivery_status or 'No courier status yet' %}
+                    <span class="courier-status {% if order.delivery_status == 'Delivered' %}delivered{% elif order.delivery_status == 'Returned' %}returned{% elif order.delivery_status == 'Cancelled' %}cancelled{% elif order.delivery_status == 'Inprocess' %}pending{% else %}other{% endif %}">{{ courier_status }}</span>
+                    {% if order.tracking_number %}
+                    <br><button class="chip {% if order.courier_name == 'Leopards' or order.tracking_number[:2]|upper == 'LE' %}leopards{% else %}pending{% endif %} tracking-chip" type="button" data-tracking-number="{{ order.tracking_number }}" style="margin-top:6px;">{% if order.courier_name == 'Leopards' or order.tracking_number[:2]|upper == 'LE' %}Leopards · {% endif %}{{ order.tracking_number }}</button>
+                    {% endif %}
+                  </div>
+                </div>
+                <div class="mini-block">
+                  <div class="mini-label">Money</div>
+                  <div class="line"><span>Product Cost</span><strong>PKR {{ order.item_cost|format_number }}</strong></div>
+                  <div class="line"><span>Packaging Cost</span><strong>PKR {{ order.packaging_cost|format_number }}</strong></div>
+                  <div class="line"><span>Delivery Cost</span><strong>PKR {{ order.delivery_cost|format_number }}</strong></div>
+                  <div class="line"><span>Subtotal</span><strong>PKR {{ order.price|format_number }}</strong></div>
+                  <div class="line"><span>Order Total</span><strong>PKR {{ order.order_total|format_number }}</strong></div>
+                  <div class="line"><span>Amount Received</span><strong>PKR {{ order.amount_received|format_number }}</strong></div>
+                  <div class="line"><span>Payable</span><strong>PKR {{ order.payable|format_number }}</strong></div>
+                </div>
+              </div>
+            </div>
+          </div>
+          {% else %}
+          <div class="empty">No unfulfilled Aabroo orders found for the selected date range.</div>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+
+    <div class="ledger-modal-backdrop" data-received-ledger-modal>
+      <div class="ledger-modal" role="dialog" aria-modal="true" aria-labelledby="portal-received-ledger-title">
+        <div class="ledger-modal-head">
+          <div class="ledger-modal-title" id="portal-received-ledger-title">Net Payment Received Entries</div>
+          <button class="ghost-btn" type="button" data-received-ledger-close>Close</button>
+        </div>
+        <div class="ledger-entry-list">
+          {% for entry in summary.net_payment_received_entries %}
+          <div class="ledger-entry-row">
+            <div>
+              <strong>PKR {{ entry.amount|format_number }}</strong>
+              <div class="ledger-entry-date">{{ entry.created_at or 'Saved entry' }}</div>
+            </div>
+          </div>
+          {% else %}
+          <div class="empty" style="padding:20px 0;">No manual received entries yet.</div>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+
+    <div class="tracking-modal-backdrop" data-tracking-modal>
+      <div class="tracking-modal" role="dialog" aria-modal="true" aria-labelledby="portal-tracking-title">
+        <div class="tracking-modal-head">
+          <div>
+            <div class="mini-label">Tracking details</div>
+            <div class="tracking-title" id="portal-tracking-title" data-tracking-title>Tracking</div>
+          </div>
+          <button class="ghost-btn" type="button" data-tracking-close>Close</button>
+        </div>
+        <div data-tracking-content>
+          <div class="tracking-meta">Select a tracking number to view courier movement.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+  <script>
+    (function () {
+      const tabButtons = Array.from(document.querySelectorAll('[data-tab-btn]'));
+      const panels = Array.from(document.querySelectorAll('[data-tab-panel]'));
+      if (!tabButtons.length || !panels.length) return;
+      const fulfilledFilterButtons = Array.from(document.querySelectorAll('[data-fulfilled-filter]'));
+      const fulfilledCards = Array.from(document.querySelectorAll('[data-fulfilled-status]'));
+      const fulfilledFilterEmpty = document.querySelector('[data-fulfilled-filter-empty]');
+
+      function activateTab(name) {
+        tabButtons.forEach((btn) => btn.classList.toggle('active', btn.dataset.tabBtn === name));
+        panels.forEach((panel) => panel.classList.toggle('active', panel.dataset.tabPanel === name));
+        try { window.location.hash = name; } catch (error) {}
+      }
+
+      function applyFulfilledFilter(name) {
+        const filterName = name || 'delivered';
+        let visibleCount = 0;
+        fulfilledFilterButtons.forEach((btn) => btn.classList.toggle('active', btn.dataset.fulfilledFilter === filterName));
+        fulfilledCards.forEach((card) => {
+          const shouldShow = filterName === 'in-transit'
+            ? card.dataset.fulfilledStatus !== 'delivered'
+            : card.dataset.fulfilledStatus === filterName;
+          card.style.display = shouldShow ? '' : 'none';
+          if (shouldShow) visibleCount += 1;
+        });
+        if (fulfilledFilterEmpty) {
+          fulfilledFilterEmpty.style.display = visibleCount || !fulfilledCards.length ? 'none' : '';
+        }
+      }
+
+      tabButtons.forEach((btn) => {
+        btn.addEventListener('click', () => activateTab(btn.dataset.tabBtn));
+      });
+      fulfilledFilterButtons.forEach((btn) => {
+        btn.addEventListener('click', () => applyFulfilledFilter(btn.dataset.fulfilledFilter));
+      });
+      applyFulfilledFilter('delivered');
+
+      const hash = (window.location.hash || '').replace('#', '').trim();
+      if (hash && tabButtons.some((btn) => btn.dataset.tabBtn === hash)) {
+        activateTab(hash);
+      }
+
+      const ledgerModal = document.querySelector('[data-received-ledger-modal]');
+      document.querySelector('[data-received-ledger-open]')?.addEventListener('click', () => ledgerModal?.classList.add('open'));
+      document.querySelector('[data-received-ledger-close]')?.addEventListener('click', () => ledgerModal?.classList.remove('open'));
+      ledgerModal?.addEventListener('click', (event) => {
+        if (event.target === ledgerModal) ledgerModal.classList.remove('open');
+      });
+
+      const refreshBtn = document.querySelector('[data-refresh-tracking]');
+      refreshBtn?.addEventListener('click', async () => {
+        const oldText = refreshBtn.textContent;
+        refreshBtn.disabled = true;
+        refreshBtn.textContent = 'Refreshing...';
+        try {
+          const response = await fetch('/aabroo_portal/refresh', { method: 'POST' });
+          const payload = await response.json();
+          if (!payload.success) throw new Error(payload.error || 'Refresh failed');
+          refreshBtn.textContent = 'Updated';
+          setTimeout(() => window.location.reload(), 500);
+        } catch (error) {
+          refreshBtn.textContent = error.message || 'Refresh failed';
+          setTimeout(() => {
+            refreshBtn.textContent = oldText;
+            refreshBtn.disabled = false;
+          }, 1500);
+        }
+      });
+
+      const trackingModal = document.querySelector('[data-tracking-modal]');
+      const trackingTitle = document.querySelector('[data-tracking-title]');
+      const trackingContent = document.querySelector('[data-tracking-content]');
+
+      function closeTrackingModal() {
+        trackingModal?.classList.remove('open');
+      }
+
+      document.querySelector('[data-tracking-close]')?.addEventListener('click', closeTrackingModal);
+      trackingModal?.addEventListener('click', (event) => {
+        if (event.target === trackingModal) closeTrackingModal();
+      });
+
+      function renderTrackingDetails(tracking) {
+        const meta = [tracking.courier, tracking.customer, tracking.city, tracking.phone].filter(Boolean).join(' · ');
+        const events = (tracking.events || []).slice(0, 10).map((event, index) => `
+          <div class="tracking-event">
+            <div class="tracking-dot">${index + 1}</div>
+            <div class="tracking-event-card">
+              <div class="tracking-event-title">${event.title || 'Tracking update'}</div>
+              <div class="tracking-event-meta">${event.meta || ''}${event.reason ? `<br>Reason: ${event.reason}` : ''}</div>
+            </div>
+          </div>
+        `).join('');
+        trackingTitle.textContent = tracking.tracking_number || 'Tracking';
+        trackingContent.innerHTML = `
+          <div class="tracking-status">${tracking.status || 'No tracking status'}</div>
+          <div class="tracking-meta">${meta || 'Courier tracking information'}</div>
+          <div class="tracking-events">${events || '<div class="tracking-meta">No courier movement found yet.</div>'}</div>
+        `;
+      }
+
+      document.querySelectorAll('[data-tracking-number]').forEach((button) => {
+        button.addEventListener('click', async () => {
+          const trackingNumber = button.dataset.trackingNumber;
+          trackingTitle.textContent = trackingNumber;
+          trackingContent.innerHTML = '<div class="tracking-meta">Loading courier movement...</div>';
+          trackingModal?.classList.add('open');
+          try {
+            const response = await fetch(`/tracking-summary/${encodeURIComponent(trackingNumber)}`);
+            const payload = await response.json();
+            if (!payload.success) throw new Error(payload.error || 'Tracking lookup failed');
+            renderTrackingDetails(payload.tracking || {});
+          } catch (error) {
+            trackingContent.innerHTML = `<div class="tracking-meta">${error.message || 'Tracking lookup failed'}</div>`;
+          }
+        });
+      });
+
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('/aabroo-portal-sw.js').catch(() => null);
+      }
+    })();
+  </script>
+</body>
+</html>
