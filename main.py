@@ -4427,17 +4427,21 @@ def update_status():
 def approve_employee_status():
     data = request.get_json() or {}
     order_id = str(data.get("order_id") or "")
+    shopify_id = str(data.get("shopify_id") or "").strip()
     tracking_number = str(data.get("tracking_number") or "N/A")
     requested_status = str(data.get("requested_status") or "").strip()
     key = f"{order_id}:{tracking_number}"
     if requested_status not in {"Delivered in Lahore", "Cancelled by Employee"}:
         return jsonify({"success": False, "error": "Unsupported employee approval status."}), 400
     matching_order = next((order for order in order_details if normalize_scan_term(order.get("order_num")) == normalize_scan_term(order_id)), None)
-    if not matching_order or not matching_order.get("order_id"):
+    if not matching_order:
         return jsonify({"success": False, "error": "Shopify order not found."}), 404
+    resource_id = shopify_id or str(matching_order.get("id") or matching_order.get("shopify_id") or "").strip()
+    if not resource_id:
+        return jsonify({"success": False, "error": "Shopify resource ID is missing."}), 404
     try:
         tag_name = "Delivered in Lahore" if requested_status == "Delivered in Lahore" else "Cancelled by Employee"
-        apply_shopify_order_tag(matching_order["order_id"], tag_name, include_date=True)
+        apply_shopify_order_tag(resource_id, tag_name, include_date=True)
         delete_order_status(key)
         return jsonify({"success": True, "message": f"Approved {requested_status} for {order_id}.", "warnings": []})
     except Exception as error:

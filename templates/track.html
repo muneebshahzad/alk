@@ -379,7 +379,7 @@
             <div class="approval-actions">
               <button
                 class="btn {% if approval.requested_status == 'Delivered in Lahore' %}btn-success{% else %}btn-danger{% endif %}"
-                onclick="approveEmployeeRequest('{{ approval.order_id }}', '{{ approval.tracking_number }}', '{{ approval.requested_status }}')">
+                onclick="approveEmployeeRequest('{{ approval.order_id }}', '{{ approval.shopify_id }}', '{{ approval.tracking_number }}', '{{ approval.requested_status }}')">
                 {% if approval.requested_status == 'Delivered in Lahore' %}Approve Delivery{% else %}Approve Cancel{% endif %}
               </button>
             </div>
@@ -1078,11 +1078,11 @@ function markOrder(orderId, tag) {
   .catch(() => showToast('Request failed'));
 }
 
-function approveEmployeeRequest(orderId, trackingNumber, requestedStatus) {
+function approveEmployeeRequest(orderId, shopifyId, trackingNumber, requestedStatus) {
   fetch('/employee_status/approve', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ order_id: orderId, tracking_number: trackingNumber, requested_status: requestedStatus })
+    body: JSON.stringify({ order_id: orderId, shopify_id: shopifyId, tracking_number: trackingNumber, requested_status: requestedStatus })
   })
   .then(r => r.json())
   .then(d => {
