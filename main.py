@@ -4735,11 +4735,39 @@ def _aabroo_api_base():
     return f"https://{host}/admin/api/{os.getenv('AABROO_ADMIN_API_VERSION', '2026-04')}"
 
 
-def _aabroo_headers():
-    token = (os.getenv("AABROO_PASSWORD") or os.getenv("AABROO_ACCESS_TOKEN") or "").strip()
+_aabroo_token_cache = {"token": "", "expires_at": 0.0}
+
+
+def _aabroo_access_token():
+    static_token = (os.getenv("AABROO_PASSWORD") or os.getenv("AABROO_ACCESS_TOKEN") or "").strip()
+    if static_token:
+        return static_token
+    now = time.time()
+    if _aabroo_token_cache["token"] and now < float(_aabroo_token_cache["expires_at"] or 0):
+        return _aabroo_token_cache["token"]
+    client_id = (os.getenv("AABROO_CLIENT_ID") or "").strip()
+    client_secret = (os.getenv("AABROO_CLIENT_SECRET") or "").strip()
+    if not client_id or not client_secret:
+        raise RuntimeError("AABROO_CLIENT_ID and AABROO_CLIENT_SECRET are not configured")
+    domain = urlparse(_aabroo_api_base()).hostname
+    response = requests.post(
+        f"https://{domain}/admin/oauth/access_token",
+        data={"grant_type": "client_credentials", "client_id": client_id, "client_secret": client_secret},
+        headers={"Accept": "application/json"},
+        timeout=25,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    token = str(payload.get("access_token") or "").strip()
     if not token:
-        raise RuntimeError("AABROO_PASSWORD is not configured")
-    return {"X-Shopify-Access-Token": token, "Accept": "application/json", "Content-Type": "application/json"}
+        raise RuntimeError("Shopify did not return an Aabroo access token")
+    expires_in = float(payload.get("expires_in") or 86400)
+    _aabroo_token_cache.update(token=token, expires_at=now + max(60, expires_in - 120))
+    return token
+
+
+def _aabroo_headers():
+    return {"X-Shopify-Access-Token": _aabroo_access_token(), "Accept": "application/json", "Content-Type": "application/json"}
 
 
 def _aabroo_next_link(value):
