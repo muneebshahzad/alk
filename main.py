@@ -4749,6 +4749,7 @@ def _aabroo_api_base():
 
 
 _aabroo_token_cache = {"token": "", "expires_at": 0.0}
+_aabroo_product_images_cache = {"images": {}, "product_ids": set(), "expires_at": 0.0}
 
 
 def _aabroo_access_token():
@@ -4803,6 +4804,51 @@ def _aabroo_fetch_orders():
         rows.extend(response.json().get("orders") or [])
         url, params = _aabroo_next_link(response.headers.get("Link")), None
     return rows
+
+
+def _aabroo_product_image_map(orders):
+    """Load product and variant images missing from Shopify order line items."""
+    product_ids = sorted({
+        str(line.get("product_id"))
+        for order in orders or []
+        for line in order.get("line_items") or []
+        if line.get("product_id")
+    })
+    requested_ids = set(product_ids)
+    if time.time() < _aabroo_product_images_cache["expires_at"] and requested_ids.issubset(_aabroo_product_images_cache["product_ids"]):
+        return dict(_aabroo_product_images_cache["images"])
+    images = {}
+    for start in range(0, len(product_ids), 100):
+        response = requests.get(
+            f"{_aabroo_api_base()}/products.json",
+            headers=_aabroo_headers(),
+            params={"ids": ",".join(product_ids[start:start + 100]), "limit": 100, "fields": "id,image,images,variants"},
+            timeout=25,
+        )
+        response.raise_for_status()
+        for product in response.json().get("products") or []:
+            product_id = str(product.get("id") or "")
+            product_images = product.get("images") or []
+            image_by_id = {str(image.get("id")): image.get("src") or "" for image in product_images if image.get("id")}
+            default_image = (product.get("image") or {}).get("src") or (product_images[0].get("src") if product_images else "")
+            if product_id and default_image:
+                images[(product_id, "")] = default_image
+            for variant in product.get("variants") or []:
+                variant_id = str(variant.get("id") or "")
+                variant_image = image_by_id.get(str(variant.get("image_id") or "")) or default_image
+                if product_id and variant_id and variant_image:
+                    images[(product_id, variant_id)] = variant_image
+    _aabroo_product_images_cache.update(images=images, product_ids=requested_ids, expires_at=time.time() + 10 * 60)
+    return images
+
+
+def _aabroo_line_image(line, product_images):
+    direct = str(line.get("image") or line.get("image_src") or "").strip()
+    if direct:
+        return direct
+    product_id = str(line.get("product_id") or "")
+    variant_id = str(line.get("variant_id") or "")
+    return product_images.get((product_id, variant_id)) or product_images.get((product_id, "")) or "/static/alkaramat-logo-v2.png"
 
 
 def _aabroo_notes(order):
@@ -4898,6 +4944,11 @@ def build_aabroo_portal_data():
         raw_orders, error = _aabroo_fetch_orders(), ""
     except Exception as exc:
         raw_orders, error = [], str(exc)
+    try:
+        product_images = _aabroo_product_image_map(raw_orders)
+    except Exception as exc:
+        print(f"Could not load Aabroo product images: {exc}")
+        product_images = {}
     overrides = load_aghaje_order_overrides() or {}; item_defaults = load_aghaje_item_cost_overrides() or {}; order_items = load_aghaje_order_item_cost_overrides() or {}
     domain = _aabroo_shop_domain(); host = (urlparse(domain if "://" in domain else f"https://{domain}").hostname or "") if domain else ""; shop_name = host.split(".")[0]
     orders = []
@@ -4910,7 +4961,7 @@ def build_aabroo_portal_data():
             product_id, variant_id = line.get("product_id"), line.get("variant_id"); title = str(line.get("title") or line.get("name") or "Product"); key = _aabroo_item_cost_key(product_id, variant_id, title)
             default_saved = item_defaults.get(key) or {}; order_saved = (order_items.get(order_id) or {}).get(key) or {}; saved = order_saved or default_saved
             unit_cost = _aabroo_money(saved.get("cost")); unit_price = _aabroo_money(line.get("price")); item_cost += unit_cost * count; qty += count
-            items.append({"title": title, "image": line.get("image") or "/static/alkaramat-logo-v2.png", "qty": count, "unit_price": unit_price, "line_price": round(unit_price * count, 2), "unit_cost": unit_cost, "default_unit_cost": _aabroo_money(default_saved.get("cost")), "has_order_cost_override": bool(order_saved), "line_cost": round(unit_cost * count, 2), "cost": unit_cost, "cost_key": key, "product_id": product_id, "variant_id": variant_id})
+            items.append({"title": title, "image": _aabroo_line_image(line, product_images), "qty": count, "unit_price": unit_price, "line_price": round(unit_price * count, 2), "unit_cost": unit_cost, "default_unit_cost": _aabroo_money(default_saved.get("cost")), "has_order_cost_override": bool(order_saved), "line_cost": round(unit_cost * count, 2), "cost": unit_cost, "cost_key": key, "product_id": product_id, "variant_id": variant_id})
         saved = overrides.get(order_id) or {}; fulfillment_raw = str(source.get("fulfillment_status") or "unfulfilled").lower(); fulfilled = fulfillment_raw in {"fulfilled", "partial"}
         payment_status = str(saved.get("payment_status") or ("Not Payable" if delivery == "Cancelled" else "Pending")); packaging = _aabroo_money(saved.get("packaging_cost")); courier_cost = _aabroo_money(saved.get("delivery_cost")); received = _aabroo_money(saved.get("amount_received"))
         if delivery == "Cancelled": item_cost = packaging = courier_cost = received = 0.0

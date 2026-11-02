@@ -3,6 +3,11 @@ import pytest
 main = pytest.importorskip("main", reason="application dependencies are not installed in the lightweight test environment")
 
 
+@pytest.fixture(autouse=True)
+def _avoid_aabroo_product_api(monkeypatch):
+    monkeypatch.setattr(main, "_aabroo_product_image_map", lambda _orders: {})
+
+
 def _order(**overrides):
     value = {
         "id": 42, "name": "#AB1001", "created_at": "2026-10-01T10:00:00+05:00",
@@ -18,6 +23,17 @@ def _order(**overrides):
     }
     value.update(overrides)
     return value
+
+
+def test_aabroo_line_image_prefers_variant_then_product_image():
+    images = {
+        ("10", ""): "https://cdn.example/product.jpg",
+        ("10", "11"): "https://cdn.example/variant.jpg",
+    }
+
+    assert main._aabroo_line_image({"product_id": 10, "variant_id": 11}, images) == "https://cdn.example/variant.jpg"
+    assert main._aabroo_line_image({"product_id": 10, "variant_id": 12}, images) == "https://cdn.example/product.jpg"
+    assert main._aabroo_line_image({"image": "https://cdn.example/order.jpg", "product_id": 10}, images) == "https://cdn.example/order.jpg"
 
 
 def test_aabroo_accounting_includes_cod_and_vendor_cash(monkeypatch):
