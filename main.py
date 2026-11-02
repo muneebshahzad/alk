@@ -42,6 +42,9 @@ from db import (
     update_admin_passkey_usage,
     update_employee_passkey_usage,
     upsert_order_status,
+    load_aghaje_item_cost_overrides,
+    load_aghaje_order_item_cost_overrides,
+    load_aghaje_order_overrides,
 )
 from webauthn import (
     generate_authentication_options,
@@ -108,8 +111,11 @@ abandoned_checkout_cache = {"rows": None, "expires_at": 0.0}
 shipper_advice_action_cache = set()
 EMPLOYEE_PORTAL_SESSION_KEY = "employee_portal_authenticated"
 ADMIN_PORTAL_SESSION_KEY = "admin_portal_authenticated"
+AABROO_PORTAL_SESSION_KEY = "aabroo_portal_authenticated"
 EMPLOYEE_PORTAL_PASSWORD = os.getenv("EMPLOYEE_PORTAL_PASSWORD", "@@@t")
 ADMIN_PORTAL_PASSWORD = os.getenv("ADMIN_PORTAL_PASSWORD", "security")
+AABROO_PORTAL_PASSWORD = os.getenv("AABROO_PORTAL_PASSWORD", "security")
+AABROO_SETTLEMENTS_KEY = "aabroo_cash_settlements_v1"
 ADMIN_PORTAL_RP_ID = os.getenv("ADMIN_PORTAL_RP_ID", "dashboard.alkaramat.com").strip()
 ADMIN_PORTAL_ORIGIN = os.getenv("ADMIN_PORTAL_ORIGIN", "https://dashboard.alkaramat.com").rstrip("/")
 ADMIN_PASSKEY_CHALLENGE_KEY = "admin_passkey_challenge"
@@ -4710,6 +4716,147 @@ def create_scanned_load_sheet():
     except Exception as error:
         print(f"DigiDokaan load-sheet generation failed: {error}")
         return jsonify({'success': False, 'error': str(error)}), 502
+
+
+def _aabroo_money(value):
+    return parse_money(value, 0)
+
+
+def _aabroo_shop_domain():
+    return (os.getenv("AABROO_SHOP_URL") or os.getenv("AABROO_SHOP_DOMAIN") or "").strip()
+
+
+def _aabroo_api_base():
+    domain = _aabroo_shop_domain()
+    if not domain:
+        raise RuntimeError("AABROO_SHOP_URL is not configured")
+    parsed = urlparse(domain if "://" in domain else f"https://{domain}")
+    host = parsed.netloc or parsed.path
+    return f"https://{host}/admin/api/{os.getenv('AABROO_ADMIN_API_VERSION', '2026-04')}"
+
+
+def _aabroo_headers():
+    token = (os.getenv("AABROO_PASSWORD") or os.getenv("AABROO_ACCESS_TOKEN") or "").strip()
+    if not token:
+        raise RuntimeError("AABROO_PASSWORD is not configured")
+    return {"X-Shopify-Access-Token": token, "Accept": "application/json", "Content-Type": "application/json"}
+
+
+def _aabroo_next_link(value):
+    for part in str(value or "").split(","):
+        if 'rel="next"' in part:
+            candidate = part.split(";", 1)[0].strip().strip("<>")
+            if candidate:
+                return candidate
+    return None
+
+
+def _aabroo_fetch_orders():
+    url = f"{_aabroo_api_base()}/orders.json"
+    params = {"status": os.getenv("AABROO_ORDER_FETCH_STATUS", "any"), "limit": 250,
+              "created_at_min": os.getenv("AABROO_CREATED_AT_MIN", "2026-01-01T00:00:00+05:00")}
+    rows = []
+    while url:
+        response = requests.get(url, headers=_aabroo_headers(), params=params, timeout=25)
+        response.raise_for_status()
+        rows.extend(response.json().get("orders") or [])
+        url, params = _aabroo_next_link(response.headers.get("Link")), None
+    return rows
+
+
+def _aabroo_notes(order):
+    return {str(x.get("name") or "").strip(): x.get("value") for x in order.get("note_attributes") or [] if x.get("name")}
+
+
+def _aabroo_delivery(order, notes):
+    raw = str(notes.get("hxs_courier_status") or "").strip(); upper = raw.upper()
+    if order.get("cancelled_at"):
+        return (("Returned", raw or "Cancelled after dispatch") if notes.get("hxs_courier_tracking") else ("Cancelled", "Cancelled"))
+    if "DELIVER" in upper and "UNDELIVER" not in upper: return "Delivered", raw
+    if any(x in upper for x in ("RETURN", "UNDELIVER", "REFUS")): return "Returned", raw
+    if raw: return "Other status", raw
+    return "Inprocess", "Courier status not available yet"
+
+
+def _aabroo_settlements():
+    try:
+        value = json.loads(get_app_setting(AABROO_SETTLEMENTS_KEY, "[]") or "[]")
+        return value if isinstance(value, list) else []
+    except (TypeError, ValueError):
+        return []
+
+
+def build_aabroo_portal_data():
+    try:
+        raw_orders, error = _aabroo_fetch_orders(), ""
+    except Exception as exc:
+        raw_orders, error = [], str(exc)
+    overrides = load_aghaje_order_overrides() or {}; item_defaults = load_aghaje_item_cost_overrides() or {}; order_items = load_aghaje_order_item_cost_overrides() or {}
+    domain = _aabroo_shop_domain(); host = (urlparse(domain if "://" in domain else f"https://{domain}").hostname or "") if domain else ""; shop_name = host.split(".")[0]
+    orders = []
+    for source in raw_orders:
+        order_id = str(source.get("name") or f"#{source.get('order_number', '')}"); notes = _aabroo_notes(source); delivery, detail = _aabroo_delivery(source, notes)
+        items, item_cost, qty = [], 0.0, 0
+        for line in source.get("line_items") or []:
+            count = int(line.get("current_quantity", line.get("quantity", 0)) or 0)
+            if count <= 0: continue
+            product_id, variant_id = line.get("product_id"), line.get("variant_id"); title = str(line.get("title") or line.get("name") or "Product"); key = f"{product_id or 'product'}:{variant_id or title.lower()}"
+            saved = (order_items.get(order_id) or {}).get(key) or item_defaults.get(key) or {}; unit_cost = _aabroo_money(saved.get("cost")); item_cost += unit_cost * count; qty += count
+            items.append({"title": title, "qty": count, "unit_cost": unit_cost, "line_cost": unit_cost * count})
+        saved = overrides.get(order_id) or {}; fulfillment_raw = str(source.get("fulfillment_status") or "unfulfilled").lower(); fulfilled = fulfillment_raw in {"fulfilled", "partial"}
+        payment_status = str(saved.get("payment_status") or ("Not Payable" if delivery == "Cancelled" else "Pending")); packaging = _aabroo_money(saved.get("packaging_cost")); courier_cost = _aabroo_money(saved.get("delivery_cost")); received = _aabroo_money(saved.get("amount_received"))
+        if delivery == "Cancelled": item_cost = packaging = courier_cost = received = 0.0
+        payable = 0.0 if payment_status == "Not Payable" else received - item_cost - packaging - courier_cost
+        customer = source.get("customer") or {}; address = source.get("shipping_address") or source.get("billing_address") or {}
+        orders.append({"order_id": order_id, "shopify_link": f"https://admin.shopify.com/store/{shop_name}/orders/{source.get('id')}" if shop_name else "#", "created_at": source.get("created_at", ""),
+          "customer_name": address.get("name") or f"{customer.get('first_name','')} {customer.get('last_name','')}".strip(), "customer_phone": address.get("phone") or customer.get("phone") or "", "customer_city": address.get("city") or "",
+          "fulfillment_status": "Partially fulfilled" if fulfillment_raw == "partial" else ("Fulfilled" if fulfilled else "Unfulfilled"), "fulfilled": fulfilled, "delivery_status": delivery, "delivery_status_detail": detail, "payment_status": payment_status,
+          "courier_name": notes.get("hxs_courier_name") or "", "tracking_number": notes.get("hxs_courier_tracking") or "", "items": items, "item_qty": qty, "item_cost": round(item_cost,2), "packaging_cost": packaging, "delivery_cost": courier_cost,
+          "price": _aabroo_money(source.get("current_subtotal_price", source.get("subtotal_price"))), "order_total": _aabroo_money(source.get("current_total_price", source.get("total_price"))), "amount_received": received, "payable": round(payable,2)})
+    orders.sort(key=lambda x: parse_date_for_sort(x.get("created_at")), reverse=True); visible = [x for x in orders if x["delivery_status"] != "Cancelled"]
+    closed = [x for x in visible if x["payment_status"] == "Paid"]; fulfilled = [x for x in visible if x["fulfilled"] and x["payment_status"] != "Paid"]; unfulfilled = [x for x in visible if not x["fulfilled"] and x["payment_status"] != "Paid"]
+    settlements = _aabroo_settlements(); cash = sum(_aabroo_money(x.get("amount")) for x in settlements); cost = sum(x["item_cost"] + x["packaging_cost"] + x["delivery_cost"] for x in visible if x["fulfilled"]); cod = sum(x["amount_received"] for x in visible)
+    summary = {"total_orders": len(visible), "fulfilled_orders": len(fulfilled), "unfulfilled_orders": len(unfulfilled), "closed_orders": len(closed), "total_items_qty": sum(x["item_qty"] for x in visible), "delivered_orders": sum(x["delivery_status"] == "Delivered" for x in visible), "returned_orders": sum(x["delivery_status"] == "Returned" for x in visible), "pending_orders": sum(x["payment_status"] == "Pending" for x in visible), "paid_orders": len(closed), "total_cost": round(cost,2), "total_cod": round(cod,2), "total_cash_paid": round(cash,2), "balance": round(cod + cash - cost,2), "net_payment_received_entries": settlements}
+    return {"orders": visible, "fulfilled_orders": fulfilled, "closed_orders": closed, "unfulfilled_orders": unfulfilled, "summary": summary, "error_message": error}
+
+
+@app.get("/aabroo-orders/paid-order-ids")
+def aabroo_paid_order_ids():
+    data = build_aabroo_portal_data()
+    error_message = str(data.get("error_message") or "").strip()
+    if error_message:
+        return jsonify({"success": False, "error": error_message, "paid_order_ids": []}), 502
+    paid_order_ids = [
+        str(order.get("order_id") or "").strip()
+        for order in data.get("orders", [])
+        if str(order.get("payment_status") or "").strip().lower() == "paid"
+    ]
+    return jsonify({"success": True, "paid_order_ids": paid_order_ids})
+
+
+@app.route("/aabroo_portal", methods=["GET", "POST"])
+@app.route("/aabroo-portal", methods=["GET", "POST"])
+def aabroo_portal():
+    if request.method == "POST":
+        if (request.form.get("password") or "").strip() == AABROO_PORTAL_PASSWORD:
+            session[AABROO_PORTAL_SESSION_KEY] = True; session.permanent = True
+            return redirect(url_for("aabroo_portal"))
+        return render_template("aabroo_portal.html", view="login", login_error="Wrong password. Try again."), 401
+    if not session.get(AABROO_PORTAL_SESSION_KEY): return render_template("aabroo_portal.html", view="login", login_error="")
+    return render_template("aabroo_portal.html", view="portal", **build_aabroo_portal_data())
+
+
+@app.post("/aabroo_portal/logout")
+def aabroo_portal_logout():
+    session.pop(AABROO_PORTAL_SESSION_KEY, None); return redirect(url_for("aabroo_portal"))
+
+
+@app.route("/aabroo-portal-manifest.webmanifest")
+def aabroo_portal_manifest(): return send_from_directory("static", "aabroo-portal.webmanifest", mimetype="application/manifest+json")
+
+
+@app.route("/aabroo-portal-sw.js")
+def aabroo_portal_service_worker(): return send_from_directory("static", "aabroo-portal-sw.js", mimetype="application/javascript")
 
 
 shop_url = os.getenv('SHOP_URL')
