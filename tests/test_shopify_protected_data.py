@@ -8,6 +8,34 @@ class ShopifyProtectedDataTests(unittest.TestCase):
     @patch.object(protected, "get_graphql_token", return_value="token")
     @patch.object(protected, "get_graphql_endpoint", return_value="https://shop.test/graphql.json")
     @patch.object(protected.requests, "post")
+    def test_adds_order_tags_with_graphql_installed_app(self, post, _endpoint, _token):
+        response = post.return_value
+        response.json.return_value = {
+            "data": {"tagsAdd": {"node": {"id": "gid://shopify/Order/99"}, "userErrors": []}}
+        }
+
+        self.assertTrue(protected.add_order_tags(99, ["Delivered in Lahore (2026-11-02)"]))
+
+        variables = post.call_args.kwargs["json"]["variables"]
+        self.assertEqual(variables["id"], "gid://shopify/Order/99")
+        self.assertEqual(variables["tags"], ["Delivered in Lahore (2026-11-02)"])
+        self.assertIn("tagsAdd", post.call_args.kwargs["json"]["query"])
+        response.raise_for_status.assert_called_once()
+
+    @patch.object(protected, "get_graphql_token", return_value="token")
+    @patch.object(protected, "get_graphql_endpoint", return_value="https://shop.test/graphql.json")
+    @patch.object(protected.requests, "post")
+    def test_surfaces_graphql_tag_user_errors(self, post, _endpoint, _token):
+        post.return_value.json.return_value = {
+            "data": {"tagsAdd": {"node": None, "userErrors": [{"message": "Order not found"}]}}
+        }
+
+        with self.assertRaisesRegex(RuntimeError, "Order not found"):
+            protected.add_order_tags(99, ["Delivered"])
+
+    @patch.object(protected, "get_graphql_token", return_value="token")
+    @patch.object(protected, "get_graphql_endpoint", return_value="https://shop.test/graphql.json")
+    @patch.object(protected.requests, "post")
     def test_fetches_and_formats_protected_customer_data_in_one_batch(self, post, _endpoint, _token):
         response = post.return_value
         response.json.return_value = {"data": {"nodes": [{

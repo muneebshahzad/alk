@@ -64,6 +64,7 @@ from webauthn.helpers.structs import (
     UserVerificationRequirement,
 )
 from shopify_protected_data import (
+    add_order_tags,
     create_oauth_state,
     exchange_oauth_code_for_token,
     fetch_protected_order_details,
@@ -3595,15 +3596,10 @@ def find_employee_portal_order(term):
 
 
 def apply_shopify_order_tag(order_id, tag, include_date=False):
-    order = shopify.Order.find(order_id)
-    tags = [item.strip() for item in str(getattr(order, "tags", "") or "").split(",") if item.strip()]
     clean_tag = tag.strip()
     if include_date:
         clean_tag = f"{clean_tag} ({datetime.now().strftime('%Y-%m-%d')})"
-    if clean_tag not in tags:
-        tags.append(clean_tag)
-    order.tags = ", ".join(tags)
-    return order.save()
+    return add_order_tags(order_id, [clean_tag])
 
 
 def apply_aabroo_order_tag(order_id, tag, include_date=False):

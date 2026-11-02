@@ -251,3 +251,45 @@ def fetch_protected_order_details(order_ids: list[int | str]) -> tuple[dict[str,
             if node and node.get("legacyResourceId"):
                 details[str(node["legacyResourceId"])] = _build_customer_details(node)
     return details, errors
+
+
+def add_order_tags(order_id: int | str, tags: list[str]) -> bool:
+    """Add tags to an order through the installed Shopify GraphQL app."""
+    token = get_graphql_token()
+    clean_order_id = _clean(order_id)
+    clean_tags = list(dict.fromkeys(_clean(tag) for tag in tags if _clean(tag)))
+    if not token:
+        raise RuntimeError("Shopify GraphQL access token is not configured")
+    if not clean_order_id:
+        raise ValueError("Shopify order ID is required")
+    if not clean_tags:
+        return True
+
+    mutation = """mutation AddOrderTags($id: ID!, $tags: [String!]!) {
+      tagsAdd(id: $id, tags: $tags) {
+        node { id }
+        userErrors { field message }
+      }
+    }"""
+    response = requests.post(
+        get_graphql_endpoint(),
+        json={
+            "query": mutation,
+            "variables": {
+                "id": f"gid://shopify/Order/{int(clean_order_id)}",
+                "tags": clean_tags,
+            },
+        },
+        headers={"Content-Type": "application/json", "X-Shopify-Access-Token": token},
+        timeout=30,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    errors = [error.get("message", "Unknown Shopify GraphQL error") for error in payload.get("errors") or []]
+    result = (payload.get("data") or {}).get("tagsAdd") or {}
+    errors.extend(error.get("message", "Could not add Shopify order tag") for error in result.get("userErrors") or [])
+    if errors:
+        raise RuntimeError("; ".join(errors))
+    if not (result.get("node") or {}).get("id"):
+        raise RuntimeError("Shopify did not confirm the order tag update")
+    return True
