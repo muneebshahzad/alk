@@ -36,6 +36,43 @@ def test_aabroo_line_image_prefers_variant_then_product_image():
     assert main._aabroo_line_image({"image": "https://cdn.example/order.jpg", "product_id": 10}, images) == "https://cdn.example/order.jpg"
 
 
+def test_aabroo_orders_are_available_to_scanner(monkeypatch):
+    monkeypatch.setattr(main, "build_aabroo_portal_data", lambda: {
+        "all_orders": [{
+            "shopify_order_id": 987,
+            "order_id": "#1020",
+            "delivery_status": "Returned",
+            "customer_name": "Customer",
+            "tracking_number": "22320269889521",
+            "items": [{"title": "Stole", "qty": 1, "image": "https://cdn.example/stole.jpg"}],
+        }],
+        "error_message": "",
+    })
+
+    orders = main.build_aabroo_employee_portal_orders()
+
+    assert orders[0]["source"] == "aabroo"
+    assert orders[0]["shopify_id"] == 987
+    assert orders[0]["items"][0]["tracking_number"] == "22320269889521"
+
+
+def test_employee_return_report_tags_aabroo_store(monkeypatch):
+    tagged = []
+    monkeypatch.setattr(main, "apply_employee_portal_order_tag", lambda source, order_id, tag: tagged.append((source, order_id, tag)) or True)
+    client = main.app.test_client()
+    with client.session_transaction() as session:
+        session[main.EMPLOYEE_PORTAL_SESSION_KEY] = True
+
+    response = client.post("/employee_portal/report", json={
+        "mode": "return",
+        "orders": [{"source": "aabroo", "shopify_id": "987", "order_id": "#1020"}],
+    })
+
+    assert response.status_code == 200
+    assert tagged == [("aabroo", "987", "Return Received")]
+    assert response.get_json()["tagged_by_source"] == {"Aabroo": 1}
+
+
 def test_aabroo_accounting_includes_cod_and_vendor_cash(monkeypatch):
     monkeypatch.setattr(main, "_aabroo_fetch_orders", lambda: [_order()])
     monkeypatch.setattr(main, "_aabroo_shop_domain", lambda: "aabroo.myshopify.com")

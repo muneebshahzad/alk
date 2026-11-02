@@ -283,7 +283,7 @@
       white-space: nowrap;
     }
     .badge.shopify { background: rgba(42, 157, 91, 0.12); color: #1b6f41; }
-    .badge.aghaje { background: rgba(38, 103, 255, 0.12); color: #1746b8; }
+    .badge.aabroo { background: rgba(38, 103, 255, 0.12); color: #1746b8; }
     .badge.daraz { background: rgba(242, 182, 50, 0.18); color: #8b5a00; }
     .order-meta {
       display: grid;
@@ -809,7 +809,7 @@
 
       function renderResult(order) {
         const resultCard = document.getElementById('resultCard');
-        const sourceClass = order.source === 'aghaje' ? 'aghaje' : order.source === 'shopify' ? 'shopify' : 'daraz';
+        const sourceClass = order.source === 'aabroo' ? 'aabroo' : order.source === 'shopify' ? 'shopify' : 'daraz';
         const sourceLabel = order.source_label || (order.source === 'shopify' ? 'Alkaramat' : order.source);
         const pieces = (order.items || []).reduce((sum, item) => sum + Number(item.quantity || 0), 0);
 

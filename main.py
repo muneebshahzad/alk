@@ -3533,11 +3533,46 @@ def serialize_daraz_order_for_employee(order):
     }
 
 
+def serialize_aabroo_order_for_employee(order):
+    return {
+        "source": "aabroo",
+        "source_label": "Aabroo",
+        "shopify_id": order.get("shopify_order_id"),
+        "order_id": str(order.get("order_id") or ""),
+        "status": order.get("delivery_status") or order.get("fulfillment_status") or "",
+        "customer_name": order.get("customer_name") or "",
+        "customer_phone": order.get("customer_phone") or "",
+        "customer_city": order.get("customer_city") or "",
+        "total_price": order.get("order_total") or 0,
+        "created_at": order.get("created_at") or "",
+        "items": [{
+            "title": item.get("title") or "",
+            "quantity": item.get("qty") or 0,
+            "image": item.get("image") or "",
+            "tracking_number": order.get("tracking_number") or "N/A",
+            "status": order.get("delivery_status_detail") or order.get("delivery_status") or "",
+        } for item in order.get("items") or []],
+    }
+
+
+def build_aabroo_employee_portal_orders():
+    try:
+        data = build_aabroo_portal_data()
+    except Exception as error:
+        print(f"Could not load Aabroo employee portal orders: {error}")
+        return []
+    if data.get("error_message"):
+        print(f"Could not load Aabroo employee portal orders: {data['error_message']}")
+        return []
+    return [serialize_aabroo_order_for_employee(order) for order in data.get("all_orders") or []]
+
+
 def build_employee_portal_orders():
     try:
         refresh_daraz_cache_if_needed()
         employee_orders = [serialize_shopify_order_for_employee(order) for order in order_details]
         employee_orders.extend(serialize_daraz_order_for_employee(order) for order in daraz_orders)
+        employee_orders.extend(build_aabroo_employee_portal_orders())
         return sorted(employee_orders, key=lambda order: parse_date_timestamp(order.get("created_at")), reverse=True)
     except Exception as error:
         print(f"Could not load employee portal orders: {error}")
@@ -3569,6 +3604,52 @@ def apply_shopify_order_tag(order_id, tag, include_date=False):
         tags.append(clean_tag)
     order.tags = ", ".join(tags)
     return order.save()
+
+
+def apply_aabroo_order_tag(order_id, tag, include_date=False):
+    order_id = str(order_id or "").strip()
+    if not order_id:
+        return False
+    clean_tag = str(tag or "").strip()
+    if include_date:
+        clean_tag = f"{clean_tag} ({datetime.now().strftime('%Y-%m-%d')})"
+    response = requests.get(
+        f"{_aabroo_api_base()}/orders/{order_id}.json",
+        headers=_aabroo_headers(), params={"fields": "id,tags"}, timeout=20,
+    )
+    response.raise_for_status()
+    order = response.json().get("order") or {}
+    tags = [value.strip() for value in str(order.get("tags") or "").split(",") if value.strip()]
+    if clean_tag not in tags:
+        tags.append(clean_tag)
+    update = requests.put(
+        f"{_aabroo_api_base()}/orders/{order_id}.json",
+        headers=_aabroo_headers(),
+        json={"order": {"id": order_id, "tags": ", ".join(tags)}},
+        timeout=20,
+    )
+    update.raise_for_status()
+    return True
+
+
+def apply_employee_portal_order_tag(source, order_id, tag_name):
+    source = str(source or "").strip().lower()
+    if source == "aabroo":
+        return apply_aabroo_order_tag(order_id, tag_name, include_date=True)
+    if source in {"shopify", "alkaramat", "al-karamat"}:
+        return apply_shopify_order_tag(order_id, tag_name, include_date=True)
+    return False
+
+
+def employee_portal_source_label(source):
+    source = str(source or "").strip().lower()
+    if source == "aabroo":
+        return "Aabroo"
+    if source == "daraz":
+        return "Daraz"
+    if source in {"shopify", "alkaramat", "al-karamat"}:
+        return "Alkaramat"
+    return source or "Unknown"
 
 
 async def revalidate_pending_trax_shipments(orders):
@@ -4262,20 +4343,28 @@ def employee_portal_report():
     tagged_count = 0
     skipped_count = 0
     failed = []
-    seen_order_ids = set()
+    seen_order_keys = set()
+    tagged_by_source = {}
     for entry in scanned_orders:
+        source = str(entry.get("source") or "").strip().lower()
         shopify_id = str(entry.get("shopify_id") or "").strip()
-        if not shopify_id or shopify_id in seen_order_ids:
+        if not source or not shopify_id:
             skipped_count += 1
             continue
-        seen_order_ids.add(shopify_id)
+        order_key = (source, shopify_id)
+        if order_key in seen_order_keys:
+            skipped_count += 1
+            continue
+        seen_order_keys.add(order_key)
         try:
-            if apply_shopify_order_tag(shopify_id, tag_name, include_date=True):
+            if apply_employee_portal_order_tag(source, shopify_id, tag_name):
                 tagged_count += 1
+                label = employee_portal_source_label(source)
+                tagged_by_source[label] = tagged_by_source.get(label, 0) + 1
             else:
                 skipped_count += 1
         except Exception as error:
-            failed.append({"order_id": entry.get("order_id") or shopify_id, "error": str(error)})
+            failed.append({"source": source, "order_id": entry.get("order_id") or shopify_id, "error": str(error)})
     return jsonify(
         {
             "success": not failed,
@@ -4283,7 +4372,7 @@ def employee_portal_report():
             "skipped_count": skipped_count,
             "failed_count": len(failed),
             "failed": failed[:5],
-            "tagged_by_source": {"Alkaramat": tagged_count} if tagged_count else {},
+            "tagged_by_source": tagged_by_source,
             "tag_name": tag_name,
         }
     ), 207 if failed else 200
@@ -4967,7 +5056,7 @@ def build_aabroo_portal_data():
         if delivery == "Cancelled": item_cost = packaging = courier_cost = received = 0.0
         payable = 0.0 if payment_status == "Not Payable" else received - item_cost - packaging - courier_cost
         customer = source.get("customer") or {}; address = source.get("shipping_address") or source.get("billing_address") or {}
-        orders.append({"order_id": order_id, "shopify_link": f"https://admin.shopify.com/store/{shop_name}/orders/{source.get('id')}" if shop_name else "#", "created_at": source.get("created_at", ""),
+        orders.append({"order_id": order_id, "shopify_order_id": source.get("id"), "shopify_link": f"https://admin.shopify.com/store/{shop_name}/orders/{source.get('id')}" if shop_name else "#", "created_at": source.get("created_at", ""),
           "customer_name": address.get("name") or f"{customer.get('first_name','')} {customer.get('last_name','')}".strip(), "customer_phone": address.get("phone") or customer.get("phone") or "", "customer_city": address.get("city") or "", "is_lahore": "lahore" in str(address.get("city") or "").lower(),
           "fulfillment_status": "Partially fulfilled" if fulfillment_raw == "partial" else ("Fulfilled" if fulfilled else "Unfulfilled"), "fulfillment_status_raw": fulfillment_raw, "fulfilled": fulfilled, "delivery_status": delivery, "delivery_status_detail": detail, "payment_status": payment_status, "financial_status": source.get("financial_status") or "",
           "courier_name": notes.get("hxs_courier_name") or "", "tracking_number": notes.get("hxs_courier_tracking") or "", "is_postex": "postex" in str(notes.get("hxs_courier_name") or "").lower().replace(" ", ""), "items": items, "item_qty": qty, "item_cost": round(item_cost,2), "packaging_cost": packaging, "delivery_cost": courier_cost,
