@@ -2756,13 +2756,23 @@ def post_shipper_advice():
         return jsonify({"success": False, "error": str(error)}), 502
 
 
+@shopify_api_retry
+def fetch_initial_shopify_orders(start_date):
+    return shopify.Order.find(limit=250, order="created_at DESC", created_at_min=start_date)
+
+
+@shopify_api_retry
+def fetch_next_shopify_orders_page(orders):
+    return orders.next_page()
+
+
 async def getShopifyOrders():
     start_date = datetime(2024, 9, 1).isoformat()
     order_details = []
     total_start_time = time.time()
 
     try:
-        orders = shopify.Order.find(limit=250, order="created_at DESC", created_at_min=start_date)
+        orders = fetch_initial_shopify_orders(start_date)
     except Exception as e:
         print(f"Error fetching orders: {e}")
         return []
@@ -2783,7 +2793,7 @@ async def getShopifyOrders():
                     break
 
                 time.sleep(1.0)
-                orders = orders.next_page()
+                orders = fetch_next_shopify_orders_page(orders)
 
             except Exception as e:
                 print(f"Error fetching next page: {e}")
