@@ -2306,6 +2306,11 @@ async def process_line_item(session, line_item, fulfillments):
                 tracking_source = "DigiDokaan"
             else:
                 tracking_details = await fetch_tracking_status(session, tracking_number)
+                if clean_tracking_status_label(tracking_details).casefold() == "tracking unavailable":
+                    # A successful Shopify fulfillment with a tracking number is
+                    # already evidence that the shipment was booked. An empty or
+                    # temporarily unavailable courier history must not erase it.
+                    tracking_details = "Booked"
                 tracking_source = "Call Courier"
             tracking_info.append({
                 'tracking_number': tracking_number,

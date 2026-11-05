@@ -62,7 +62,7 @@ class Session:
 
 
 class TrackingTests(unittest.IsolatedAsyncioTestCase):
-    async def test_unavailable_never_means_delivered(self):
+    async def test_fulfilled_order_without_courier_history_remains_booked(self):
         line = SimpleNamespace(id=1, quantity=1, fulfillment_status='fulfilled', fulfillable_quantity=0)
         fulfillment = SimpleNamespace(status='success', tracking_number='123456789', line_items=[line])
         for payload, status in [([], 200), ({'Message': 'No details'}, 200),
@@ -70,7 +70,7 @@ class TrackingTests(unittest.IsolatedAsyncioTestCase):
                                 (ValueError('Invalid JSON'), 200), (None, 503)]:
             with self.subTest(payload=payload, status=status):
                 result = await namespace['process_line_item'](Session(payload, status), line, [fulfillment])
-                self.assertEqual(result[0]['status'], 'Tracking unavailable')
+                self.assertEqual(result[0]['status'], 'Booked')
                 self.assertEqual(result[0]['tracking_number'], '123456789')
 
     async def test_valid_history_and_wrapped_history(self):
