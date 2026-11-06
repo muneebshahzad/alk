@@ -75,6 +75,8 @@ class DeliveryFollowupTests(unittest.TestCase):
         self.assertIn("window.confirm", source)
         self.assertIn("Mark Return Received", source)
         self.assertIn("Mark Claim Received", source)
+        self.assertIn("{% if section.key == 'return_missed' %}", source)
+        self.assertIn("object-fit:contain!important", source)
 
     def test_undelivered_page_renders_all_products_and_return_actions(self):
         main.order_details = [order(8, "Return To Sender", items=[
@@ -89,6 +91,12 @@ class DeliveryFollowupTests(unittest.TestCase):
         self.assertIn("/b.jpg", html)
         self.assertIn("Mark Return Received", html)
         self.assertIn("Mark Claim Received", html)
+        contacted_section = html.split('data-section="to_be_contacted"', 1)[1].split('data-section="to_be_returned"', 1)[0]
+        missed_section = html.split('data-section="return_missed"', 1)[1]
+        self.assertNotIn("Mark Return Received", contacted_section)
+        self.assertNotIn("Mark Claim Received", contacted_section)
+        self.assertIn("Mark Return Received", missed_section)
+        self.assertIn("Mark Claim Received", missed_section)
 
     def test_return_resolutions_cancel_tag_and_remove_cache_immediately(self):
         for tag in ("Return Received", "Claim Received"):
