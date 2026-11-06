@@ -281,6 +281,20 @@
     </div>
   </a>
 
+  <a class="abandoned-link-card" href="/undelivered" style="border-color:#e74a3b;background:#fff7f6;">
+    <div>
+      <div class="abandoned-card-title" style="color:#b83a32;">Delivery follow-up</div>
+      <div class="abandoned-card-copy" style="color:#b83a32;font-weight:800;">
+        {{ (delivery_followup_summary.needs_attention if delivery_followup_summary else 0)|format_number }} orders need attention ·
+        {{ (delivery_followup_summary.needs_contact if delivery_followup_summary else 0)|format_number }} need to be contacted
+      </div>
+    </div>
+    <div class="abandoned-card-stats">
+      <div class="abandoned-card-stat"><span class="abandoned-card-value" style="color:#b83a32;">{{ (delivery_followup_summary.needs_attention if delivery_followup_summary else 0)|format_number }}</span><span class="abandoned-card-label">Need attention</span></div>
+      <div class="abandoned-card-stat"><span class="abandoned-card-value" style="color:#b83a32;">{{ (delivery_followup_summary.needs_contact if delivery_followup_summary else 0)|format_number }}</span><span class="abandoned-card-label">Need contact</span></div>
+    </div>
+  </a>
+
   <!-- Bulk selection bar -->
   <div class="bulk-bar" id="bulkBar">
     <span class="bulk-count" id="bulkCount">0 selected</span>

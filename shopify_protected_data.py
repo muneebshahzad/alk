@@ -293,3 +293,38 @@ def add_order_tags(order_id: int | str, tags: list[str]) -> bool:
     if not (result.get("node") or {}).get("id"):
         raise RuntimeError("Shopify did not confirm the order tag update")
     return True
+
+
+def cancel_order(order_id: int | str) -> bool:
+    """Cancel an order without issuing an automatic refund."""
+    token = get_graphql_token()
+    clean_order_id = _clean(order_id)
+    if not token:
+        raise RuntimeError("Shopify GraphQL access token is not configured")
+    if not clean_order_id:
+        raise ValueError("Shopify order ID is required")
+    mutation = """mutation CancelOrder($orderId: ID!, $refundMethod: OrderCancelRefundMethodInput!, $restock: Boolean!, $reason: OrderCancelReason!) {
+      orderCancel(orderId: $orderId, refundMethod: $refundMethod, restock: $restock, reason: $reason) {
+        job { id done }
+        orderCancelUserErrors { field message code }
+      }
+    }"""
+    response = requests.post(
+        get_graphql_endpoint(),
+        json={"query": mutation, "variables": {
+            "orderId": f"gid://shopify/Order/{int(clean_order_id)}",
+            "refundMethod": {"originalPaymentMethodsRefund": False},
+            "restock": True,
+            "reason": "CUSTOMER",
+        }},
+        headers={"Content-Type": "application/json", "X-Shopify-Access-Token": token},
+        timeout=30,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    errors = [error.get("message", "Unknown Shopify GraphQL error") for error in payload.get("errors") or []]
+    result = (payload.get("data") or {}).get("orderCancel") or {}
+    errors.extend(error.get("message", "Could not cancel Shopify order") for error in result.get("orderCancelUserErrors") or [])
+    if errors and not all("already" in error.casefold() and "cancel" in error.casefold() for error in errors):
+        raise RuntimeError("; ".join(errors))
+    return True

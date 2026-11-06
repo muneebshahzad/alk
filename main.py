@@ -28,11 +28,13 @@ from flask import send_file, make_response
 import io
 import functools
 from db import (
+    add_delivery_followup_contact,
     delete_order_status,
     get_app_setting,
     init_db,
     load_admin_passkeys,
     load_employee_passkeys,
+    load_delivery_followup_contacts,
     load_order_statuses,
     load_shipper_advice_action_keys,
     save_admin_passkey,
@@ -65,6 +67,7 @@ from webauthn.helpers.structs import (
 )
 from shopify_protected_data import (
     add_order_tags,
+    cancel_order,
     create_oauth_state,
     exchange_oauth_code_for_token,
     fetch_protected_order_details,
@@ -1371,6 +1374,148 @@ def aggregate_order_status(line_items):
     if len(unique_statuses) > 1:
         return "Mixed Status"
     return normalized_statuses[0] if normalized_statuses else "Un-Booked"
+
+
+RETURN_COURIER_MARKERS = (
+    "RETURN SUBMITTED", "RETURN SUBMISSION", "RETURN TO SHIPPER", "RETURNED TO SHIPPER",
+    "RETURN TO SENDER", "RETURNED TO SENDER", "RETURN TO ORIGIN", "RETURN - CONFIRM",
+    "RETURN CONFIRM", "RETURN - IN TRANSIT", "RETURN - ARRIVED AT ORIGIN",
+    "RETURN - DELIVERED TO SHIPPER", "RETURN DELIVERED TO SHIPPER", "OUT FOR RETURN",
+    "BEING RETURN", "ASSIGNED TO COURIER FOR RETURN", "RETURN COMPLETED", "RETURN DELIVERED",
+    "RTO COMPLETED", "RTO DELIVERED",
+)
+COMPLETED_RETURN_COURIER_MARKERS = (
+    "RETURN SUBMITTED", "RETURN SUBMISSION", "RETURN TO SHIPPER", "RETURNED TO SHIPPER",
+    "RETURN TO SENDER", "RETURNED TO SENDER", "RETURN - DELIVERED TO SHIPPER",
+    "RETURN DELIVERED TO SHIPPER", "RETURN COMPLETED", "RETURN DELIVERED",
+    "RTO COMPLETED", "RTO DELIVERED",
+)
+FAILED_DELIVERY_MARKERS = (
+    "UNDELIVERED", "DELIVERY UNSUCCESSFUL", "DELIVERY FAILED", "DELIVERY ATTEMPT",
+    "ATTEMPT TO DELIVER", "CONSIGNEE REFUSED", "CUSTOMER REFUSED", "ADDRESS CLOSED",
+    "SHIPPER ADVISE REQUESTED", "SHIPPER ADVICE REQUESTED", "REASON VALIDATION REQUIRED",
+    "CALL NOT ATTENDED", "UNTRACEABLE",
+)
+DISPATCH_COURIER_MARKERS = (
+    "PICKED FROM SHIPPER", "RIDER PICKED", "ARRIVED AT ORIGIN", "IN TRANSIT",
+    "OUT FOR DELIVERY", "DELIVERY UNSUCCESSFUL", "DELIVERY FAILED", "DELIVERED",
+    "RETURN - CONFIRM", "RETURN - IN TRANSIT", "RETURN - ARRIVED AT ORIGIN",
+)
+DELIVERY_CONTACT_OUTCOMES = (
+    "WhatsApp - Awaiting Reply", "WhatsApp - Customer Interested / Fake Status",
+    "WhatsApp - Cancelled", "Call - No Response", "Call - Customer Interested / Fake Status",
+    "Call - Cancelled",
+)
+
+
+def status_contains_any(statuses, markers):
+    combined = " | ".join(clean_tracking_status_label(value).upper() for value in statuses or [] if value)
+    return any(marker in combined for marker in markers)
+
+
+def dated_order_tag_date(tags, label):
+    pattern = re.compile(rf"^{re.escape(label)}\s*\((\d{{4}}-\d{{2}}-\d{{2}})\)$", re.I)
+    for tag in tags or []:
+        match = pattern.match(str(tag or "").strip())
+        if match:
+            return match.group(1)
+    return ""
+
+
+def is_return_resolved_order(order):
+    tags = (order or {}).get("tags") or []
+    return bool(dated_order_tag_date(tags, "Return Received") or dated_order_tag_date(tags, "Claim Received"))
+
+
+def parse_followup_date(value):
+    parsed = parse_date_for_sort(value)
+    return None if parsed == datetime.min else parsed.date()
+
+
+def apply_followup_timeline_dates(item, history):
+    """Keep the first dispatch and return scans needed for follow-up age labels."""
+    dated_events = []
+    for event in history or []:
+        event_date = parse_followup_date((event or {}).get("TransactionDate"))
+        status = clean_tracking_status_label((event or {}).get("ProcessDescForPortal") or (event or {}).get("ProcessDesc"))
+        if event_date and status:
+            dated_events.append((event_date, status))
+    dispatch_dates = [event_date for event_date, status in dated_events if status_contains_any([status], DISPATCH_COURIER_MARKERS)]
+    return_dates = [event_date for event_date, status in dated_events if status_contains_any([status], RETURN_COURIER_MARKERS)]
+    if dispatch_dates:
+        item["dispatched_at"] = min(dispatch_dates).isoformat()
+    if return_dates:
+        item["return_marked_at"] = min(return_dates).isoformat()
+
+
+def build_undelivered_order_view(orders):
+    """Classify only failed-delivery and return-journey orders for follow-up."""
+    today = datetime.now().date()
+    rows = []
+    seen = set()
+    for source_order in orders or []:
+        order_key = str(source_order.get("id") or source_order.get("order_id") or "")
+        if not order_key or order_key in seen or is_return_resolved_order(source_order):
+            continue
+        statuses = [source_order.get("status")] + [item.get("status") for item in source_order.get("line_items") or []]
+        has_failed = status_contains_any(statuses, FAILED_DELIVERY_MARKERS)
+        has_return = status_contains_any(statuses, RETURN_COURIER_MARKERS)
+        if not (has_failed or has_return):
+            continue
+        completed_return = status_contains_any(statuses, COMPLETED_RETURN_COURIER_MARKERS)
+        order = dict(source_order)
+        items = [dict(item) for item in source_order.get("line_items") or []]
+        order["line_items"] = items
+        dispatch_date = dated_order_tag_date(order.get("tags"), "Dispatched")
+        dispatch_candidates = [parse_followup_date(item.get("dispatched_at")) for item in items]
+        dispatch_candidates = [value for value in dispatch_candidates if value]
+        dispatched_on = parse_followup_date(dispatch_date) or (min(dispatch_candidates) if dispatch_candidates else None)
+        created_on = parse_followup_date(order.get("created_at")) or today
+        dispatched_on = dispatched_on or created_on
+        return_candidates = [parse_followup_date(item.get("return_marked_at")) for item in items]
+        return_candidates = [value for value in return_candidates if value]
+        return_on = min(return_candidates) if return_candidates else None
+        order.update({
+            "order_age_days": max((today - created_on).days, 0),
+            "dispatch_age_days": max((today - dispatched_on).days, 0),
+            "dispatch_date": dispatched_on.isoformat(),
+            "return_marked_date": return_on.isoformat() if return_on else "",
+            "return_marked_days": max((today - return_on).days, 0) if return_on else None,
+            "needs_attention": True,
+            "followup_section": "return_missed" if completed_return else ("to_be_returned" if has_return else "to_be_contacted"),
+        })
+        rows.append(order)
+        seen.add(order_key)
+    return sorted(rows, key=lambda row: parse_date_timestamp(row.get("created_at")), reverse=True)
+
+
+def build_delivery_followup_sections(orders):
+    orders = list(orders or [])
+    return [
+        {"key": "to_be_contacted", "title": "To Be Contacted", "description": "Failed deliveries and all return journeys requiring customer follow-up.", "orders": orders},
+        {"key": "to_be_returned", "title": "To Be Returned", "description": "Returns currently moving back through the courier network.", "orders": [order for order in orders if order.get("followup_section") == "to_be_returned"]},
+        {"key": "return_missed", "title": "Return Missed", "description": "Completed courier returns without a dated return or claim receipt.", "orders": [order for order in orders if order.get("followup_section") == "return_missed"], "return_marked_count": sum(1 for order in orders if order.get("followup_section") == "return_missed" and order.get("return_marked_date"))},
+    ]
+
+
+def build_delivery_followup_preview(order):
+    order = order or {}
+    items = order.get("line_items") or []
+    customer = order.get("customer_details") or {}
+    return {
+        "order_id": order.get("order_id") or "",
+        "created_at": str(order.get("created_at") or "")[:10],
+        "total_price": parse_money(order.get("total_price"), 0),
+        "financial_status": order.get("financial_status") or "",
+        "customer": {"name": customer.get("name") or "Customer", "phone": customer.get("phone") or "", "city": customer.get("city") or "", "address": customer.get("address") or ""},
+        "items": [{"title": item.get("product_title") or "Product", "image": item.get("image_src") or "", "quantity": int(item.get("quantity") or 0), "status": item.get("status") or "Awaiting courier update", "tracking_number": "" if str(item.get("tracking_number") or "").strip() in {"", "N/A"} else str(item.get("tracking_number"))} for item in items],
+    }
+
+
+def get_delivery_followup_summary(orders=None):
+    rows = build_undelivered_order_view(order_details if orders is None else orders)
+    contacts = load_delivery_followup_contacts([order.get("id") for order in rows])
+    return {"needs_attention": len(rows), "needs_contact": sum(1 for order in rows if not contacts.get(str(order.get("id"))))}
 
 
 def employee_portal_is_authenticated():
@@ -2885,9 +3030,23 @@ def fetch_orders():
 
 @app.route('/apply_tag', methods=['POST'])
 def apply_tag():
+    global order_details
     data = request.json
     order_id = data.get('order_id')
-    tag = data.get('tag')
+    tag = str(data.get('tag') or '').strip()
+
+    if not order_id or not tag:
+        return jsonify({"success": False, "error": "order_id and tag are required."}), 400
+
+    if tag.casefold() in {"returned", "return received", "claim received"}:
+        try:
+            cancel_order(order_id)
+            apply_shopify_order_tag(order_id, tag, include_date=True)
+            order_details = [order for order in order_details if str(order.get("id") or order.get("shopify_id")) != str(order_id)]
+            return jsonify({"success": True, "message": "Order cancelled and dated tag applied."})
+        except Exception as error:
+            print(f"Could not resolve returned Shopify order {order_id}: {error}")
+            return jsonify({"success": False, "error": str(error)}), 500
 
     # Get today's date in YYYY-MM-DD format
     today_date = datetime.now().strftime('%Y-%m-%d')
@@ -3080,6 +3239,7 @@ def tracking_home():
         employee_approvals=build_employee_approval_items(),
         total_order_value=total_order_value,
         abandoned_summary=get_abandoned_summary_safe(),
+        delivery_followup_summary=get_delivery_followup_summary(),
     )
 
 
@@ -3272,6 +3432,53 @@ def displayTracking(tracking_num):
     )
 
 
+def find_order_item_by_tracking_number(tracking_number):
+    target = normalize_scan_term(tracking_number)
+    for order in order_details:
+        for item in order.get("line_items") or []:
+            if normalize_scan_term(item.get("tracking_number")) == target:
+                return order, item
+    return None, None
+
+
+def build_tracking_summary_payload(tracking_number):
+    matched_order, matched_item = find_order_item_by_tracking_number(tracking_number)
+    current_status = str((matched_item or {}).get("status") or "").strip()
+    terminal = is_delivered_status(current_status) or status_contains_any([current_status], COMPLETED_RETURN_COURIER_MARKERS)
+
+    async def lookup():
+        if terminal:
+            return []
+        async with aiohttp.ClientSession(timeout=ClientTimeout(total=12)) as client:
+            if is_digidokaan_tracking_number(tracking_number):
+                return await fetch_resolved_tracking_history(client, tracking_number)
+            return await fetch_tracking_data(client, tracking_number)
+
+    result = asyncio.run(lookup())
+    rows = result if isinstance(result, list) else []
+    events = [{
+        "title": clean_tracking_status_label(row.get("ProcessDescForPortal") or row.get("ProcessDesc") or "Tracking update"),
+        "meta": str(row.get("TransactionDate") or ""),
+        "reason": str(row.get("ReasonDesc") or "") if str(row.get("ReasonDesc") or "").upper() != "OK" else "",
+    } for row in rows if isinstance(row, dict)]
+    latest = events[-1]["title"] if events else current_status
+    return {
+        "tracking_number": str(tracking_number),
+        "courier": "DigiDokaan / Trax" if is_digidokaan_tracking_number(tracking_number) else "Call Courier",
+        "status": latest or "No tracking status",
+        "events": events,
+    }
+
+
+@app.route('/tracking-summary/<tracking_num>')
+def tracking_summary(tracking_num):
+    try:
+        return jsonify({"success": True, "tracking": build_tracking_summary_payload(tracking_num)})
+    except Exception as error:
+        print(f"Tracking summary failed for {tracking_num}: {error}")
+        return jsonify({"success": False, "error": "Courier timeline is temporarily unavailable."}), 502
+
+
 @app.route('/abandoned')
 def abandoned_orders():
     try:
@@ -3357,14 +3564,36 @@ def admin_notifications():
 
 @app.route('/undelivered')
 def undelivered():
-    global order_details
-    refresh_daraz_cache_if_needed()
-    active_daraz_orders = [
-        order
-        for order in daraz_orders
-        if order.get('status') not in {'Ready To Ship', 'Pending', 'Packed', 'Packed by seller / warehouse'}
-    ]
-    return render_template("undelivered.html", order_details=order_details, darazOrders=active_daraz_orders)
+    rows = build_undelivered_order_view(order_details)
+    contacts = load_delivery_followup_contacts([order.get("id") for order in rows])
+    for order in rows:
+        order["contact_history"] = contacts.get(str(order.get("id")), [])
+        order["latest_contact"] = order["contact_history"][0] if order["contact_history"] else None
+        order["preview"] = build_delivery_followup_preview(order)
+    return render_template(
+        "undelivered.html",
+        order_details=rows,
+        sections=build_delivery_followup_sections(rows),
+        contact_outcomes=DELIVERY_CONTACT_OUTCOMES,
+    )
+
+
+@app.route('/undelivered/contact', methods=['POST'])
+def save_undelivered_contact():
+    data = request.get_json(silent=True) or {}
+    order_id = str(data.get("order_id") or "").strip()
+    outcome = str(data.get("outcome") or "").strip()
+    remarks = str(data.get("remarks") or "").strip()[:1000]
+    if not order_id or outcome not in DELIVERY_CONTACT_OUTCOMES:
+        return jsonify({"success": False, "error": "Select a valid contact outcome."}), 400
+    record = add_delivery_followup_contact(order_id, outcome, remarks)
+    if not record:
+        return jsonify({"success": False, "error": "Could not save the contact record."}), 500
+    created_at = record.get("created_at")
+    return jsonify({"success": True, "contact": {
+        "id": record.get("id"), "outcome": record.get("outcome"), "remarks": record.get("remarks") or "",
+        "created_at": created_at.isoformat() if hasattr(created_at, "isoformat") else str(created_at or ""),
+    }})
 
 
 @app.route('/report')
@@ -3684,6 +3913,7 @@ async def revalidate_pending_trax_shipments(orders):
             continue
         item["status"] = result["status"]
         item["tracking_source"] = result.get("source") or item.get("tracking_source") or ""
+        apply_followup_timeline_dates(item, result.get("history") or [])
         touched_orders.add(id(order))
         updated += 1
     for order in orders or []:
@@ -3718,6 +3948,7 @@ async def refresh_trax_tracking_for_orders(orders):
             continue
         item["status"] = result["status"]
         item["tracking_source"] = result.get("source") or item.get("tracking_source") or ""
+        apply_followup_timeline_dates(item, result.get("history") or [])
         touched_orders.add(id(order))
         updated += 1
     for order in orders or []:

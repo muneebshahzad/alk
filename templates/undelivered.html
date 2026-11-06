@@ -1,549 +1,138 @@
-<!DOCTYPE html>
-<html lang="en">
+{% extends 'base.html' %}
+{% block title %}Al Karamat – Delivery Follow-up{% endblock %}
 
-<head>
+{% block content %}
+<style>
+  #main{min-width:0}.ud-page{height:100%;min-width:0;overflow:auto;background:#f5f7f4;color:#19342e}.ud-page *{box-sizing:border-box}.ud-shell{width:min(1500px,100%);margin:auto;padding:16px 22px 32px}
+  .ud-top{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px}.ud-title{margin:0;font-size:19px;line-height:1.2}.ud-live{border:1px solid #cadbce;border-radius:999px;background:#edf4ee;padding:7px 11px;color:#315b4d;font-size:10px;font-weight:800}
+  .ud-stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-bottom:12px}.ud-stat{padding:14px 16px;border:1px solid #e3e6f0;border-radius:12px;background:#fff;box-shadow:0 1px 4px rgba(0,0,0,.04)}.ud-stat span{font-size:10px;color:#858796;font-weight:800;text-transform:uppercase;letter-spacing:.04em}.ud-stat strong{display:block;margin-top:5px;font:800 22px 'DM Mono',monospace;color:#2d2e36}.ud-stat.return strong{color:#a43b36}.ud-stat.returning strong{color:#b7791f}
+  .ud-controls{display:grid;grid-template-columns:minmax(220px,1fr) 180px 150px;gap:9px;padding:10px;border:1px solid #d8e1db;border-radius:12px;background:#fff;margin-bottom:12px}.ud-input{width:100%;height:40px;border:1px solid #d8e1db;border-radius:8px;background:#fff;padding:0 11px;color:#19342e;font:12px 'DM Sans',sans-serif;outline:none}.ud-input:focus{border-color:#6f9888;box-shadow:0 0 0 3px rgba(49,91,77,.1)}
+  .ud-panel{display:block;border:1px solid #d8e1db;border-radius:13px;background:#fff;overflow:hidden;margin-bottom:12px}.ud-panel>summary{list-style:none;display:flex;align-items:center;gap:12px;padding:12px 15px;cursor:pointer;border-bottom:1px solid transparent}.ud-panel>summary::-webkit-details-marker{display:none}.ud-panel[open]>summary{border-bottom-color:#e4ebe6}.ud-chevron{font-size:12px;color:#7d8984;transition:transform .15s}.ud-panel[open] .ud-chevron{transform:rotate(90deg)}.ud-panel-title{flex:1;min-width:0}.ud-panel-title h2{display:inline;margin:0;font-size:14px}.ud-panel-title p{display:inline;margin-left:8px;color:#7d8984;font-size:10px}.ud-counterbar{display:flex;gap:7px;flex-wrap:wrap}.ud-counter{padding:4px 9px;border-radius:999px;background:#edf4ee;color:#315b4d;font-size:10px;font-weight:800}.ud-counter.red{background:#fde9e7;color:#a43b36}
+  .ud-list{display:flex;flex-direction:column;gap:10px;padding:10px}.ud-card{border:1.5px solid #e3e6f0;border-radius:12px;background:#fff;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,.04)}.ud-card.attention{border-left:4px solid #d74c45}.ud-card-main{display:grid;grid-template-columns:minmax(300px,1.15fr) minmax(220px,.8fr) minmax(240px,1fr) auto;gap:16px;align-items:center;padding:13px 14px}
+  .ud-order{display:flex;align-items:flex-start;gap:9px;min-width:0}.ud-thumbs{display:flex;flex:0 0 auto;flex-wrap:wrap;gap:4px;width:120px}.ud-thumbs.single{width:58px}.ud-thumb{width:58px;height:58px;flex:0 0 58px;border-radius:9px;background:#edf1ef;object-fit:cover}.ud-thumb-empty{display:grid;place-items:center;color:#7d8984;font-size:18px}.ud-order-copy{min-width:0}.ud-order-link{color:#315b4d;font-size:14px;font-weight:850;text-decoration:none}.ud-product{margin-top:3px;font-size:11px;font-weight:750;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.ud-product-more{color:#7d8984;font-weight:500}.ud-status{margin-top:3px;color:#6d7c76;font-size:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.ud-tracking{display:flex;gap:4px;flex-wrap:wrap;margin-top:4px;color:#53655e;font:800 9px 'DM Mono',monospace}.ud-tracking span{padding:2px 5px;border-radius:5px;background:#edf1ef}
+  .ud-timers{display:flex;gap:6px;flex-wrap:wrap}.ud-timer{min-width:90px;padding:6px 8px;border:1px solid #dfe6e1;border-radius:8px;background:#f8faf8}.ud-timer span{display:block;color:#7d8984;font-size:8px;font-weight:800;text-transform:uppercase}.ud-timer strong{display:block;margin-top:1px;font-size:14px}.ud-timer.return strong{color:#a43b36}
+  .ud-person strong{display:block;font-size:12px}.ud-person span{display:block;margin-top:3px;color:#7d8984;font-size:10px;line-height:1.35;overflow-wrap:anywhere}.ud-contact-last{margin-top:6px;padding:5px 7px;border-radius:7px;background:#f3f6f4;font-size:9px;color:#52635c}.ud-contact-last b{color:#315b4d}.ud-address{max-width:360px}.ud-statuses{display:flex;gap:4px;flex-wrap:wrap;margin-top:5px}.ud-status-chip{display:inline-flex;align-items:center;gap:4px;padding:3px 7px;border-radius:99px;background:#edf2ff;color:#3158c9;font-size:9px;font-weight:800}.ud-status-chip.returning{background:#fff3cd;color:#8b5a00}.ud-status-chip.returned{background:#fde9e7;color:#a43b36}
+  .ud-side{text-align:right;white-space:nowrap}.ud-value{font-size:14px;font-weight:850}.ud-value-label{display:block;color:#7d8984;font-size:8px}.ud-actions{display:flex;justify-content:flex-end;gap:6px;margin-top:7px;flex-wrap:wrap;max-width:440px}.ud-action{min-height:32px;border:1px solid #cad8d0;border-radius:8px;background:#fff;padding:6px 10px;color:#315b4d;font:800 10px 'DM Sans',sans-serif;cursor:pointer;text-decoration:none}.ud-action.contact{border-color:#315b4d;background:#315b4d;color:#fff}.ud-action.resolve{border-color:#d74c45;color:#a43b36;background:#fff7f6}.ud-action.claim{border-color:#b7791f;color:#8b5a00;background:#fffaf0}.ud-action:disabled{opacity:.55;cursor:wait}.ud-action[aria-disabled=true]{opacity:.45;pointer-events:none}
+  .ud-history{border-top:1px solid #edf1ee;padding:8px 12px;background:#fafbfa;font-size:10px;color:#64736d}.ud-history summary{cursor:pointer;font-weight:800;color:#315b4d}.ud-history-row{display:grid;grid-template-columns:minmax(180px,.8fr) minmax(220px,1fr) auto;gap:10px;padding-top:7px}.ud-history-row span:last-child{color:#7d8984;text-align:right}.ud-empty{display:none;padding:34px 18px;text-align:center;color:#6d7c76;font-size:11px}
+  .ud-dialog{width:min(440px,calc(100% - 24px));border:0;border-radius:15px;padding:0;box-shadow:0 22px 70px rgba(15,34,28,.28)}.ud-dialog::backdrop{background:rgba(20,34,30,.5)}.ud-dialog-head{display:flex;align-items:center;justify-content:space-between;padding:15px 17px;border-bottom:1px solid #e4ebe6}.ud-dialog-head h3{margin:0;font-size:15px}.ud-close{border:0;background:none;font-size:22px;cursor:pointer;color:#6d7c76}.ud-form{padding:15px 17px}.ud-options{display:grid;gap:7px}.ud-option{display:flex;align-items:center;gap:9px;padding:9px 10px;border:1px solid #dfe6e1;border-radius:9px;font-size:11px;cursor:pointer}.ud-option:has(input:checked){border-color:#315b4d;background:#edf4ee}.ud-option input{accent-color:#315b4d}.ud-remarks{width:100%;min-height:75px;margin-top:11px;resize:vertical;border:1px solid #d8e1db;border-radius:9px;padding:9px;font:11px 'DM Sans',sans-serif}.ud-save{width:100%;margin-top:11px;border:0;border-radius:9px;background:#315b4d;color:#fff;padding:11px;font:800 11px 'DM Sans',sans-serif;cursor:pointer}
+  .order-preview-backdrop{position:fixed;inset:0;z-index:2200;display:none;align-items:center;justify-content:center;padding:22px;background:rgba(18,24,38,.6);backdrop-filter:blur(5px)}.order-preview-backdrop.open{display:flex}.order-preview-modal{width:min(1120px,96vw);max-height:92vh;overflow:hidden;background:#fff;border-radius:22px;box-shadow:0 28px 80px rgba(15,24,53,.34);display:flex;flex-direction:column}.order-preview-head{display:flex;align-items:center;gap:12px;padding:16px 19px;border-bottom:1px solid #e8ebf1}.order-preview-title{font-size:18px;font-weight:900;color:#14213d}.order-preview-meta{font-size:11px;color:#858796}.order-preview-close{margin-left:auto;border:0;background:#f2f4f8;border-radius:10px;width:34px;height:34px;font-size:20px;cursor:pointer}.order-preview-layout{display:grid;grid-template-columns:minmax(0,1.05fr) minmax(330px,.75fr);min-height:0;overflow:auto}.order-preview-main{padding:18px;background:linear-gradient(180deg,#fffaf2,#fff)}.order-preview-products{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px}.order-preview-products.single{grid-template-columns:minmax(220px,360px);justify-content:start}.order-preview-products.single .order-preview-image{height:280px}.order-preview-product{border:1px solid #e3e6f0;border-radius:15px;overflow:hidden;background:#fff;box-shadow:0 7px 20px rgba(15,24,53,.06)}.order-preview-image{height:190px;background:#f4f5f8;display:grid;place-items:center;color:#858796;overflow:hidden}.order-preview-image img{width:100%;height:100%;object-fit:contain}.order-preview-product-copy{padding:11px 12px}.order-preview-product-title{font-size:13px;font-weight:900;color:#14213d}.order-preview-product-meta{margin-top:6px;color:#727583;font-size:10px}.order-preview-customer{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:14px}.order-preview-info{padding:10px 11px;border:1px solid #e3e6f0;border-radius:11px;background:#fff}.order-preview-info span{display:block;color:#9a9dab;font-size:8px;font-weight:900;text-transform:uppercase}.order-preview-info strong{display:block;margin-top:4px;color:#2d2e36;font-size:11px;overflow-wrap:anywhere}.order-preview-timeline{padding:18px;border-left:1px solid #e8ebf1;background:#f8f9fc;overflow:auto}.order-preview-timeline h3{margin:0 0 12px;font-size:14px}.timeline-group{margin-bottom:16px}.timeline-track{font:800 10px 'DM Mono',monospace;color:#4e73df;margin-bottom:8px}.timeline-event{position:relative;margin-left:6px;padding:0 0 13px 17px;border-left:2px solid #dbe2f3}.timeline-event:before{content:'';position:absolute;left:-5px;top:2px;width:8px;height:8px;border-radius:50%;background:#4e73df}.timeline-event:last-child{padding-bottom:0}.timeline-event strong{display:block;font-size:11px;color:#2d2e36}.timeline-event span{display:block;margin-top:2px;font-size:9px;color:#858796}.timeline-empty{padding:18px;border:1px dashed #ccd3df;border-radius:12px;color:#858796;text-align:center;font-size:11px}
+  @media(max-width:1200px){.ud-card-main{grid-template-columns:minmax(0,1fr) auto}.ud-timers,.ud-person{grid-column:1}.ud-side{grid-column:2;grid-row:1/4;align-self:center}}
+  @media(max-width:700px){.ud-shell{padding:12px 10px 78px}.ud-stats{gap:7px;overflow-x:auto}.ud-stat{padding:11px;min-width:135px}.ud-controls{grid-template-columns:1fr}.ud-panel>summary{align-items:flex-start;flex-wrap:wrap}.ud-panel-title p{display:block;margin:2px 0 0}.ud-counterbar{width:100%;padding-left:24px}.ud-card-main{grid-template-columns:1fr;gap:10px;padding:10px}.ud-timers,.ud-person,.ud-side{grid-column:1;grid-row:auto}.ud-person{display:block}.ud-side{text-align:left;padding-top:8px;border-top:1px solid #e4ebe6}.ud-actions{justify-content:flex-start;flex-wrap:wrap}.ud-history-row{grid-template-columns:1fr;gap:2px}.ud-history-row span:last-child{text-align:left}.ud-thumb{width:54px;height:54px;flex-basis:54px}.order-preview-backdrop{padding:7px}.order-preview-modal{width:100%;max-height:calc(100dvh - 14px);border-radius:16px}.order-preview-layout{grid-template-columns:1fr}.order-preview-main,.order-preview-timeline{padding:12px}.order-preview-timeline{border-left:0;border-top:1px solid #e8ebf1}.order-preview-image{height:140px}.order-preview-customer{grid-template-columns:1fr 1fr}}
+</style>
 
-    <meta charset="utf-8">
-    <meta http-equiv="X-UA-Compatible" content="IE=edge">
-    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
-    <meta name="description" content="">
-    <meta name="author" content="">
+<div class="ud-page"><main class="ud-shell">
+  <div class="ud-top"><h1 class="ud-title">Delivery follow-up</h1><span class="ud-live">Hourly tracking</span></div>
+  <div class="ud-stats">
+    {% for section in sections %}<div class="ud-stat{% if section.key == 'return_missed' %} return{% elif section.key == 'to_be_returned' %} returning{% endif %}"><span>{{ section.title }}</span><strong>{{ section.orders|length }}</strong></div>{% endfor %}
+  </div>
+  <div class="ud-controls">
+    <input id="udSearch" class="ud-input" type="search" placeholder="Search order, customer, product, city, tracking or status…">
+    <select id="udAge" class="ud-input"><option value="all">Any dispatch age</option><option value="0-3">0–3 days</option><option value="4-7">4–7 days</option><option value="8+">8+ days</option></select>
+    <select id="udSort" class="ud-input" aria-label="Sort orders"><option value="latest">Latest first</option><option value="oldest">Oldest first</option></select>
+  </div>
 
-    <title>Daily Tasker - Tracking</title>
-
-    <!-- Custom fonts for this template -->
-    <link href="static/assets/vendor/fontawesome-free/css/all.min.css" rel="stylesheet" type="text/css">
-    <link
-        href="https://fonts.googleapis.com/css?family=Nunito:200,200i,300,300i,400,400i,600,600i,700,700i,800,800i,900,900i"
-        rel="stylesheet">
-
-    <!-- Custom styles for this template -->
-    <link href="static/assets/css/sb-admin-2.min.css" rel="stylesheet">
-
-    <!-- Custom styles for this page -->
-    <link href="static/assets/vendor/datatables/dataTables.bootstrap4.min.css" rel="stylesheet">
- <style>
-        .status-buttons {
-            display: none;
-            margin-top: 10px;
-        }
-        .status-buttons .btn {
-            margin-right: 5px;
-            margin-bottom: 5px;
-        }
-    </style>
-</head>
-
-<body id="page-top">
-
-    <!-- Page Wrapper -->
-    <div id="wrapper">
-
-        <!-- Sidebar -->
-        {% include 'header.html' %}
-        <!-- End of Sidebar -->
-
-        <!-- Content Wrapper -->
-        <div id="content-wrapper" class="d-flex flex-column">
-
-            <!-- Main Content -->
-            <div id="content">
-
-                <!-- Topbar -->
-                <nav class="navbar navbar-expand navbar-light bg-white topbar mb-4 static-top shadow">
-
-                    <!-- Sidebar Toggle (Topbar) -->
-                    <form class="form-inline">
-                        <button id="sidebarToggleTop" class="btn btn-link d-md-none rounded-circle mr-3">
-                            <i class="fa fa-bars"></i>
-                        </button>
-                    </form>
-
-                    <!-- Topbar Search -->
-
-
-                    <!-- Topbar Navbar -->
-                    <ul class="navbar-nav ml-auto">
-
-                        <!-- Nav Item - Search Dropdown (Visible Only XS) -->
-                        <li class="nav-item dropdown no-arrow d-sm-none">
-                            <a class="nav-link dropdown-toggle" href="#" id="searchDropdown" role="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
-                                <i class="fas fa-search fa-fw"></i>
-                            </a>
-                            <!-- Dropdown - Messages -->
-                            <div class="dropdown-menu dropdown-menu-right p-3 shadow animated--grow-in" aria-labelledby="searchDropdown">
-                                <form class="form-inline mr-auto w-100 navbar-search">
-                                    <div class="input-group">
-                                        <input type="text" class="form-control bg-light border-0 small" placeholder="Search for..." aria-label="Search" aria-describedby="basic-addon2">
-                                        <div class="input-group-append">
-                                            <button class="btn btn-primary" type="button">
-                                                <i class="fas fa-search fa-sm"></i>
-                                            </button>
-
-                                        </div>
-                                    </div>
-                                </form>
-                            </div>
-                        </li>
-
-                        <!-- Nav Item - Alerts -->
-<!--                        <li class="nav-item dropdown no-arrow mx-1">-->
-<!--                            <a class="nav-link dropdown-toggle" href="#" id="alertsDropdown" role="button"-->
-<!--                                data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">-->
-<!--                                <i class="fas fa-bell fa-fw"></i>-->
-<!--                                &lt;!&ndash; Counter - Alerts &ndash;&gt;-->
-<!--                                <span class="badge badge-danger badge-counter">3+</span>-->
-<!--                            </a>-->
-<!--                            &lt;!&ndash; Dropdown - Alerts &ndash;&gt;-->
-<!--                            <div class="dropdown-list dropdown-menu dropdown-menu-right shadow animated&#45;&#45;grow-in"-->
-<!--                                aria-labelledby="alertsDropdown">-->
-<!--                                <h6 class="dropdown-header">-->
-<!--                                    Alerts Center-->
-<!--                                </h6>-->
-<!--                                <a class="dropdown-item d-flex align-items-center" href="#">-->
-<!--                                    <div class="mr-3">-->
-<!--                                        <div class="icon-circle bg-primary">-->
-<!--                                            <i class="fas fa-file-alt text-white"></i>-->
-<!--                                        </div>-->
-<!--                                    </div>-->
-<!--                                    <div>-->
-<!--                                        <div class="small text-gray-500">December 12, 2019</div>-->
-<!--                                        <span class="font-weight-bold">A new monthly report is ready to download!</span>-->
-<!--                                    </div>-->
-<!--                                </a>-->
-<!--                                <a class="dropdown-item d-flex align-items-center" href="#">-->
-<!--                                    <div class="mr-3">-->
-<!--                                        <div class="icon-circle bg-success">-->
-<!--                                            <i class="fas fa-donate text-white"></i>-->
-<!--                                        </div>-->
-<!--                                    </div>-->
-<!--                                    <div>-->
-<!--                                        <div class="small text-gray-500">December 7, 2019</div>-->
-<!--                                        $290.29 has been deposited into your account!-->
-<!--                                    </div>-->
-<!--                                </a>-->
-<!--                                <a class="dropdown-item d-flex align-items-center" href="#">-->
-<!--                                    <div class="mr-3">-->
-<!--                                        <div class="icon-circle bg-warning">-->
-<!--                                            <i class="fas fa-exclamation-triangle text-white"></i>-->
-<!--                                        </div>-->
-<!--                                    </div>-->
-<!--                                    <div>-->
-<!--                                        <div class="small text-gray-500">December 2, 2019</div>-->
-<!--                                        Spending Alert: We've noticed unusually high spending for your account.-->
-<!--                                    </div>-->
-<!--                                </a>-->
-<!--                                <a class="dropdown-item text-center small text-gray-500" href="#">Show All Alerts</a>-->
-<!--                            </div>-->
-<!--                        </li>-->
-
-<!--                        &lt;!&ndash; Nav Item - Messages &ndash;&gt;-->
-<!--                        <li class="nav-item dropdown no-arrow mx-1">-->
-<!--                            <a class="nav-link dropdown-toggle" href="#" id="messagesDropdown" role="button"-->
-<!--                                data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">-->
-<!--                                <i class="fas fa-envelope fa-fw"></i>-->
-<!--                                &lt;!&ndash; Counter - Messages &ndash;&gt;-->
-<!--                                <span class="badge badge-danger badge-counter">7</span>-->
-<!--                            </a>-->
-<!--                            &lt;!&ndash; Dropdown - Messages &ndash;&gt;-->
-<!--                            <div class="dropdown-list dropdown-menu dropdown-menu-right shadow animated&#45;&#45;grow-in"-->
-<!--                                aria-labelledby="messagesDropdown">-->
-<!--                                <h6 class="dropdown-header">-->
-<!--                                    Message Center-->
-<!--                                </h6>-->
-<!--                                <a class="dropdown-item d-flex align-items-center" href="#">-->
-<!--                                    <div class="dropdown-list-image mr-3">-->
-<!--                                        <img class="rounded-circle" src="img/undraw_profile_1.svg"-->
-<!--                                            alt="...">-->
-<!--                                        <div class="status-indicator bg-success"></div>-->
-<!--                                    </div>-->
-<!--                                    <div class="font-weight-bold">-->
-<!--                                        <div class="text-truncate">Hi there! I am wondering if you can help me with a-->
-<!--                                            problem I've been having.</div>-->
-<!--                                        <div class="small text-gray-500">Emily Fowler · 58m</div>-->
-<!--                                    </div>-->
-<!--                                </a>-->
-<!--                                <a class="dropdown-item d-flex align-items-center" href="#">-->
-<!--                                    <div class="dropdown-list-image mr-3">-->
-<!--                                        <img class="rounded-circle" src="img/undraw_profile_2.svg"-->
-<!--                                            alt="...">-->
-<!--                                        <div class="status-indicator"></div>-->
-<!--                                    </div>-->
-<!--                                    <div>-->
-<!--                                        <div class="text-truncate">I have the photos that you ordered last month, how-->
-<!--                                            would you like them sent to you?</div>-->
-<!--                                        <div class="small text-gray-500">Jae Chun · 1d</div>-->
-<!--                                    </div>-->
-<!--                                </a>-->
-<!--                                <a class="dropdown-item d-flex align-items-center" href="#">-->
-<!--                                    <div class="dropdown-list-image mr-3">-->
-<!--                                        <img class="rounded-circle" src="img/undraw_profile_3.svg"-->
-<!--                                            alt="...">-->
-<!--                                        <div class="status-indicator bg-warning"></div>-->
-<!--                                    </div>-->
-<!--                                    <div>-->
-<!--                                        <div class="text-truncate">Last month's report looks great, I am very happy with-->
-<!--                                            the progress so far, keep up the good work!</div>-->
-<!--                                        <div class="small text-gray-500">Morgan Alvarez · 2d</div>-->
-<!--                                    </div>-->
-<!--                                </a>-->
-<!--                                <a class="dropdown-item d-flex align-items-center" href="#">-->
-<!--                                    <div class="dropdown-list-image mr-3">-->
-<!--                                        <img class="rounded-circle" src="https://source.unsplash.com/Mv9hjnEUHR4/60x60"-->
-<!--                                            alt="...">-->
-<!--                                        <div class="status-indicator bg-success"></div>-->
-<!--                                    </div>-->
-<!--                                    <div>-->
-<!--                                        <div class="text-truncate">Am I a good boy? The reason I ask is because someone-->
-<!--                                            told me that people say this to all dogs, even if they aren't good...</div>-->
-<!--                                        <div class="small text-gray-500">Chicken the Dog · 2w</div>-->
-<!--                                    </div>-->
-<!--                                </a>-->
-<!--                                <a class="dropdown-item text-center small text-gray-500" href="#">Read More Messages</a>-->
-<!--                            </div>-->
-<!--                        </li>-->
-
-                         <div class="topbar-divider d-none d-sm-block"></div>
-
-                        <!-- Nav Item - User Information -->
-                        <li class="nav-item dropdown no-arrow">
-                            <a class="nav-link dropdown-toggle" href="#" id="userDropdown" role="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
-                                <span class="mr-2 d-none d-lg-inline text-gray-600 small">User</span>
-                                <img class="img-profile rounded-circle" src="static/img/undraw_profile.svg">
-                            </a>
-                            <!-- Dropdown - User Information -->
-                            <div class="dropdown-menu dropdown-menu-right shadow animated--grow-in" aria-labelledby="userDropdown">
-                                <a class="dropdown-item" href="#">
-                                    <i class="fas fa-user fa-sm fa-fw mr-2 text-gray-400"></i>
-                                    Profile
-                                </a>
-                                <a class="dropdown-item" href="#">
-                                    <i class="fas fa-cogs fa-sm fa-fw mr-2 text-gray-400"></i>
-                                    Settings
-                                </a>
-                                <a class="dropdown-item" href="#">
-                                    <i class="fas fa-list fa-sm fa-fw mr-2 text-gray-400"></i>
-                                    Activity Log
-                                </a>
-                                <div class="dropdown-divider"></div>
-                                <a class="dropdown-item" href="#" data-toggle="modal" data-target="#logoutModal">
-                                    <i class="fas fa-sign-out-alt fa-sm fa-fw mr-2 text-gray-400"></i>
-                                    Logout
-                                </a>
-                            </div>
-                        </li>
-
-                    </ul>
-
-                </nav>
-                <!-- End of Topbar -->
-
-                <!-- Begin Page Content -->
-                <div class="container-fluid">
-
-
-                    <!-- Page Heading -->
-                    <h1 class="h3 mb-2 text-gray-800">Order Tracking</h1>
-
-                    <!-- DataTales Example -->
-                    <div class="card shadow mb-4">
-                        <div class="card-header py-3">
-                            <h6 class="m-0 font-weight-bold text-primary">Shopify - Pending </h6>
-                        </div>
-                        <div class="card-body">
-                            <div class="table-responsive">
-
-                                <table class="table table-bordered" id="dataTable" width="100%" cellspacing="0">
-
-    <thead>
-        <tr>
-            <th>Order ID</th>
-            <th style="width: 15%;">Customer</th>
-            <th>City</th>
-            <th>Tags</th>
-            <th>Payment</th>
-            <th>Date</th>
-            <th>Total Price</th>
-            <th>Items</th>
-            <th>Status</th>
-            <th>Actions</th>
-        </tr>
-    </thead>
-    <tfoot>
-        <tr>
-            <th>Order ID</th>
-            <th style="width: 15%;">Customer</th>
-            <th>City</th>
-            <th>Tags</th>
-            <th>Payment</th>
-            <th>Date</th>
-            <th>Total Price</th>
-            <th>Items</th>
-            <th>Status</th>
-            <th>Actions</th>
-        </tr>
-    </tfoot>
-    <tbody>
-
-        {# Shopify orders #}
-        {% for order in order_details %}
-        {% if order.status not in ['Booked', 'Un-Booked'] %}
-            <tr>
-                <td><a href="{{ order.order_link }}" target="_blank">{{ order.order_num }}</a></td>
-                <td>
-                    {% if order.customer_details %}
-                        {{ order.customer_details.name or "Unknown" }}<br>
-                        {{ order.customer_details.address or "Not provided" }}<br>
-                        {{ order.customer_details.city or "Unknown" }}<br>
-                        {{ order.customer_details.phone or "Not provided" }}<br>
-
-                        {% if order.customer_details.phone %}
-                            <a href="tel:{{ order.customer_details.phone }}" class="btn btn-primary btn-sm">Call</a>
-                            <div class="btn-group">
-                                <button type="button" class="btn btn-success btn-sm dropdown-toggle" data-toggle="dropdown">
-                                    WhatsApp
-                                </button>
-                                <div class="dropdown-menu">
-                                    <a class="dropdown-item" href="https://wa.me/{{ order.customer_details.phone }}?text=Hello%20{{ order.customer_details.name }},%20Your%20order%23{{ order.order_id }}..." target="_blank">Send Dispatch Message</a>
-                                    <a class="dropdown-item" href="https://wa.me/{{ order.customer_details.phone }}?text=Hello%20{{ order.customer_details.name }},%20Your%20order%23{{ order.order_id }}%20from%20TheAlkaramat.com%20has%20been%20delayed..." target="_blank">Send Delay Message</a>
-                                    <a class="dropdown-item" href="https://wa.me/{{ order.customer_details.phone }}?text=Hello%20{{ order.customer_details.name }},%20Logistics%20company%20made%20an%20attempt..." target="_blank">Send Address Closed Message</a>
-                                    <a class="dropdown-item" href="https://wa.me/{{ order.customer_details.phone }}?text=Hello%20{{ order.customer_details.name }},%20Logistics%20company%20made%20an%20attempt..." target="_blank">Send Refused Message</a>
-                                    <a class="dropdown-item" href="https://wa.me/{{ order.customer_details.phone }}?text=Hello%20{{ order.customer_details.name }},%20Your%20order%23{{ order.order_id }}%20from%20TheAlkaramat.com%20was%20delivered..." target="_blank">Send Feedback Message</a>
-                                </div>
-                            </div>
-                        {% else %}
-                            <p>Phone number not available</p>
-                        {% endif %}
-                    {% else %}
-                        <p>Customer details not available</p>
-                    {% endif %}
-                </td>
-
-                <td>{{ order.customer_details.city or "Unknown" if order.customer_details else "Unknown" }}</td>
-
-                <td>
-                    {% for tag in order.tags %}
-                        <span class="badge badge-secondary">{{ tag }}</span><br>
-                    {% endfor %}
-                </td>
-                <td>{{ order.financial_status }}</td>
-                <td>{{ order.created_at }}</td>
-                <td>{{ order.total_price }}</td>
-
-                <td>
-                    <table class="table table-sm">
-                        <thead>
-                            <tr>
-                                <th>Image</th>
-                                <th style="width: 30%;">Title</th>
-                                <th>Pcs</th>
-                                <th>Tracking Number</th>
-                                <th style="width: 20%;">Status</th>
-                                <th>Email</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {% for item in order.line_items %}
-                                <tr>
-                                    <td><img src="{{ item.image_src }}" width="50" height="50"></td>
-                                    <td>{{ item.product_title }}</td>
-                                    <td>{{ item.quantity }}</td>
-                                    <td><a href="track/{{item.tracking_number}}" target="_blank">{{ item.tracking_number }}</a></td>
-                                    <td>{{ item.status }}</td>
-                                    <td>
-                                        <div class="btn-group">
-                                            <button type="button" class="btn btn-info btn-sm dropdown-toggle" data-toggle="dropdown">
-                                                Email
-                                            </button>
-                                            <div class="dropdown-menu">
-                                                <a class="dropdown-item" href="#" onclick="sendEmail('delay', '{{ item.tracking_number }}')">Send Email for Delay</a>
-                                                <a class="dropdown-item" href="#" onclick="sendEmail('incomplete', '{{ item.tracking_number }}')">Send Email for Incomplete Address</a>
-                                                <a class="dropdown-item" href="#" onclick="sendEmail('refusal', '{{ item.tracking_number }}')">Send Email for Fake Refusal</a>
-                                            </div>
-                                        </div>
-                                    </td>
-                                </tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
-                </td>
-
-                <td>{{ order.status }}</td>
-                <td>
-                    <button class="btn btn-primary btn-sm" onclick="toggleStatusButtons(this)">Mark As</button>
-                    <div class="status-buttons">
-                        <button class="btn btn-outline-success btn-sm" onclick="applyTag('{{ order.id }}', 'Delivered')">Delivered</button>
-                        <button class="btn btn-outline-danger btn-sm" onclick="applyTag('{{ order.id }}', 'Returned')">Close Order</button>
-                        <button class="btn btn-outline-danger btn-sm" onclick="applyTag('{{ order.id }}', 'Return Received')">Return Received</button>
-                        <button class="btn btn-outline-warning btn-sm" onclick="applyTag('{{ order.id }}', 'Cancelled')">Cancelled</button>
-                        <button class="btn btn-outline-info btn-sm" onclick="applyTag('{{ order.id }}', 'Confirmed')">Confirmed</button>
-                        <button class="btn btn-outline-secondary btn-sm" onclick="applyTag('{{ order.id }}', 'Call Not Attended')">Call Not Attended</button>
-                    </div>
-                </td>
-            </tr>
-        {% endif %}
-        {% endfor %}
-
-        {# Daraz orders #}
-        {% for order in darazOrders %}
-        {% if order.status not in ['Ready To Ship', 'Pending'] %}
-            <tr>
-                <td>{{ order.order_id }}</td>
-                <td>
-                    {{ order.customer.name }}<br>
-                    {{ order.customer.address }}<br>
-                    {{ order.customer.phone }}<br>
-                    <a href="tel:{{ order.customer.phone }}" class="btn btn-primary btn-sm">Call</a>
-                    <div class="btn-group">
-                        <button type="button" class="btn btn-success btn-sm dropdown-toggle" data-toggle="dropdown">
-                            WhatsApp
-                        </button>
-                        <div class="dropdown-menu">
-                            <a class="dropdown-item" href="https://wa.me/{{ order.customer.phone }}?text=Hello%20{{ order.customer.name }},%20Your%20order%23{{ order.order_id }}%20from%20TheAlkaramat.com%20has%20been%20dispatched..." target="_blank">Send Dispatch Message</a>
-                            <a class="dropdown-item" href="https://wa.me/{{ order.customer.phone }}?text=Hello%20{{ order.customer.name }},%20Your%20order%23{{ order.order_id }}%20from%20TheAlkaramat.com%20has%20been%20delayed..." target="_blank">Send Delay Message</a>
-                            <a class="dropdown-item" href="https://wa.me/{{ order.customer.phone }}?text=Hello%20{{ order.customer.name }},%20Logistics%20company%20made%20an%20attempt..." target="_blank">Send Address Closed Message</a>
-                            <a class="dropdown-item" href="https://wa.me/{{ order.customer.phone }}?text=Hello%20{{ order.customer.name }},%20Logistics%20company%20made%20an%20attempt..." target="_blank">Send Refused Message</a>
-                            <a class="dropdown-item" href="https://wa.me/{{ order.customer.phone }}?text=Hello%20{{ order.customer.name }},%20Your%20order%23{{ order.order_id }}%20from%20TheAlkaramat.com%20was%20delivered..." target="_blank">Send Feedback Message</a>
-                        </div>
-                    </div>
-                </td>
-                <td></td>
-                <td> DARAZ </td>
-                <td></td>
-                <td>{{ order.date }}</td>
-                <td>{{ order.total_price }}</td>
-                <td>
-                    <table class="table table-sm">
-                        <thead>
-                            <tr>
-                                <th>Image</th>
-                                <th style="width: 50%;">Title</th>
-                                <th>Tracking Number</th>
-                                <th style="width: 20%;">Status</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {% for item in order.items_list %}
-                                <tr>
-                                    <td><img src="{{ item.item_image }}" width="50" height="50"></td>
-                                    <td>{{ item.item_title }}</td>
-                                    <td>{{ item.tracking_number }}</td>
-                                    <td>{{ item.status }}</td>
-                                </tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
-                </td>
-                <td>{{ order.status }}</td>
-                <td></td>
-            </tr>
-        {% endif %}
-        {% endfor %}
-    </tbody>
-</table>
-
-                            </div>
-                        </div>
-                    </div>
-
-                </div>
-                <!-- /.container-fluid -->
-
-            </div>
-            <!-- End of Main Content -->
-
-            <!-- Footer -->
-            <footer class="sticky-footer bg-white">
-                <div class="container my-auto">
-                    <div class="copyright text-center my-auto">
-                        <span>Copyright &copy; Your Website 2020</span>
-                    </div>
-                </div>
-            </footer>
-            <!-- End of Footer -->
-
+  <div id="undeliveredList">
+  {% for section in sections %}
+    <details class="ud-panel ud-section" data-section="{{ section.key }}" {% if section.key == 'to_be_contacted' %}open{% endif %}>
+      <summary>
+        <span class="ud-chevron">▶</span>
+        <div class="ud-panel-title"><h2>{{ section.title }}</h2><p>{{ section.description }}</p></div>
+        <div class="ud-counterbar">
+          <span class="ud-counter{% if section.key == 'return_missed' %} red{% endif %}">{{ section.title }} <b class="js-section-count">{{ section.orders|length }}</b></span>
+          {% if section.key == 'return_missed' %}<span class="ud-counter red">Return Marked <b class="js-return-count">{{ section.return_marked_count }}</b></span>{% endif %}
         </div>
-        <!-- End of Content Wrapper -->
-
-    </div>
-    <!-- End of Page Wrapper -->
-
-    <!-- Scroll to Top Button-->
-    <a class="scroll-to-top rounded" href="#page-top">
-        <i class="fas fa-angle-up"></i>
-    </a>
-
-    <!-- Logout Modal-->
-    <div class="modal fade" id="logoutModal" tabindex="-1" role="dialog" aria-labelledby="exampleModalLabel"
-        aria-hidden="true">
-        <div class="modal-dialog" role="document">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title" id="exampleModalLabel">Ready to Leave?</h5>
-                    <button class="close" type="button" data-dismiss="modal" aria-label="Close">
-                        <span aria-hidden="true">×</span>
-                    </button>
-                </div>
-                <div class="modal-body">Select "Logout" below if you are ready to end your current session.</div>
-                <div class="modal-footer">
-                    <button class="btn btn-secondary" type="button" data-dismiss="modal">Cancel</button>
-                    <a class="btn btn-primary" href="login.html">Logout</a>
-                </div>
+      </summary>
+      <div class="ud-list">
+      {% for order in section.orders %}
+        {% set items = order.line_items or [] %}{% set item0 = items[0] if items else {} %}{% set customer = order.customer_details or {} %}
+        {% set phone = item0.get('phone') or customer.get('phone','') %}{% set name = item0.get('name') or customer.get('name','') or 'Customer' %}{% set city = item0.get('city') or customer.get('city','') %}{% set tracking = item0.get('tracking_number') or '' %}
+        <article class="ud-card{% if order.needs_attention %} attention{% endif %}" data-age="{{ order.dispatch_age_days }}" data-order-age="{{ order.order_age_days }}" data-section="{{ section.key }}" data-return-marked="{{ 'true' if order.return_marked_date else 'false' }}" data-search="{{ order.order_id }} {{ name }} {{ city }} {{ phone }} {{ order.status }} {% for item in items %}{{ item.product_title }} {{ item.tracking_number }} {{ item.status }} {% endfor %}">
+          <div class="ud-card-main">
+            <div class="ud-order">
+              <div class="ud-thumbs{% if items|length <= 1 %} single{% endif %}">{% for item in items %}{% if item.get('image_src') and item.get('image_src') != 'None' %}<img class="ud-thumb" src="{{ item.get('image_src') }}" alt="{{ item.get('product_title') or 'Product' }}" loading="lazy">{% else %}<div class="ud-thumb ud-thumb-empty">📦</div>{% endif %}{% endfor %}</div>
+              <div class="ud-order-copy">
+                <a class="ud-order-link" href="{{ order.order_link or '#' }}" target="_blank">#{{ order.order_id }}</a>
+                <div class="ud-product">{{ item0.get('product_title') or 'Product unavailable' }}{% if items|length > 1 %}<span class="ud-product-more"> +{{ items|length - 1 }} more</span>{% endif %}</div>
+                <div class="ud-statuses">{% for item in items %}{% set item_status = item.get('status') or 'Awaiting courier update' %}<span class="ud-status-chip{% if order.followup_section == 'to_be_returned' %} returning{% elif order.followup_section == 'return_missed' %} returned{% endif %}">{{ item_status }}{% if item.get('quantity',1)|int > 1 %} ×{{ item.get('quantity') }}{% endif %}</span>{% endfor %}</div>
+                {% set tracking_numbers = namespace(seen=[]) %}<div class="ud-tracking">{% for item in items %}{% set number = item.get('tracking_number') %}{% if number and number != 'N/A' and number not in tracking_numbers.seen %}<span>{{ number }}</span>{% set tracking_numbers.seen = tracking_numbers.seen + [number] %}{% endif %}{% endfor %}</div>
+              </div>
             </div>
-        </div>
+            <div class="ud-timers">
+              <div class="ud-timer"><span>Order since</span><strong>{{ order.order_age_days }}d</strong></div>
+              <div class="ud-timer"><span>Dispatched since</span><strong>{{ order.dispatch_age_days }}d</strong></div>
+              {% if order.followup_section in ['to_be_returned','return_missed'] %}<div class="ud-timer return"><span>Return activity</span><strong>{% if order.return_marked_days is not none %}{{ order.return_marked_days }}d{% else %}—{% endif %}</strong></div>{% endif %}
+            </div>
+            {% set address = item0.get('address') or customer.get('address','') %}<div class="ud-person"><strong>{{ name }}</strong><span>{% if phone %}{{ phone }} · {% endif %}{{ city or 'City unavailable' }}</span><span class="ud-address">{{ address or 'Address unavailable' }}</span>{% if order.latest_contact %}<div class="ud-contact-last"><b>Contacted:</b> {{ order.latest_contact.outcome }} · {{ order.latest_contact.created_at.strftime('%d %b, %I:%M %p') if order.latest_contact.created_at.strftime is defined else order.latest_contact.created_at }}</div>{% endif %}</div>
+            <div class="ud-side"><div class="ud-value">PKR {{ order.total_price|float|int|format_number }}<span class="ud-value-label">ORDER VALUE</span></div><div class="ud-actions">
+              <button class="ud-action" type="button" data-order-preview="{{ order.preview|tojson|forceescape }}" onclick="openOrderPreview(this)">View order</button>
+              {% if tracking and tracking != 'N/A' %}<a class="ud-action" href="/track/{{ tracking }}" target="_blank">Track</a>{% endif %}
+              <button class="ud-action contact" type="button" data-order-id="{{ order.id }}" data-order-label="#{{ order.order_id }}" onclick="openContactDialog(this)">Mark contacted</button>
+              {% if order.followup_section == 'return_missed' %}<button class="ud-action resolve" type="button" data-order-id="{{ order.id }}" data-order-label="#{{ order.order_id }}" onclick="resolveReturnedOrder(this,'Return Received')">Mark Return Received</button><button class="ud-action claim" type="button" data-order-id="{{ order.id }}" data-order-label="#{{ order.order_id }}" onclick="resolveReturnedOrder(this,'Claim Received')">Mark Claim Received</button>{% endif %}
+            </div></div>
+          </div>
+          {% if order.contact_history %}<details class="ud-history"><summary>Contact history ({{ order.contact_history|length }})</summary>{% for contact in order.contact_history %}<div class="ud-history-row"><b>{{ contact.outcome }}</b><span>{{ contact.remarks or 'No additional remarks' }}</span><span>{{ contact.created_at.strftime('%d %b %Y, %I:%M %p') if contact.created_at.strftime is defined else contact.created_at }}</span></div>{% endfor %}</details>{% endif %}
+        </article>
+      {% endfor %}
+        <div class="ud-empty js-section-empty">No matching orders.</div>
+      </div>
+    </details>
+  {% endfor %}
+  </div>
+</main></div>
+
+<div class="order-preview-backdrop" id="orderPreview" onclick="closeOrderPreview(event)">
+  <div class="order-preview-modal" role="dialog" aria-modal="true" aria-label="Order preview" onclick="event.stopPropagation()">
+    <div class="order-preview-head"><div><div class="order-preview-title" id="orderPreviewTitle">Order</div><div class="order-preview-meta" id="orderPreviewMeta"></div></div><button class="order-preview-close" type="button" onclick="closeOrderPreview()">×</button></div>
+    <div class="order-preview-layout">
+      <section class="order-preview-main"><div class="order-preview-products" id="orderPreviewProducts"></div><div class="order-preview-customer" id="orderPreviewCustomer"></div></section>
+      <aside class="order-preview-timeline"><h3>Tracking timeline</h3><div id="orderPreviewTimeline" class="timeline-empty">Loading courier updates…</div></aside>
     </div>
+  </div>
+</div>
 
-    <!-- Bootstrap core JavaScript-->
-    <script src="static/assets/vendor/jquery/jquery.min.js"></script>
-    <script src="static/assets/vendor/bootstrap/js/bootstrap.bundle.min.js"></script>
+<dialog id="contactDialog" class="ud-dialog"><div class="ud-dialog-head"><h3>Contacted <span id="contactOrderLabel"></span></h3><button class="ud-close" type="button" onclick="closeContactDialog()">×</button></div><form id="contactForm" class="ud-form">
+  <input id="contactOrderId" type="hidden"><div class="ud-options">{% for outcome in contact_outcomes %}<label class="ud-option"><input type="radio" name="outcome" value="{{ outcome }}" required><span>{{ outcome }}</span></label>{% endfor %}</div>
+  <textarea id="contactRemarks" class="ud-remarks" maxlength="1000" placeholder="Optional remarks…"></textarea><button id="contactSave" class="ud-save" type="submit">Save contact record</button>
+</form></dialog>
+{% endblock %}
 
-    <!-- Core plugin JavaScript-->
-    <script src="static/assets/vendor/jquery-easing/jquery.easing.min.js"></script>
-
-    <!-- Custom scripts for all pages-->
-    <script src="static/assets/js/sb-admin-2.min.js"></script>
-
-    <!-- Page level plugins -->
-    <script src="static/assets/vendor/datatables/jquery.dataTables.min.js"></script>
-    <script src="static/assets/vendor/datatables/dataTables.bootstrap4.min.js"></script>
-
-    <!-- Page level custom scripts -->
-    <script src="static/assets/js/demo/datatables-demo.js"></script>
-        <script src="static/assets/js/demo/datatables-demo.js"></script>
-    <script src="static/assets/js/track.js"></script>
-
+{% block extra_js %}
 <script>
-    $(document).ready(function() {
-        // Check if the table is already a DataTable and destroy it if necessary
-        if ($.fn.DataTable.isDataTable('#dataTable')) {
-            $('#dataTable').DataTable().destroy();
-        }
-
-        // Initialize the DataTable with desired settings
-        $('#dataTable').DataTable({
-            "columnDefs": [
-                { "searchable": false, "targets": [-1, 4] }  // Make the last column and the 5th column non-searchable
-            ]
-        });
-    });
+function escapeFollowupHtml(value){return String(value??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]))}
+async function openOrderPreview(button){
+  const order=JSON.parse(button.dataset.orderPreview||'{}');
+  const customer=order.customer||{};
+  const products=document.getElementById('orderPreviewProducts');
+  document.getElementById('orderPreviewTitle').textContent=`#${order.order_id||'Order'}`;
+  document.getElementById('orderPreviewMeta').textContent=`${order.created_at||''} • ${order.financial_status||'Payment status unavailable'} • PKR ${Number(order.total_price||0).toLocaleString()}`;
+  products.classList.toggle('single',(order.items||[]).length===1);
+  products.innerHTML=(order.items||[]).map(item=>`<article class="order-preview-product"><div class="order-preview-image">${item.image?`<img src="${escapeFollowupHtml(item.image)}" alt="">`:'Product'}</div><div class="order-preview-product-copy"><div class="order-preview-product-title">${escapeFollowupHtml(item.title)}</div><div class="order-preview-product-meta">Qty ${Number(item.quantity||0)} • ${escapeFollowupHtml(item.status)}${item.tracking_number?` • ${escapeFollowupHtml(item.tracking_number)}`:''}</div></div></article>`).join('')||'<div class="timeline-empty">No products found.</div>';
+  document.getElementById('orderPreviewCustomer').innerHTML=[['Customer',customer.name],['Phone',customer.phone],['City',customer.city],['Address',customer.address]].map(([label,value])=>`<div class="order-preview-info"><span>${label}</span><strong>${escapeFollowupHtml(value||'—')}</strong></div>`).join('');
+  const timeline=document.getElementById('orderPreviewTimeline');timeline.className='timeline-empty';timeline.textContent='Loading courier updates…';document.getElementById('orderPreview').classList.add('open');
+  const numbers=[...new Set((order.items||[]).map(item=>item.tracking_number).filter(Boolean))];
+  if(!numbers.length){timeline.textContent='No courier tracking is attached to this order.';return}
+  const results=await Promise.all(numbers.map(async number=>{try{const response=await fetch(`/tracking-summary/${encodeURIComponent(number)}`);const data=await response.json();return data.success?data.tracking:{tracking_number:number,events:[]}}catch(_error){return {tracking_number:number,events:[]}}}));
+  timeline.className='';timeline.innerHTML=results.map(result=>`<div class="timeline-group"><div class="timeline-track">${escapeFollowupHtml(result.courier||'Courier')} • ${escapeFollowupHtml(result.tracking_number)} • ${escapeFollowupHtml(result.status||'')}</div>${(result.events||[]).map(event=>`<div class="timeline-event"><strong>${escapeFollowupHtml(event.title)}</strong><span>${escapeFollowupHtml(event.meta)}${event.reason?` • ${escapeFollowupHtml(event.reason)}`:''}</span></div>`).join('')||'<div class="timeline-empty">No detailed scans were returned.</div>'}</div>`).join('');
+}
+function closeOrderPreview(event){if(event&&event.target&&event.target.id!=='orderPreview')return;document.getElementById('orderPreview').classList.remove('open')}
+async function resolveReturnedOrder(button,tag){
+  const label=button.dataset.orderLabel||'this order';
+  if(!window.confirm(`${tag} will cancel ${label} in Shopify and apply the dated “${tag}” tag. Continue?`))return;
+  button.disabled=true;
+  try{
+    const response=await fetch('/apply_tag',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({order_id:button.dataset.orderId,tag})});
+    const data=await response.json();
+    if(!response.ok||!data.success)throw new Error(data.error||`Could not mark ${tag}`);
+    showToast(`${label} marked ${tag}`);
+    window.location.reload();
+  }catch(error){showToast(error.message||'Request failed');button.disabled=false}
+}
+function sortUndeliveredCards(){const direction=document.getElementById('udSort').value;document.querySelectorAll('.ud-section .ud-list').forEach(list=>{const empty=list.querySelector('.js-section-empty');const cards=[...list.querySelectorAll('.ud-card')].sort((a,b)=>direction==='oldest'?Number(b.dataset.orderAge)-Number(a.dataset.orderAge):Number(a.dataset.orderAge)-Number(b.dataset.orderAge));cards.forEach(card=>list.insertBefore(card,empty))})}
+function applyUndeliveredFilters(){sortUndeliveredCards();const q=(document.getElementById('udSearch').value||'').trim().toLowerCase();const f=document.getElementById('udAge').value;document.querySelectorAll('#undeliveredList .ud-card').forEach(c=>{const a=Number(c.dataset.age||0);const age=f==='all'||(f==='0-3'&&a<=3)||(f==='4-7'&&a>=4&&a<=7)||(f==='8+'&&a>=8);c.hidden=!(age&&(!q||c.dataset.search.toLowerCase().includes(q)))});document.querySelectorAll('.ud-section').forEach(s=>{const cards=[...s.querySelectorAll('.ud-card')].filter(c=>!c.hidden);s.querySelector('.js-section-count').textContent=cards.length;const r=s.querySelector('.js-return-count');if(r)r.textContent=cards.filter(c=>c.dataset.returnMarked==='true').length;s.querySelector('.js-section-empty').style.display=cards.length?'none':'block'})}
+function openContactDialog(button){const d=document.getElementById('contactDialog');document.getElementById('contactOrderId').value=button.dataset.orderId;document.getElementById('contactOrderLabel').textContent=button.dataset.orderLabel;document.getElementById('contactForm').reset();d.showModal()}
+function closeContactDialog(){document.getElementById('contactDialog').close()}
+document.getElementById('contactForm').addEventListener('submit',async event=>{event.preventDefault();const selected=document.querySelector('input[name="outcome"]:checked');if(!selected)return;const save=document.getElementById('contactSave');save.disabled=true;try{const response=await fetch('/undelivered/contact',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({order_id:document.getElementById('contactOrderId').value,outcome:selected.value,remarks:document.getElementById('contactRemarks').value})});const data=await response.json();if(!response.ok||!data.success)throw new Error(data.error||'Could not save contact record');closeContactDialog();showToast('Contact record saved');window.location.reload()}catch(error){showToast(error.message||'Request failed')}finally{save.disabled=false}});
+document.addEventListener('keydown',event=>{if(event.key==='Escape')closeOrderPreview()});
+document.addEventListener('DOMContentLoaded',()=>{document.getElementById('udSearch').addEventListener('input',applyUndeliveredFilters);document.getElementById('udAge').addEventListener('change',applyUndeliveredFilters);document.getElementById('udSort').addEventListener('change',applyUndeliveredFilters);applyUndeliveredFilters()});
 </script>
-<script>
-        $(document).ready(function() {
-            var currentUrl = window.location.pathname;
-            $('.nav-item a').each(function() {
-                var linkUrl = $(this).attr('href');
-                if (currentUrl === '/' + linkUrl) {
-                    $(this).parent().addClass('active');
-                }
-            });
-        });
-    </script>
-
-</body>
-
-
-</html>
-
-
-
-
+{% endblock %}

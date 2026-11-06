@@ -36,6 +36,22 @@ class ShopifyProtectedDataTests(unittest.TestCase):
     @patch.object(protected, "get_graphql_token", return_value="token")
     @patch.object(protected, "get_graphql_endpoint", return_value="https://shop.test/graphql.json")
     @patch.object(protected.requests, "post")
+    def test_cancels_order_without_automatic_refund(self, post, _endpoint, _token):
+        post.return_value.json.return_value = {"data": {"orderCancel": {
+            "job": {"id": "gid://shopify/Job/1", "done": False},
+            "orderCancelUserErrors": [], "userErrors": [],
+        }}}
+
+        self.assertTrue(protected.cancel_order(99))
+
+        variables = post.call_args.kwargs["json"]["variables"]
+        self.assertEqual(variables["orderId"], "gid://shopify/Order/99")
+        self.assertEqual(variables["refundMethod"], {"originalPaymentMethodsRefund": False})
+        self.assertTrue(variables["restock"])
+
+    @patch.object(protected, "get_graphql_token", return_value="token")
+    @patch.object(protected, "get_graphql_endpoint", return_value="https://shop.test/graphql.json")
+    @patch.object(protected.requests, "post")
     def test_fetches_and_formats_protected_customer_data_in_one_batch(self, post, _endpoint, _token):
         response = post.return_value
         response.json.return_value = {"data": {"nodes": [{
