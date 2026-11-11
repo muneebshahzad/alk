@@ -5228,11 +5228,14 @@ async def _aabroo_fetch_live_tracking_statuses_async(lookups):
                 # resolve them through the same direct courier path used by the
                 # main dashboard instead of masking their live state as Booked.
                 if "digidokaan" in courier:
-                    status = await fetch_tracking_status(client, tracking_number)
-                    if str(status).strip().lower() != "tracking unavailable":
-                        return str(status or "").strip()
                     snapshot = await fetch_resolved_tracking_snapshot(client, tracking_number)
-                    return str((snapshot or {}).get("status") or "").strip()
+                    status = str((snapshot or {}).get("status") or "").strip()
+                    if status:
+                        return status
+                    # Retain the legacy partner lookup as a safe fallback for
+                    # older DigiDokaan CNs that the aggregator cannot resolve.
+                    fallback = await fetch_tracking_status(client, tracking_number)
+                    return "" if str(fallback).strip().lower() == "tracking unavailable" else str(fallback or "").strip()
                 if "call" in courier and "courier" in courier:
                     status = await fetch_tracking_status(client, tracking_number)
                     return "" if str(status).strip().lower() == "tracking unavailable" else str(status or "").strip()

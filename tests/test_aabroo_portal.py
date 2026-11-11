@@ -66,7 +66,7 @@ def test_aabroo_digidokaan_tracking_uses_live_status(monkeypatch):
     assert delivery == "Inprocess"
 
 
-def test_aabroo_digidokaan_label_resolves_underlying_call_courier_cn(monkeypatch):
+def test_aabroo_digidokaan_label_uses_aggregator_before_partner_fallback(monkeypatch):
     calls = []
 
     async def call_courier(_session, tracking_number):
@@ -75,7 +75,7 @@ def test_aabroo_digidokaan_label_resolves_underlying_call_courier_cn(monkeypatch
 
     async def digidokaan(_session, tracking_number):
         calls.append(("digidokaan", tracking_number))
-        return {"status": None, "source": "", "history": []}
+        return {"status": "Delivered", "source": "DigiDokaan", "history": []}
 
     monkeypatch.setattr(main, "fetch_tracking_status", call_courier)
     monkeypatch.setattr(main, "fetch_resolved_tracking_snapshot", digidokaan)
@@ -85,7 +85,7 @@ def test_aabroo_digidokaan_label_resolves_underlying_call_courier_cn(monkeypatch
     ]))
 
     assert statuses == {"173019564522": "Delivered"}
-    assert calls == [("call", "173019564522")]
+    assert calls == [("digidokaan", "173019564522")]
 
 
 def test_aabroo_tracking_failure_preserves_last_valid_status(monkeypatch):
