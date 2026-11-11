@@ -6,6 +6,7 @@ main = pytest.importorskip("main", reason="application dependencies are not inst
 @pytest.fixture(autouse=True)
 def _avoid_aabroo_product_api(monkeypatch):
     monkeypatch.setattr(main, "_aabroo_product_image_map", lambda _orders: {})
+    main._aabroo_tracking_cache.clear()
 
 
 def _order(**overrides):
@@ -34,6 +35,45 @@ def test_aabroo_line_image_prefers_variant_then_product_image():
     assert main._aabroo_line_image({"product_id": 10, "variant_id": 11}, images) == "https://cdn.example/variant.jpg"
     assert main._aabroo_line_image({"product_id": 10, "variant_id": 12}, images) == "https://cdn.example/product.jpg"
     assert main._aabroo_line_image({"image": "https://cdn.example/order.jpg", "product_id": 10}, images) == "https://cdn.example/order.jpg"
+
+
+def test_aabroo_digidokaan_tracking_uses_live_status(monkeypatch):
+    async def live(_lookups):
+        return {"22320269889521": "Out for Delivery"}
+
+    monkeypatch.setattr(main, "_aabroo_fetch_live_tracking_statuses_async", live)
+    source = _order(note_attributes=[
+        {"name": "hxs_courier_name", "value": "DigiDokaan"},
+        {"name": "hxs_courier_tracking", "value": "22320269889521"},
+    ])
+
+    statuses = main._aabroo_resolve_tracking_statuses([source])
+    delivery, detail = main._aabroo_delivery(source, main._aabroo_notes(source), statuses["22320269889521"])
+
+    assert detail == "Out for Delivery"
+    assert delivery == "Inprocess"
+
+
+def test_aabroo_tracking_failure_preserves_last_valid_status(monkeypatch):
+    responses = iter(({"22320269889521": "In Transit"}, {}))
+
+    async def live(_lookups):
+        return next(responses)
+
+    monkeypatch.setattr(main, "_aabroo_fetch_live_tracking_statuses_async", live)
+    source = _order(note_attributes=[
+        {"name": "hxs_courier_name", "value": "DigiDokaan"},
+        {"name": "hxs_courier_tracking", "value": "22320269889521"},
+    ])
+
+    assert main._aabroo_resolve_tracking_statuses([source], force=True)["22320269889521"] == "In Transit"
+    assert main._aabroo_resolve_tracking_statuses([source], force=True)["22320269889521"] == "In Transit"
+
+
+def test_aabroo_return_delivery_is_not_misclassified_as_delivered():
+    delivery, detail = main._aabroo_delivery({}, {}, "Return - Delivered to Shipper")
+    assert delivery == "Returned"
+    assert detail == "Return - Delivered to Shipper"
 
 
 def test_aabroo_orders_are_available_to_scanner(monkeypatch):

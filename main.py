@@ -5075,6 +5075,7 @@ def _aabroo_api_base():
 
 _aabroo_token_cache = {"token": "", "expires_at": 0.0}
 _aabroo_product_images_cache = {"images": {}, "product_ids": set(), "expires_at": 0.0}
+_aabroo_tracking_cache = {}
 
 
 def _aabroo_access_token():
@@ -5180,13 +5181,94 @@ def _aabroo_notes(order):
     return {str(x.get("name") or "").strip(): x.get("value") for x in order.get("note_attributes") or [] if x.get("name")}
 
 
-def _aabroo_delivery(order, notes):
-    raw = str(notes.get("hxs_courier_status") or "").strip(); upper = raw.upper()
+def _aabroo_tracking_is_terminal(status):
+    upper = str(status or "").upper()
+    if "UNDELIVERED" in upper:
+        return False
+    return (
+        upper == "DELIVERED"
+        or upper.startswith("DELIVERED ")
+        or "RETURNED TO SHIPPER" in upper
+        or "DELIVERED TO SHIPPER" in upper
+        or "CANCELLED" in upper
+    )
+
+
+async def _aabroo_fetch_live_tracking_statuses_async(lookups):
+    statuses = {}
+    semaphore = asyncio.Semaphore(8)
+    async with aiohttp.ClientSession(timeout=ClientTimeout(total=12)) as client:
+        async def lookup(tracking_number, courier_name):
+            async with semaphore:
+                courier = str(courier_name or "").lower()
+                if is_digidokaan_tracking_number(tracking_number) or "digidokaan" in courier or "trax" in courier:
+                    snapshot = await fetch_resolved_tracking_snapshot(client, tracking_number)
+                    return str((snapshot or {}).get("status") or "").strip()
+                if "call" in courier and "courier" in courier:
+                    status = await fetch_tracking_status(client, tracking_number)
+                    return "" if str(status).strip().lower() == "tracking unavailable" else str(status or "").strip()
+                return ""
+
+        results = await asyncio.gather(*(
+            lookup(tracking_number, courier_name)
+            for tracking_number, courier_name in lookups
+        ), return_exceptions=True)
+    for (tracking_number, _courier_name), result in zip(lookups, results):
+        if isinstance(result, str) and result:
+            statuses[tracking_number] = clean_tracking_status_label(result)
+    return statuses
+
+
+def _aabroo_resolve_tracking_statuses(raw_orders, force=False):
+    """Return live courier states without replacing the last valid status on failure."""
+    now = time.time()
+    order_lookups = []
+    for order in raw_orders or []:
+        notes = _aabroo_notes(order)
+        tracking_number = str(notes.get("hxs_courier_tracking") or "").strip()
+        courier_name = str(notes.get("hxs_courier_name") or "").strip()
+        if tracking_number and (
+            is_digidokaan_tracking_number(tracking_number)
+            or "digidokaan" in courier_name.lower()
+            or "trax" in courier_name.lower()
+            or ("call" in courier_name.lower() and "courier" in courier_name.lower())
+        ):
+            order_lookups.append((tracking_number, courier_name))
+    unique_lookups = list(dict.fromkeys(order_lookups))
+    stale = []
+    resolved = {}
+    for tracking_number, courier_name in unique_lookups:
+        cached = _aabroo_tracking_cache.get(tracking_number) or {}
+        if not force and cached.get("status") and now < float(cached.get("expires_at") or 0):
+            resolved[tracking_number] = cached["status"]
+        else:
+            stale.append((tracking_number, courier_name))
+    if stale:
+        try:
+            fresh = asyncio.run(_aabroo_fetch_live_tracking_statuses_async(stale))
+        except Exception as error:
+            print(f"Could not refresh Aabroo courier statuses: {error}")
+            fresh = {}
+        for tracking_number, _courier_name in stale:
+            status = fresh.get(tracking_number)
+            if status:
+                ttl = 24 * 60 * 60 if _aabroo_tracking_is_terminal(status) else 5 * 60
+                _aabroo_tracking_cache[tracking_number] = {"status": status, "expires_at": now + ttl}
+                resolved[tracking_number] = status
+            else:
+                cached = _aabroo_tracking_cache.get(tracking_number) or {}
+                if cached.get("status"):
+                    resolved[tracking_number] = cached["status"]
+    return resolved
+
+
+def _aabroo_delivery(order, notes, live_status=""):
+    raw = str(live_status or notes.get("hxs_courier_status") or "").strip(); upper = clean_tracking_status_label(raw).upper()
     if order.get("cancelled_at"):
         return (("Returned", raw or "Cancelled after dispatch") if notes.get("hxs_courier_tracking") else ("Cancelled", "Cancelled"))
-    if "DELIVER" in upper and "UNDELIVER" not in upper: return "Delivered", raw
     if any(x in upper for x in ("RETURN", "UNDELIVER", "REFUS")): return "Returned", raw
-    if raw: return "Other status", raw
+    if upper == "DELIVERED" or upper.startswith("DELIVERED "): return "Delivered", raw
+    if raw: return "Inprocess", raw
     return "Inprocess", "Courier status not available yet"
 
 
@@ -5274,11 +5356,12 @@ def build_aabroo_portal_data():
     except Exception as exc:
         print(f"Could not load Aabroo product images: {exc}")
         product_images = {}
+    live_tracking_statuses = _aabroo_resolve_tracking_statuses(raw_orders)
     overrides = load_aghaje_order_overrides() or {}; item_defaults = load_aghaje_item_cost_overrides() or {}; order_items = load_aghaje_order_item_cost_overrides() or {}
     domain = _aabroo_shop_domain(); host = (urlparse(domain if "://" in domain else f"https://{domain}").hostname or "") if domain else ""; shop_name = host.split(".")[0]
     orders = []
     for source in raw_orders:
-        order_id = str(source.get("name") or f"#{source.get('order_number', '')}"); notes = _aabroo_notes(source); delivery, detail = _aabroo_delivery(source, notes)
+        order_id = str(source.get("name") or f"#{source.get('order_number', '')}"); notes = _aabroo_notes(source); tracking_number = str(notes.get("hxs_courier_tracking") or "").strip(); delivery, detail = _aabroo_delivery(source, notes, live_tracking_statuses.get(tracking_number, ""))
         items, item_cost, qty = [], 0.0, 0
         for line in source.get("line_items") or []:
             count = int(line.get("current_quantity", line.get("quantity", 0)) or 0)
@@ -5380,8 +5463,9 @@ def refresh_aabroo_portal():
     if request.path != "/aabroo-orders/refresh" and not session.get(AABROO_PORTAL_SESSION_KEY):
         return jsonify({"success": False, "error": "Not authenticated."}), 401
     try:
-        count = len(_aabroo_fetch_orders())
-        return jsonify({"success": True, "message": f"Refreshed {count} Aabroo orders.", "refreshed_count": count})
+        orders = _aabroo_fetch_orders()
+        statuses = _aabroo_resolve_tracking_statuses(orders, force=True)
+        return jsonify({"success": True, "message": f"Refreshed {len(statuses)} courier statuses across {len(orders)} Aabroo orders.", "refreshed_count": len(orders), "tracking_status_count": len(statuses)})
     except Exception as error:
         return jsonify({"success": False, "error": str(error)}), 500
 
