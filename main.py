@@ -5279,14 +5279,15 @@ def _aabroo_resolve_tracking_statuses(raw_orders, force=False):
     return resolved
 
 
-def _aabroo_delivery(order, notes, live_status=""):
+def _aabroo_delivery(order, notes, live_status="", tracking_number=""):
     raw = str(live_status or notes.get("hxs_courier_status") or "").strip(); upper = clean_tracking_status_label(raw).upper()
     if order.get("cancelled_at"):
-        return (("Returned", raw or "Cancelled after dispatch") if notes.get("hxs_courier_tracking") else ("Cancelled", "Cancelled"))
+        return (("Returned", raw or "Cancelled after dispatch") if tracking_number or notes.get("hxs_courier_tracking") else ("Cancelled", "Cancelled"))
     if any(x in upper for x in ("RETURN", "UNDELIVER", "REFUS")): return "Returned", raw
     if upper == "DELIVERED" or upper.startswith("DELIVERED "): return "Delivered", raw
     if raw: return "Inprocess", raw
-    return "Inprocess", "Courier status not available yet"
+    if tracking_number: return "Inprocess", "Booked"
+    return "Inprocess", "Not booked with courier yet"
 
 
 def _aabroo_item_cost_key(product_id=None, variant_id=None, title=""):
@@ -5378,7 +5379,7 @@ def build_aabroo_portal_data():
     domain = _aabroo_shop_domain(); host = (urlparse(domain if "://" in domain else f"https://{domain}").hostname or "") if domain else ""; shop_name = host.split(".")[0]
     orders = []
     for source in raw_orders:
-        order_id = str(source.get("name") or f"#{source.get('order_number', '')}"); notes = _aabroo_notes(source); tracking_number, courier_name = _aabroo_tracking_details(source, notes); delivery, detail = _aabroo_delivery(source, notes, live_tracking_statuses.get(tracking_number, ""))
+        order_id = str(source.get("name") or f"#{source.get('order_number', '')}"); notes = _aabroo_notes(source); tracking_number, courier_name = _aabroo_tracking_details(source, notes); delivery, detail = _aabroo_delivery(source, notes, live_tracking_statuses.get(tracking_number, ""), tracking_number)
         items, item_cost, qty = [], 0.0, 0
         for line in source.get("line_items") or []:
             count = int(line.get("current_quantity", line.get("quantity", 0)) or 0)

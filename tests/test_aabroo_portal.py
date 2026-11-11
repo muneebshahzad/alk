@@ -88,6 +88,11 @@ def test_aabroo_return_delivery_is_not_misclassified_as_delivered():
     assert detail == "Return - Delivered to Shipper"
 
 
+def test_aabroo_tracking_without_scans_uses_booked_baseline():
+    assert main._aabroo_delivery({}, {}, tracking_number="22320269889521") == ("Inprocess", "Booked")
+    assert main._aabroo_delivery({}, {}) == ("Inprocess", "Not booked with courier yet")
+
+
 def test_aabroo_orders_are_available_to_scanner(monkeypatch):
     monkeypatch.setattr(main, "build_aabroo_portal_data", lambda: {
         "all_orders": [{
