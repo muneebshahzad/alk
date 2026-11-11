@@ -37,6 +37,18 @@ def test_aabroo_line_image_prefers_variant_then_product_image():
     assert main._aabroo_line_image({"image": "https://cdn.example/order.jpg", "product_id": 10}, images) == "https://cdn.example/order.jpg"
 
 
+def test_aabroo_tracking_falls_back_to_shopify_fulfillment():
+    source = _order(
+        note_attributes=[],
+        fulfillments=[{
+            "tracking_number": "22320269889521",
+            "tracking_company": "DigiDokaan",
+        }],
+    )
+
+    assert main._aabroo_tracking_details(source) == ("22320269889521", "DigiDokaan")
+
+
 def test_aabroo_digidokaan_tracking_uses_live_status(monkeypatch):
     async def live(_lookups):
         return {"22320269889521": "Out for Delivery"}

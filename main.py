@@ -5181,6 +5181,24 @@ def _aabroo_notes(order):
     return {str(x.get("name") or "").strip(): x.get("value") for x in order.get("note_attributes") or [] if x.get("name")}
 
 
+def _aabroo_tracking_details(order, notes=None):
+    notes = notes or _aabroo_notes(order)
+    tracking_number = str(notes.get("hxs_courier_tracking") or "").strip()
+    courier_name = str(notes.get("hxs_courier_name") or "").strip()
+    fulfillments = list(order.get("fulfillments") or [])
+    for fulfillment in reversed(fulfillments):
+        if not tracking_number:
+            tracking_number = str(fulfillment.get("tracking_number") or "").strip()
+            if not tracking_number:
+                tracking_numbers = fulfillment.get("tracking_numbers") or []
+                tracking_number = str(tracking_numbers[0] if tracking_numbers else "").strip()
+        if not courier_name:
+            courier_name = str(fulfillment.get("tracking_company") or "").strip()
+        if tracking_number and courier_name:
+            break
+    return tracking_number, courier_name
+
+
 def _aabroo_tracking_is_terminal(status):
     upper = str(status or "").upper()
     if "UNDELIVERED" in upper:
@@ -5225,8 +5243,7 @@ def _aabroo_resolve_tracking_statuses(raw_orders, force=False):
     order_lookups = []
     for order in raw_orders or []:
         notes = _aabroo_notes(order)
-        tracking_number = str(notes.get("hxs_courier_tracking") or "").strip()
-        courier_name = str(notes.get("hxs_courier_name") or "").strip()
+        tracking_number, courier_name = _aabroo_tracking_details(order, notes)
         if tracking_number and (
             is_digidokaan_tracking_number(tracking_number)
             or "digidokaan" in courier_name.lower()
@@ -5361,7 +5378,7 @@ def build_aabroo_portal_data():
     domain = _aabroo_shop_domain(); host = (urlparse(domain if "://" in domain else f"https://{domain}").hostname or "") if domain else ""; shop_name = host.split(".")[0]
     orders = []
     for source in raw_orders:
-        order_id = str(source.get("name") or f"#{source.get('order_number', '')}"); notes = _aabroo_notes(source); tracking_number = str(notes.get("hxs_courier_tracking") or "").strip(); delivery, detail = _aabroo_delivery(source, notes, live_tracking_statuses.get(tracking_number, ""))
+        order_id = str(source.get("name") or f"#{source.get('order_number', '')}"); notes = _aabroo_notes(source); tracking_number, courier_name = _aabroo_tracking_details(source, notes); delivery, detail = _aabroo_delivery(source, notes, live_tracking_statuses.get(tracking_number, ""))
         items, item_cost, qty = [], 0.0, 0
         for line in source.get("line_items") or []:
             count = int(line.get("current_quantity", line.get("quantity", 0)) or 0)
@@ -5378,7 +5395,7 @@ def build_aabroo_portal_data():
         orders.append({"order_id": order_id, "shopify_order_id": source.get("id"), "shopify_link": f"https://admin.shopify.com/store/{shop_name}/orders/{source.get('id')}" if shop_name else "#", "created_at": source.get("created_at", ""),
           "customer_name": address.get("name") or f"{customer.get('first_name','')} {customer.get('last_name','')}".strip(), "customer_phone": address.get("phone") or customer.get("phone") or "", "customer_city": address.get("city") or "", "is_lahore": "lahore" in str(address.get("city") or "").lower(),
           "fulfillment_status": "Partially fulfilled" if fulfillment_raw == "partial" else ("Fulfilled" if fulfilled else "Unfulfilled"), "fulfillment_status_raw": fulfillment_raw, "fulfilled": fulfilled, "delivery_status": delivery, "delivery_status_detail": detail, "payment_status": payment_status, "financial_status": source.get("financial_status") or "",
-          "courier_name": notes.get("hxs_courier_name") or "", "tracking_number": notes.get("hxs_courier_tracking") or "", "is_postex": "postex" in str(notes.get("hxs_courier_name") or "").lower().replace(" ", ""), "items": items, "item_qty": qty, "item_cost": round(item_cost,2), "packaging_cost": packaging, "delivery_cost": courier_cost,
+          "courier_name": courier_name, "tracking_number": tracking_number, "is_postex": "postex" in courier_name.lower().replace(" ", ""), "items": items, "item_qty": qty, "item_cost": round(item_cost,2), "packaging_cost": packaging, "delivery_cost": courier_cost,
           "price": _aabroo_money(source.get("current_subtotal_price", source.get("subtotal_price"))), "order_total": _aabroo_money(source.get("current_total_price", source.get("total_price"))), "amount_received": received, "amount_received_updated_at": saved.get("updated_at") or "", "payable": round(payable,2)})
     orders.sort(key=lambda x: parse_date_for_sort(x.get("created_at")), reverse=True); visible = [x for x in orders if x["delivery_status"] != "Cancelled"]
     closed = [x for x in visible if x["payment_status"] == "Paid"]; fulfilled = [x for x in visible if x["fulfilled"] and x["payment_status"] != "Paid"]; unfulfilled = [x for x in visible if not x["fulfilled"] and x["payment_status"] != "Paid"]
