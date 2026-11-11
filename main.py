@@ -100,6 +100,7 @@ from tracking_resolver import (
     fetch_resolved_tracking_status,
 )
 from trax import is_trax_tracking_number
+from tcs import fetch_public_tracking_status as fetch_tcs_tracking_status, is_tcs_tracking_number
 
 app = Flask(__name__)
 app.debug = True
@@ -5228,6 +5229,10 @@ async def _aabroo_fetch_live_tracking_statuses_async(lookups):
                 # resolve them through the same direct courier path used by the
                 # main dashboard instead of masking their live state as Booked.
                 if "digidokaan" in courier:
+                    if is_tcs_tracking_number(tracking_number):
+                        status = await fetch_tcs_tracking_status(client, tracking_number)
+                        if status:
+                            return str(status).strip()
                     snapshot = await fetch_resolved_tracking_snapshot(client, tracking_number)
                     status = str((snapshot or {}).get("status") or "").strip()
                     if status:

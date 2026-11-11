@@ -379,45 +379,6 @@ def configuration():
     return values
 
 
-def _tracking_gateway_ids(config):
-    """Return configured courier gateways in priority order for CN lookup."""
-    configured = str(config.get("gateway_id") or "").strip()
-    raw = os.getenv("DIGIDOKAAN_TRACKING_GATEWAY_IDS") or "1,2,3,4,5,6,7,8,9,10"
-    values = [configured, *(part.strip() for part in raw.split(","))]
-    return list(dict.fromkeys(value for value in values if value))
-
-
-async def _search_courier_order(session, config, headers, tracking_number, timeout):
-    """Find a CN without assuming every DigiDokaan shipment uses Trax gateway 5."""
-    last_status = 200
-    for gateway_id in _tracking_gateway_ids(config):
-        async with session.post(
-            config["base_url"] + "/api/orders/search-courier-order",
-            json={
-                "phone": config["phone"],
-                "search_value": tracking_number,
-                "gateway_id": gateway_id,
-            },
-            headers=headers,
-            timeout=timeout,
-            ssl=_SSL_CONTEXT,
-        ) as response:
-            body = await response.json(content_type=None)
-            last_status = response.status
-        if response.status == 401 or (isinstance(body, dict) and body.get("code") == 401):
-            return None, 401
-        rows = body.get("data") if isinstance(body, dict) else None
-        if response.status != 200 or not isinstance(rows, list):
-            continue
-        exact = next(
-            (row for row in rows if str(row.get("tracking_no") or "").strip() == tracking_number),
-            None,
-        )
-        if exact:
-            return exact, response.status
-    return None, last_status
-
-
 async def _access_token(session, config):
     global _token, _token_created_at
     if _token and time.monotonic() - _token_created_at < _TOKEN_TTL_SECONDS:
@@ -487,16 +448,42 @@ async def _fetch_status(session, tracking_number, config):
     global _token, _token_created_at
     token = await _access_token(session, config)
     timeout = ClientTimeout(total=20)
+    payload = {
+        "phone": config["phone"],
+        "search_value": tracking_number,
+        "gateway_id": config["gateway_id"],
+    }
     headers = {"Accept": "application/json", "Authorization": "Bearer " + token}
-    exact, search_status = await _search_courier_order(session, config, headers, tracking_number, timeout)
-    if search_status == 401:
+    async with session.post(
+        config["base_url"] + "/api/orders/search-courier-order",
+        json=payload,
+        headers=headers,
+        timeout=timeout,
+        ssl=_SSL_CONTEXT,
+    ) as response:
+        body = await response.json(content_type=None)
+
+    if response.status == 401 or (isinstance(body, dict) and body.get("code") == 401):
         _token = ""
         _token_created_at = 0.0
         token = await _access_token(session, config)
         headers["Authorization"] = "Bearer " + token
-        exact, search_status = await _search_courier_order(session, config, headers, tracking_number, timeout)
-    if search_status != 200 or not exact:
+        async with session.post(
+            config["base_url"] + "/api/orders/search-courier-order",
+            json=payload,
+            headers=headers,
+            timeout=timeout,
+            ssl=_SSL_CONTEXT,
+        ) as response:
+            body = await response.json(content_type=None)
+
+    rows = body.get("data") if isinstance(body, dict) else None
+    if response.status != 200 or not isinstance(rows, list) or not rows:
         return None
+    exact = next(
+        (row for row in rows if str(row.get("tracking_no") or "").strip() == tracking_number),
+        rows[0],
+    )
     fallback = str(exact.get("courier_status") or exact.get("status") or "").strip()
     order_id = str(exact.get("order_id") or "").strip()
     if not order_id:
@@ -554,9 +541,25 @@ async def _fetch_tracking_history(session, tracking_number):
         token = await _access_token(session, config)
         headers = {"Accept": "application/json", "Authorization": "Bearer " + token}
         timeout = ClientTimeout(total=20)
-        order, search_status = await _search_courier_order(session, config, headers, normalized, timeout)
-        if search_status != 200 or not order:
+        async with session.post(
+            config["base_url"] + "/api/orders/search-courier-order",
+            json={
+                "phone": config["phone"],
+                "search_value": normalized,
+                "gateway_id": config["gateway_id"],
+            },
+            headers=headers,
+            timeout=timeout,
+            ssl=_SSL_CONTEXT,
+        ) as response:
+            search_body = await response.json(content_type=None)
+        rows = search_body.get("data") if isinstance(search_body, dict) else None
+        if response.status != 200 or not isinstance(rows, list) or not rows:
             return []
+        order = next(
+            (row for row in rows if str(row.get("tracking_no") or "").strip() == normalized),
+            rows[0],
+        )
         order_id = str(order.get("order_id") or "").strip()
         if not order_id:
             return []
