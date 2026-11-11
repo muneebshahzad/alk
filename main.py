@@ -5219,7 +5219,18 @@ async def _aabroo_fetch_live_tracking_statuses_async(lookups):
         async def lookup(tracking_number, courier_name):
             async with semaphore:
                 courier = str(courier_name or "").lower()
-                if is_digidokaan_tracking_number(tracking_number) or "digidokaan" in courier or "trax" in courier:
+                if is_digidokaan_tracking_number(tracking_number) or "trax" in courier:
+                    snapshot = await fetch_resolved_tracking_snapshot(client, tracking_number)
+                    return str((snapshot or {}).get("status") or "").strip()
+                # DigiDokaan can book an underlying Call Courier shipment while
+                # Shopify still labels the fulfillment company as DigiDokaan.
+                # Those CNs do not use DigiDokaan/Trax's 223... number format;
+                # resolve them through the same direct courier path used by the
+                # main dashboard instead of masking their live state as Booked.
+                if "digidokaan" in courier:
+                    status = await fetch_tracking_status(client, tracking_number)
+                    if str(status).strip().lower() != "tracking unavailable":
+                        return str(status or "").strip()
                     snapshot = await fetch_resolved_tracking_snapshot(client, tracking_number)
                     return str((snapshot or {}).get("status") or "").strip()
                 if "call" in courier and "courier" in courier:
