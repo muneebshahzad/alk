@@ -85,6 +85,7 @@ from digidokaan import (
     fetch_booking_metadata,
     fetch_pending_shipper_advice,
     fetch_payments as fetch_digidokaan_payments,
+    fetch_payment_records as fetch_digidokaan_payment_records,
     fetch_tracking_status as fetch_digidokaan_tracking_status,
     fetch_trax_label,
     generate_trax_load_sheet,
@@ -2629,7 +2630,16 @@ def payments_page():
     try:
         async def load_payments():
             async with aiohttp.ClientSession() as client:
-                return await fetch_digidokaan_payments(client)
+                settlement, records = await asyncio.gather(
+                    fetch_digidokaan_payments(client),
+                    fetch_digidokaan_payment_records(client),
+                    return_exceptions=True,
+                )
+                if isinstance(settlement, dict):
+                    return settlement
+                if records:
+                    return payment_records_as_settlement_payload(records)
+                raise settlement if isinstance(settlement, Exception) else RuntimeError("DigiDokaan payment data is unavailable")
 
         payments = asyncio.run(load_payments())
         error = ""
@@ -2639,6 +2649,26 @@ def payments_page():
         error = str(fetch_error)
     dashboard = build_digidokaan_payment_dashboard(payments)
     return render_template("payments.html", payments=payments, payment_dashboard=dashboard, payments_error=error)
+
+
+def payment_records_as_settlement_payload(records):
+    """Adapt shipment records to the existing settlement dashboard ledger."""
+    ledger_rows = []
+    for record in records or []:
+        common = {
+            "tracking_no": record.get("tracking_number"),
+            "order_no": record.get("order_id"),
+            "order_date": record.get("created_at"),
+            "order_status": record.get("shipment_status"),
+            "price": record.get("order_amount"),
+            "cheque_no": record.get("settlement_id"),
+            "payment_status": "Paid" if record.get("payment_status") == "Settled" else "Not paid",
+        }
+        ledger_rows.append({**common, "payment_type": "COD", "amount": record.get("order_amount"), "sub_amount": 0})
+        deductions = sum(parse_money(record.get(key), 0) for key in ("delivery_charges", "other_charges", "reserve_amount"))
+        if deductions:
+            ledger_rows.append({**common, "payment_type": "Courier charges", "amount": 0, "sub_amount": deductions})
+    return {"balance": {}, "ready": {}, "ledger": {"data": ledger_rows}, "cheques": []}
 
 
 def _digidokaan_rows(payload):

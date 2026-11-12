@@ -6,6 +6,7 @@ import re
 import ssl
 import threading
 import time
+from datetime import datetime
 from difflib import SequenceMatcher
 from html.parser import HTMLParser
 
@@ -22,6 +23,7 @@ _history_cache = {}
 _history_inflight = {}
 _payments_cache = None
 _payments_cache_expires_at = 0.0
+_payment_records_cache = {}
 _shipper_advice_cache = None
 _shipper_advice_cache_expires_at = 0.0
 _booking_metadata_cache = None
@@ -31,6 +33,7 @@ _TOKEN_TTL_SECONDS = 6 * 60 * 60
 _ACTIVE_CACHE_SECONDS = 5 * 60
 _TERMINAL_CACHE_SECONDS = 24 * 60 * 60
 _OPERATIONS_REFRESH_SECONDS = 6 * 60 * 60
+_PAYMENT_RECORDS_CACHE_SECONDS = 5 * 60
 _TERMINAL_STATUSES = {"delivered", "returned", "return delivered", "cancelled"}
 _SSL_CONTEXT = ssl.create_default_context(cafile=certifi.where())
 
@@ -679,6 +682,125 @@ async def fetch_payments(session):
     _payments_cache = result
     _payments_cache_expires_at = time.monotonic() + _OPERATIONS_REFRESH_SECONDS
     return result
+
+
+def _payment_money(value):
+    try:
+        return round(float(value or 0), 2)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _payment_date(value):
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    try:
+        return datetime.fromisoformat(raw.replace("Z", "+00:00")).isoformat(timespec="seconds")
+    except ValueError:
+        return raw
+
+
+def _payment_record(order, detail_body):
+    data = detail_body.get("data") if isinstance(detail_body, dict) else None
+    detail = data.get("order_detail") if isinstance(data, dict) else None
+    tracking = data.get("tracking_response") if isinstance(data, dict) else None
+    detail = detail if isinstance(detail, dict) else {}
+    tracking = tracking if isinstance(tracking, dict) else {}
+    events = tracking.get("data") if isinstance(tracking.get("data"), list) else []
+    latest = next((event for event in events if isinstance(event, dict) and event.get("status")), {})
+    shipment_status = str(latest.get("status") or order.get("courier_status") or order.get("status") or "Unknown").strip()
+    order_amount = _payment_money(detail.get("amount") if detail else order.get("price"))
+    delivery_charges = _payment_money(tracking.get("delivery_charges"))
+    other_charges = _payment_money(tracking.get("other_charges"))
+    reserve_amount = _payment_money(tracking.get("reserve_amount"))
+    net_cod = _payment_money(tracking.get("total_cod_amount")) or max(
+        round(order_amount - delivery_charges - other_charges - reserve_amount, 2), 0
+    )
+    amount_paid = max(_payment_money(tracking.get("amount_paid")), 0)
+    settlement_id = str(tracking.get("settlement_id") or "").strip()
+    raw_payment_status = str(detail.get("payment_status") or "").strip()
+    paid = settlement_id or raw_payment_status.casefold() in {"1", "paid", "settled", "completed"}
+    return {
+        "order_id": str(order.get("external_reference_no") or order.get("order_id") or "").strip(),
+        "tracking_number": str(order.get("tracking_no") or "").strip(),
+        "created_at": _payment_date(order.get("created_at")),
+        "shipment_status": shipment_status,
+        "payment_status": "Settled" if paid else "Not paid",
+        "order_amount": order_amount,
+        "delivery_charges": delivery_charges,
+        "other_charges": other_charges,
+        "reserve_amount": reserve_amount,
+        "net_cod": net_cod,
+        "amount_paid": amount_paid,
+        "settlement_id": settlement_id,
+    }
+
+
+async def fetch_payment_records(session, force=False):
+    """Build the same safe shipment-ledger fallback used by Sleek Space."""
+    queries = [value.strip() for value in str(os.getenv("DIGIDOKAAN_TRACKING_SEARCH_PREFIX") or "223,173").split(",") if value.strip()]
+    cache_key = ",".join(queries)
+    cached = _payment_records_cache.get(cache_key)
+    if not force and cached and cached[1] > time.monotonic():
+        return cached[0]
+    config = configuration()
+    if not config:
+        return []
+    try:
+        token = await _access_token(session, config)
+        headers = {"Accept": "application/json", "Authorization": "Bearer " + token}
+        timeout = ClientTimeout(total=30)
+
+        async def search(prefix, include_gateway=True):
+            payload = {"phone": config["phone"], "search_value": prefix}
+            if include_gateway:
+                payload["gateway_id"] = config["gateway_id"]
+            async with session.post(
+                config["base_url"] + "/api/orders/search-courier-order",
+                json=payload, headers=headers, timeout=timeout, ssl=_SSL_CONTEXT,
+            ) as response:
+                body = await response.json(content_type=None)
+            rows = body.get("data") if isinstance(body, dict) else None
+            return rows if response.status == 200 and isinstance(rows, list) else []
+
+        searches = [search(prefix) for prefix in queries]
+        searches.extend(search(prefix, False) for prefix in queries if prefix.startswith("17"))
+        results = await asyncio.gather(*searches)
+        rows, seen = [], set()
+        for result in results:
+            for row in result:
+                identity = str(row.get("order_id") or row.get("tracking_no") or "").strip()
+                if not identity or identity in seen:
+                    continue
+                seen.add(identity)
+                rows.append(row)
+
+        semaphore = asyncio.Semaphore(6)
+        async def fetch_one(order):
+            detail_body = {}
+            order_id = str(order.get("order_id") or "").strip()
+            if order_id:
+                try:
+                    async with semaphore:
+                        async with session.post(
+                            config["base_url"] + "/api/seller/order/get_single_order_detail",
+                            json={"phone": config["phone"], "order_no": order_id},
+                            headers=headers, timeout=timeout, ssl=_SSL_CONTEXT,
+                        ) as response:
+                            if response.status == 200:
+                                detail_body = await response.json(content_type=None)
+                except Exception:
+                    pass
+            return _payment_record(order, detail_body)
+
+        records = await asyncio.gather(*(fetch_one(row) for row in rows if isinstance(row, dict)))
+        records.sort(key=lambda row: row.get("created_at") or "", reverse=True)
+        _payment_records_cache[cache_key] = (records, time.monotonic() + _PAYMENT_RECORDS_CACHE_SECONDS)
+        return records
+    except Exception as error:
+        print(f"DigiDokaan payment records unavailable: {error}")
+        return cached[0] if cached else []
 
 
 def _money_from_text(value):
