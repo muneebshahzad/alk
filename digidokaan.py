@@ -631,6 +631,11 @@ async def fetch_tracking_history(session, tracking_number):
             _history_inflight.pop(normalized, None)
 
 
+def _digidokaan_response_ok(response_status, body):
+    """DigiDokaan success payloads may include code=200 or omit code."""
+    return response_status == 200 and isinstance(body, dict) and body.get("code") in {None, 200}
+
+
 async def fetch_payments(session):
     """Return the merchant's read-only DigiDokaan settlement summary and ledger."""
     global _payments_cache, _payments_cache_expires_at
@@ -653,7 +658,7 @@ async def fetch_payments(session):
             ssl=_SSL_CONTEXT,
         ) as response:
             body = await response.json(content_type=None)
-        if response.status != 200 or not isinstance(body, dict) or body.get("code") != 200:
+        if not _digidokaan_response_ok(response.status, body):
             raise RuntimeError("DigiDokaan payments are temporarily unavailable")
         return body
 

@@ -28,6 +28,28 @@ class AdviceSession:
         return AdviceResponse()
 
 
+class PaymentResponse:
+    status = 200
+
+    def __init__(self, path):
+        self.path = path
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args):
+        return None
+
+    async def json(self, **kwargs):
+        # Current DigiDokaan settlement responses can omit the optional code.
+        return {"data": [], "path": self.path}
+
+
+class PaymentSession:
+    def post(self, url, **kwargs):
+        return PaymentResponse(url.rsplit("/", 1)[-1])
+
+
 class DigiDokaanTrackingTests(IsolatedAsyncioTestCase):
     def setUp(self):
         digidokaan._status_cache.clear()
@@ -125,6 +147,27 @@ class DigiDokaanTrackingTests(IsolatedAsyncioTestCase):
     async def test_submit_shipper_advice_requires_remarks(self):
         with self.assertRaisesRegex(ValueError, "Remarks are required"):
             await digidokaan.submit_shipper_advice(object(), "22317467960795", 5, "return", "")
+
+    async def test_payments_accept_success_payload_without_code(self):
+        digidokaan._payments_cache = None
+        digidokaan._payments_cache_expires_at = 0
+        config = {
+            "base_url": "https://digidokaan.pk",
+            "web_url": "https://web.digidokaan.pk",
+            "phone": "923000000000",
+            "password": "secret",
+            "gateway_id": "5",
+        }
+        with patch.object(digidokaan, "configuration", return_value=config), patch.object(
+            digidokaan, "_access_token", AsyncMock(return_value="private-token")
+        ), patch.object(
+            digidokaan, "_fetch_cheque_history", AsyncMock(return_value=[])
+        ):
+            result = await digidokaan.fetch_payments(PaymentSession())
+
+        self.assertEqual(result["balance"]["data"], [])
+        self.assertEqual(result["ready"]["data"], [])
+        self.assertEqual(result["ledger"]["data"], [])
 
 
 if __name__ == "__main__":
