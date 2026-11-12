@@ -41,8 +41,8 @@ class PaymentResponse:
         return None
 
     async def json(self, **kwargs):
-        # Current DigiDokaan settlement responses can omit the optional code.
-        return {"data": [], "path": self.path}
+        # Accounts may omit code or serialize the success code as a string.
+        return {"code": "200", "data": [], "path": self.path}
 
 
 class PaymentSession:

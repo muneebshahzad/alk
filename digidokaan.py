@@ -633,7 +633,10 @@ async def fetch_tracking_history(session, tracking_number):
 
 def _digidokaan_response_ok(response_status, body):
     """DigiDokaan success payloads may include code=200 or omit code."""
-    return response_status == 200 and isinstance(body, dict) and body.get("code") in {None, 200}
+    if response_status != 200 or not isinstance(body, dict):
+        return False
+    code = body.get("code")
+    return code is None or str(code).strip() == "200"
 
 
 async def fetch_payments(session):
