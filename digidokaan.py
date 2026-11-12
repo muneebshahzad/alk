@@ -776,7 +776,11 @@ async def fetch_payment_records(session, force=False):
                 seen.add(identity)
                 rows.append(row)
 
-        semaphore = asyncio.Semaphore(6)
+        # The payment page is a synchronous request. Fetch independent order
+        # details concurrently so a large ledger does not exceed the web
+        # worker timeout; individual failures still retain the search row.
+        semaphore = asyncio.Semaphore(24)
+        detail_timeout = ClientTimeout(total=10)
         async def fetch_one(order):
             detail_body = {}
             order_id = str(order.get("order_id") or "").strip()
@@ -786,7 +790,7 @@ async def fetch_payment_records(session, force=False):
                         async with session.post(
                             config["base_url"] + "/api/seller/order/get_single_order_detail",
                             json={"phone": config["phone"], "order_no": order_id},
-                            headers=headers, timeout=timeout, ssl=_SSL_CONTEXT,
+                            headers=headers, timeout=detail_timeout, ssl=_SSL_CONTEXT,
                         ) as response:
                             if response.status == 200:
                                 detail_body = await response.json(content_type=None)
