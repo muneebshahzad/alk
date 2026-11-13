@@ -1305,7 +1305,7 @@ def is_delivered_status(status):
 def normalize_status_bucket(status):
     raw = (status or "Un-Booked").strip()
     upper = raw.upper()
-    upper = re.sub(r"^SHIPMENT\s*[-–—:]\s*", "", upper).strip()
+    upper = re.sub(r"^SHIPMENT(?:\s*[-–—:]\s*|\s+)(?=\S)", "", upper).strip()
     if "PARTIALLY DELIVERED" in upper:
         return "Partially Delivered"
     if "RETURNED TO SHIPPER" in upper or "DELIVERED TO SHIPPER" in upper or "RETURN DELIVERED" in upper:

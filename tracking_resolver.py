@@ -16,7 +16,13 @@ _DATE_FORMATS = (
 
 def clean_tracking_status_label(value):
     """Remove Trax's repetitive display prefix without changing status meaning."""
-    return re.sub(r"^\s*shipment\s*[-–—:]\s*", "", str(value or ""), flags=re.I).strip()
+    label = re.sub(
+        r"^\s*shipment(?:\s*[-–—:]\s*|\s+)(?=\S)",
+        "",
+        str(value or ""),
+        flags=re.I,
+    ).strip()
+    return label[:1].upper() + label[1:] if label else ""
 
 
 def tracking_event_datetime(event):

@@ -9,6 +9,16 @@ _TCS_PUBLIC_BRIDGE = "https://www.tcsexpress.com/apibridge"
 _SSL_CONTEXT = ssl.create_default_context(cafile=certifi.where())
 
 
+def _clean_status(value):
+    label = re.sub(
+        r"^\s*shipment(?:\s*[-–—:]\s*|\s+)(?=\S)",
+        "",
+        str(value or ""),
+        flags=re.I,
+    ).strip()
+    return label[:1].upper() + label[1:] if label else ""
+
+
 def is_tcs_tracking_number(value):
     """TCS domestic CNs returned through DigiDokaan use the 17 + 10 digit shape."""
     return bool(re.fullmatch(r"17\d{10}", re.sub(r"\D", "", str(value or ""))))
@@ -56,12 +66,12 @@ async def fetch_public_tracking_history(session, tracking_number):
     shipment = next((row for row in data.get("shipmentinfo") or [] if isinstance(row, dict)), {})
     history = []
     for event in reversed(data.get("checkpoints") or []):
-        if not isinstance(event, dict) or not str(event.get("status") or "").strip():
+        if not isinstance(event, dict) or not _clean_status(event.get("status")):
             continue
         history.append({
             "ConsignmentNo": normalized,
             "TransactionDate": str(event.get("datetime") or "").strip(),
-            "ProcessDescForPortal": str(event.get("status") or "").strip(),
+            "ProcessDescForPortal": _clean_status(event.get("status")),
             "ReasonDesc": "",
             "ConsigneeName": str(shipment.get("consignee") or "").strip(),
             "ConsigneeCity": str(shipment.get("destination") or "").strip(),
@@ -78,13 +88,13 @@ async def fetch_public_tracking_status(session, tracking_number):
     delivery = data.get("deliveryinfo")
     if isinstance(delivery, list):
         for event in delivery:
-            status = str((event or {}).get("status") or "").strip()
+            status = _clean_status((event or {}).get("status"))
             if status:
                 return status
     checkpoints = data.get("checkpoints")
     if isinstance(checkpoints, list):
         for event in checkpoints:
-            status = str((event or {}).get("status") or "").strip()
+            status = _clean_status((event or {}).get("status"))
             if status:
                 return status
     return None

@@ -22,6 +22,11 @@ class TrackingResolverTests(unittest.IsolatedAsyncioTestCase):
             tracking_resolver.clean_tracking_status_label("Shipment – In Transit"),
             "In Transit",
         )
+        self.assertEqual(tracking_resolver.clean_tracking_status_label("SHIPMENT DELIVERED"), "DELIVERED")
+        self.assertEqual(
+            tracking_resolver.clean_tracking_status_label("Shipment pending at destination"),
+            "Pending at destination",
+        )
         self.assertEqual(tracking_resolver.clean_tracking_status_label("Return - Dispatched"), "Return - Dispatched")
 
     async def test_newer_trax_overrides_stale_digidokaan(self):

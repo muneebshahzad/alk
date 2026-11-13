@@ -51,7 +51,7 @@ class TCSTrackingTests(unittest.IsolatedAsyncioTestCase):
     async def test_public_history_is_chronological(self):
         history = await fetch_public_tracking_history(_Session(), "173019564522")
         self.assertEqual([row["ProcessDescForPortal"] for row in history], [
-            "Shipment Picked Up", "Shipment Delivered",
+            "Picked Up", "Delivered",
         ])
         self.assertEqual(history[-1]["TrackingSource"], "TCS Direct")
         self.assertEqual(history[-1]["ConsigneeCity"], "BATKHELA")
