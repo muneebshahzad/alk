@@ -2966,7 +2966,7 @@ def fetch_next_shopify_orders_page(orders):
     return orders.next_page()
 
 
-async def getShopifyOrders():
+async def getShopifyOrders(on_page=None):
     start_date = datetime(2024, 9, 1).isoformat()
     order_details = []
     total_start_time = time.time()
@@ -2987,6 +2987,12 @@ async def getShopifyOrders():
                     print(f"Error processing an order: {result}")
                 elif result is not None:
                     order_details.append(result)
+
+            # Make each completed Shopify page visible immediately. A slow
+            # later page or courier service must not leave the dashboard at
+            # zero until the entire historical catalogue has finished.
+            if on_page and order_details:
+                on_page(list(order_details))
 
             try:
                 if not orders.has_next_page():
@@ -3292,7 +3298,21 @@ def tracking_home():
 def refresh_tracking_in_background():
     global order_details
     try:
-        refreshed_orders = asyncio.run(getShopifyOrders())
+        original_orders = list(order_details)
+
+        def publish_shopify_page(partial_orders):
+            global order_details
+            refreshed_ids = {
+                str(order.get("id") or order.get("shopify_id") or "")
+                for order in partial_orders
+            }
+            preserved_orders = [
+                order for order in original_orders
+                if str(order.get("id") or order.get("shopify_id") or "") not in refreshed_ids
+            ]
+            order_details = partial_orders + preserved_orders
+
+        refreshed_orders = asyncio.run(getShopifyOrders(on_page=publish_shopify_page))
         if refreshed_orders:
             refreshed_ids = {
                 str(order.get("id") or order.get("shopify_id") or "")
