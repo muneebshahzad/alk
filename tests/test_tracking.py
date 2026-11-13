@@ -19,6 +19,7 @@ namespace = {
     'quote': __import__('urllib.parse', fromlist=['quote']).quote,
     'urlencode': __import__('urllib.parse', fromlist=['urlencode']).urlencode,
     'fetch_tracking_status': None,
+    'is_tcs_tracking_number': lambda value: str(value or '').startswith('17'),
     'parse_money': lambda value, default=0: float(value or default),
     'parse_int': lambda value, default=0: int(value or default),
     'format_currency_amount': lambda value, currency='PKR': f"{currency} {float(value or 0):,.0f}",

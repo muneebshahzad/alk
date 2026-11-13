@@ -39,6 +39,7 @@ class _Session:
 class TCSTrackingTests(unittest.IsolatedAsyncioTestCase):
     def test_tcs_cn_shape(self):
         self.assertTrue(is_tcs_tracking_number("173019564522"))
+        self.assertFalse(is_tcs_tracking_number("123456789012"))
         self.assertFalse(is_tcs_tracking_number("22320269889521"))
 
     async def test_public_json_status_is_normalized(self):

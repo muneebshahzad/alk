@@ -34,6 +34,7 @@ class OrderProcessingTests(unittest.TestCase):
             "fetch_tracking_status": fetch_tracking_status,
             "clean_tracking_status_label": lambda value: value,
             "is_digidokaan_tracking_number": lambda value: str(value).startswith("223"),
+            "is_tcs_tracking_number": lambda value: str(value).startswith("17"),
             "tracking_url_for_number": lambda value: f"/track/{value}",
         }
         exec(compile(ast.Module(body=[process_line_item_function], type_ignores=[]), "main.py", "exec"), namespace)
@@ -56,6 +57,36 @@ class OrderProcessingTests(unittest.TestCase):
             ("Delivered", 1),
             ("Un-Booked", 1),
         ])
+
+    def test_tcs_fulfillment_does_not_block_initial_order_load(self):
+        calls = []
+
+        async def fetch_tracking_status(_session, tracking):
+            calls.append(tracking)
+            return "Delivered"
+
+        namespace = {
+            "fetch_digidokaan_tracking_status": fetch_tracking_status,
+            "fetch_tracking_status": fetch_tracking_status,
+            "clean_tracking_status_label": lambda value: value,
+            "is_digidokaan_tracking_number": lambda value: str(value).startswith("223"),
+            "is_tcs_tracking_number": lambda value: str(value).startswith("17"),
+            "tracking_url_for_number": lambda value: f"/track/{value}",
+        }
+        exec(compile(ast.Module(body=[process_line_item_function], type_ignores=[]), "main.py", "exec"), namespace)
+        line_item = type("LineItem", (), {
+            "id": 10, "quantity": 1, "fulfillment_status": "fulfilled", "fulfillable_quantity": 0,
+        })()
+        fulfillment_item = type("FulfillmentItem", (), {"id": 10, "quantity": 1})()
+        fulfillment = type("Fulfillment", (), {
+            "status": "success", "tracking_number": "173019689979", "line_items": [fulfillment_item],
+        })()
+
+        rows = asyncio.run(namespace["process_line_item"](None, line_item, [fulfillment]))
+
+        self.assertEqual(rows[0]["status"], "Booked")
+        self.assertEqual(rows[0]["tracking_source"], "DigiDokaan / TCS")
+        self.assertEqual(calls, [])
 
     def test_limiter_can_be_used_by_repeated_refresh_event_loops(self):
         processed = []

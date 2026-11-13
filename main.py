@@ -2459,6 +2459,13 @@ async def process_line_item(session, line_item, fulfillments):
                 tracking_details = await fetch_digidokaan_tracking_status(session, tracking_number)
                 tracking_details = clean_tracking_status_label(tracking_details) or "Tracking unavailable"
                 tracking_source = "DigiDokaan"
+            elif is_tcs_tracking_number(tracking_number):
+                # Shopify already confirms that this CN was booked. Publish the
+                # order immediately and let the post-publication background pass
+                # query TCS Direct. Waiting for TCS here can hold the entire
+                # dashboard at zero orders when its public tracker is slow.
+                tracking_details = "Booked"
+                tracking_source = "DigiDokaan / TCS"
             else:
                 tracking_details = await fetch_tracking_status(session, tracking_number)
                 if clean_tracking_status_label(tracking_details).casefold() == "tracking unavailable":

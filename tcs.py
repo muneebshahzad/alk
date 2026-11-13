@@ -10,8 +10,8 @@ _SSL_CONTEXT = ssl.create_default_context(cafile=certifi.where())
 
 
 def is_tcs_tracking_number(value):
-    """TCS domestic CNs returned through DigiDokaan use 12 numeric digits."""
-    return bool(re.fullmatch(r"\d{12}", re.sub(r"\D", "", str(value or ""))))
+    """TCS domestic CNs returned through DigiDokaan use the 17 + 10 digit shape."""
+    return bool(re.fullmatch(r"17\d{10}", re.sub(r"\D", "", str(value or ""))))
 
 
 async def _fetch_public_tracking_payload(session, tracking_number):
