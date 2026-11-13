@@ -54,7 +54,7 @@ class OrderProcessingTests(unittest.TestCase):
         rows = asyncio.run(namespace["process_line_item"](None, line_item, [fulfillment]))
 
         self.assertEqual([(row["status"], row["quantity"]) for row in rows], [
-            ("Delivered", 1),
+            ("Booked", 1),
             ("Un-Booked", 1),
         ])
 

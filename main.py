@@ -2454,10 +2454,11 @@ async def process_line_item(session, line_item, fulfillments):
             fulfilled_quantity += quantity
             tracking_number = fulfillment.tracking_number or "N/A"
             if is_digidokaan_tracking_number(tracking_number):
-                # Publish the Shopify order list using the primary source first.
-                # Direct Trax reconciliation runs after the list is available.
-                tracking_details = await fetch_digidokaan_tracking_status(session, tracking_number)
-                tracking_details = clean_tracking_status_label(tracking_details) or "Tracking unavailable"
+                # Shopify confirms this fulfillment was booked. Do not make the
+                # dashboard's initial order list wait for one or two DigiDokaan
+                # requests per CN; the background resolver replaces this safe
+                # baseline with the freshest DigiDokaan/Trax event afterwards.
+                tracking_details = "Booked"
                 tracking_source = "DigiDokaan"
             elif is_tcs_tracking_number(tracking_number):
                 # Shopify already confirms that this CN was booked. Publish the

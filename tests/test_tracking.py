@@ -101,7 +101,7 @@ class TrackingTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result[0]['status'], 'Booked')
         self.assertEqual(result[0]['tracking_source'], 'DigiDokaan')
-        primary.assert_awaited_once()
+        primary.assert_not_awaited()
         direct.assert_not_awaited()
 
     def test_digidokaan_tracking_uses_portal(self):
