@@ -101,7 +101,11 @@ from tracking_resolver import (
     fetch_resolved_tracking_status,
 )
 from trax import is_trax_tracking_number
-from tcs import fetch_public_tracking_status as fetch_tcs_tracking_status, is_tcs_tracking_number
+from tcs import (
+    fetch_public_tracking_history as fetch_tcs_tracking_history,
+    fetch_public_tracking_status as fetch_tcs_tracking_status,
+    is_tcs_tracking_number,
+)
 
 app = Flask(__name__)
 app.debug = True
@@ -2413,6 +2417,10 @@ async def fetch_tracking_status(session, tracking_number):
     if is_digidokaan_tracking_number(tracking_number):
         status = await fetch_resolved_tracking_status(session, tracking_number)
         return status or "Tracking unavailable"
+    if is_tcs_tracking_number(tracking_number):
+        status = await fetch_tcs_tracking_status(session, tracking_number)
+        if status:
+            return status
     data = await fetch_tracking_data(session, tracking_number)
     if data and isinstance(data, list) and data[-1].get("ProcessDescForPortal"):
         return data[-1]["ProcessDescForPortal"]
@@ -3452,6 +3460,10 @@ def displayTracking(tracking_num):
         async with aiohttp.ClientSession() as session:
             if is_digidokaan_tracking_number(tracking_num):
                 return await fetch_resolved_tracking_history(session, tracking_num)
+            if is_tcs_tracking_number(tracking_num):
+                history = await fetch_tcs_tracking_history(session, tracking_num)
+                if history:
+                    return history
             return await fetch_tracking_data(session, tracking_num)
 
     data = asyncio.run(async_func())
@@ -3483,6 +3495,10 @@ def build_tracking_summary_payload(tracking_number):
         async with aiohttp.ClientSession(timeout=ClientTimeout(total=12)) as client:
             if is_digidokaan_tracking_number(tracking_number):
                 return await fetch_resolved_tracking_history(client, tracking_number)
+            if is_tcs_tracking_number(tracking_number):
+                history = await fetch_tcs_tracking_history(client, tracking_number)
+                if history:
+                    return history
             return await fetch_tracking_data(client, tracking_number)
 
     result = asyncio.run(lookup())
@@ -3920,7 +3936,7 @@ async def revalidate_pending_trax_shipments(orders):
         for item in order.get("line_items", []) or []:
             tracking_number = item.get("tracking_number")
             if (
-                is_trax_tracking_number(tracking_number)
+                (is_trax_tracking_number(tracking_number) or is_tcs_tracking_number(tracking_number))
                 and is_pending_line_item_status(item.get("status"))
             ):
                 lookups.append((order, item, str(tracking_number)))
@@ -3931,6 +3947,13 @@ async def revalidate_pending_trax_shipments(orders):
 
         async def lookup(tracking_number):
             async with semaphore:
+                if is_tcs_tracking_number(tracking_number):
+                    history = await fetch_tcs_tracking_history(client, tracking_number)
+                    return {
+                        "status": str((history[-1] if history else {}).get("ProcessDescForPortal") or "").strip(),
+                        "source": "TCS Direct",
+                        "history": history,
+                    }
                 return await fetch_resolved_tracking_snapshot(client, tracking_number)
 
         results = await asyncio.gather(*(
@@ -3959,7 +3982,7 @@ async def refresh_trax_tracking_for_orders(orders):
     for order in orders or []:
         for item in order.get("line_items", []) or []:
             tracking_number = item.get("tracking_number")
-            if is_trax_tracking_number(tracking_number):
+            if is_trax_tracking_number(tracking_number) or is_tcs_tracking_number(tracking_number):
                 lookups.append((order, item, str(tracking_number)))
     if not lookups:
         return 0
@@ -3967,6 +3990,13 @@ async def refresh_trax_tracking_for_orders(orders):
     async with aiohttp.ClientSession() as client:
         async def lookup(tracking_number):
             async with semaphore:
+                if is_tcs_tracking_number(tracking_number):
+                    history = await fetch_tcs_tracking_history(client, tracking_number)
+                    return {
+                        "status": str((history[-1] if history else {}).get("ProcessDescForPortal") or "").strip(),
+                        "source": "TCS Direct",
+                        "history": history,
+                    }
                 return await fetch_resolved_tracking_snapshot(client, tracking_number)
 
         results = await asyncio.gather(*(
