@@ -106,6 +106,11 @@ from tcs import (
     fetch_public_tracking_status as fetch_tcs_tracking_status,
     is_tcs_tracking_number,
 )
+from leopards import (
+    fetch_public_tracking_history as fetch_leopards_tracking_history,
+    fetch_public_tracking_status as fetch_leopards_tracking_status,
+    is_leopards_tracking_number,
+)
 
 app = Flask(__name__)
 app.debug = True
@@ -2421,6 +2426,10 @@ async def fetch_tracking_status(session, tracking_number):
         status = await fetch_tcs_tracking_status(session, tracking_number)
         if status:
             return status
+    if is_leopards_tracking_number(tracking_number):
+        status = await fetch_leopards_tracking_status(session, tracking_number)
+        if status:
+            return status
     data = await fetch_tracking_data(session, tracking_number)
     if data and isinstance(data, list) and data[-1].get("ProcessDescForPortal"):
         return data[-1]["ProcessDescForPortal"]
@@ -2467,6 +2476,9 @@ async def process_line_item(session, line_item, fulfillments):
                 # dashboard at zero orders when its public tracker is slow.
                 tracking_details = "Booked"
                 tracking_source = "DigiDokaan / TCS"
+            elif is_leopards_tracking_number(tracking_number):
+                tracking_details = "Booked"
+                tracking_source = "Leopards"
             else:
                 tracking_details = await fetch_tracking_status(session, tracking_number)
                 if clean_tracking_status_label(tracking_details).casefold() == "tracking unavailable":
@@ -3492,6 +3504,10 @@ def displayTracking(tracking_num):
                 history = await fetch_tcs_tracking_history(session, tracking_num)
                 if history:
                     return history
+            if is_leopards_tracking_number(tracking_num):
+                history = await fetch_leopards_tracking_history(session, tracking_num)
+                if history:
+                    return history
             return await fetch_tracking_data(session, tracking_num)
 
     data = asyncio.run(async_func())
@@ -3525,6 +3541,10 @@ def build_tracking_summary_payload(tracking_number):
                 return await fetch_resolved_tracking_history(client, tracking_number)
             if is_tcs_tracking_number(tracking_number):
                 history = await fetch_tcs_tracking_history(client, tracking_number)
+                if history:
+                    return history
+            if is_leopards_tracking_number(tracking_number):
+                history = await fetch_leopards_tracking_history(client, tracking_number)
                 if history:
                     return history
             return await fetch_tracking_data(client, tracking_number)
@@ -3964,7 +3984,11 @@ async def revalidate_pending_trax_shipments(orders):
         for item in order.get("line_items", []) or []:
             tracking_number = item.get("tracking_number")
             if (
-                (is_trax_tracking_number(tracking_number) or is_tcs_tracking_number(tracking_number))
+                (
+                    is_trax_tracking_number(tracking_number)
+                    or is_tcs_tracking_number(tracking_number)
+                    or is_leopards_tracking_number(tracking_number)
+                )
                 and is_pending_line_item_status(item.get("status"))
             ):
                 lookups.append((order, item, str(tracking_number)))
@@ -3980,6 +4004,13 @@ async def revalidate_pending_trax_shipments(orders):
                     return {
                         "status": str((history[-1] if history else {}).get("ProcessDescForPortal") or "").strip(),
                         "source": "TCS Direct",
+                        "history": history,
+                    }
+                if is_leopards_tracking_number(tracking_number):
+                    history = await fetch_leopards_tracking_history(client, tracking_number)
+                    return {
+                        "status": str((history[-1] if history else {}).get("ProcessDescForPortal") or "").strip(),
+                        "source": "Leopards Direct",
                         "history": history,
                     }
                 return await fetch_resolved_tracking_snapshot(client, tracking_number)
@@ -4010,7 +4041,11 @@ async def refresh_trax_tracking_for_orders(orders):
     for order in orders or []:
         for item in order.get("line_items", []) or []:
             tracking_number = item.get("tracking_number")
-            if is_trax_tracking_number(tracking_number) or is_tcs_tracking_number(tracking_number):
+            if (
+                is_trax_tracking_number(tracking_number)
+                or is_tcs_tracking_number(tracking_number)
+                or is_leopards_tracking_number(tracking_number)
+            ):
                 lookups.append((order, item, str(tracking_number)))
     if not lookups:
         return 0
@@ -4023,6 +4058,13 @@ async def refresh_trax_tracking_for_orders(orders):
                     return {
                         "status": str((history[-1] if history else {}).get("ProcessDescForPortal") or "").strip(),
                         "source": "TCS Direct",
+                        "history": history,
+                    }
+                if is_leopards_tracking_number(tracking_number):
+                    history = await fetch_leopards_tracking_history(client, tracking_number)
+                    return {
+                        "status": str((history[-1] if history else {}).get("ProcessDescForPortal") or "").strip(),
+                        "source": "Leopards Direct",
                         "history": history,
                     }
                 return await fetch_resolved_tracking_snapshot(client, tracking_number)

@@ -30,6 +30,7 @@ class PendingTraxTrackingTests(unittest.TestCase):
             "Shipment - Rider Picked", "Picked From Shipper", "Arrived At Origin",
             "Shipment - In Transit", "Out For Delivery", "Delivery Failed",
             "Being Return", "Returned to Shipper", "Delivered",
+            "Inter Transfer at TAMIRGARAHA",
         ):
             with self.subTest(dispatched=dispatched):
                 self.assertFalse(namespace["is_pending_line_item_status"](dispatched))

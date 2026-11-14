@@ -35,6 +35,7 @@ class OrderProcessingTests(unittest.TestCase):
             "clean_tracking_status_label": lambda value: value,
             "is_digidokaan_tracking_number": lambda value: str(value).startswith("223"),
             "is_tcs_tracking_number": lambda value: str(value).startswith("17"),
+            "is_leopards_tracking_number": lambda value: str(value).upper().startswith("LE"),
             "tracking_url_for_number": lambda value: f"/track/{value}",
         }
         exec(compile(ast.Module(body=[process_line_item_function], type_ignores=[]), "main.py", "exec"), namespace)
@@ -71,6 +72,7 @@ class OrderProcessingTests(unittest.TestCase):
             "clean_tracking_status_label": lambda value: value,
             "is_digidokaan_tracking_number": lambda value: str(value).startswith("223"),
             "is_tcs_tracking_number": lambda value: str(value).startswith("17"),
+            "is_leopards_tracking_number": lambda value: str(value).upper().startswith("LE"),
             "tracking_url_for_number": lambda value: f"/track/{value}",
         }
         exec(compile(ast.Module(body=[process_line_item_function], type_ignores=[]), "main.py", "exec"), namespace)
