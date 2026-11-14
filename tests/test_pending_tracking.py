@@ -87,6 +87,10 @@ class PendingTraxTrackingTests(unittest.TestCase):
             "PAID_FINANCIAL_STATUSES": {"paid", "partially_paid"},
             "normalize_status_bucket": namespace["normalize_status_bucket"],
             "is_pending_line_item_status": namespace["is_pending_line_item_status"],
+            "has_return_resolution_tag": lambda order: any(
+                str(tag).casefold().startswith(("return received", "claim received"))
+                for tag in order.get("tags", [])
+            ),
             "is_lahore_city": lambda city: str(city).casefold() == "lahore",
             "parse_date_timestamp": lambda value: value,
         }
@@ -96,6 +100,43 @@ class PendingTraxTrackingTests(unittest.TestCase):
 
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["items_list"][0]["item_title"], "Pending shawl")
+
+    def test_return_received_order_is_never_shown_as_pending(self):
+        async def no_revalidation(_orders):
+            return 0
+
+        build_namespace = {
+            "asyncio": asyncio,
+            "refresh_daraz_cache_if_needed": lambda: None,
+            "revalidate_pending_trax_shipments": no_revalidation,
+            "order_details": [{
+                "id": 981626600,
+                "order_num": "981626600",
+                "tags": ["DigiDokaan", "Return Received (2026-10-28)"],
+                "line_items": [{
+                    "product_title": "Returned shawl", "tracking_number": "223139469269068",
+                    "status": "Booked", "quantity": 1, "unit_price": 45249,
+                }],
+            }],
+            "daraz_orders": [],
+            "load_order_statuses": lambda: {},
+            "load_product_cost_overrides": lambda: {},
+            "get_active_shopify_products": lambda: [],
+            "find_cost_override_for_item": lambda *args, **kwargs: None,
+            "parse_money": lambda value=0, *args: float(value or 0),
+            "PAID_FINANCIAL_STATUSES": {"paid", "partially_paid"},
+            "normalize_status_bucket": namespace["normalize_status_bucket"],
+            "is_pending_line_item_status": namespace["is_pending_line_item_status"],
+            "has_return_resolution_tag": lambda order: any(
+                str(tag).casefold().startswith(("return received", "claim received"))
+                for tag in order.get("tags", [])
+            ),
+            "is_lahore_city": lambda _city: False,
+            "parse_date_timestamp": lambda value: value,
+        }
+        exec(compile(ast.Module(body=[build_pending_function], type_ignores=[]), "main.py", "exec"), build_namespace)
+
+        self.assertEqual(build_namespace["build_pending_orders_mobile_data"](), [])
 
 
 if __name__ == "__main__":

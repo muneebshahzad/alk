@@ -1433,6 +1433,12 @@ def is_return_resolved_order(order):
     return bool(dated_order_tag_date(tags, "Return Received") or dated_order_tag_date(tags, "Claim Received"))
 
 
+def has_return_resolution_tag(order):
+    """Return/claim acknowledgements always remove an order from pending work."""
+    pattern = re.compile(r"^(?:return received|claim received)(?:\s*\(\d{4}-\d{2}-\d{2}\))?$", re.I)
+    return any(pattern.match(str(tag or "").strip()) for tag in ((order or {}).get("tags") or []))
+
+
 def parse_followup_date(value):
     parsed = parse_date_for_sort(value)
     return None if parsed == datetime.min else parsed.date()
@@ -4121,6 +4127,11 @@ def build_pending_orders_mobile_data():
             }
         )
     for shopify_order in order_details:
+        # A physically received return or an accepted claim is closed work.
+        # This guard is independent of courier availability and prevents the
+        # initial safe `Booked` baseline from resurfacing a resolved order.
+        if has_return_resolution_tag(shopify_order):
+            continue
         customer = shopify_order.get("customer_details") or {}
         customer_city = (customer.get("city") or "").strip()
         items = []
