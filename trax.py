@@ -21,8 +21,9 @@ _TERMINAL_MARKERS = (
 
 
 def is_trax_tracking_number(value):
-    """Trax/Sonic public CNs are fourteen numeric characters."""
-    return len(re.sub(r"\D", "", str(value or ""))) == 14
+    """Recognize the 14- and 15-digit Trax CNs issued through DigiDokaan."""
+    digits = re.sub(r"\D", "", str(value or ""))
+    return digits.startswith("223") and len(digits) in {14, 15}
 
 
 def _is_terminal_status(value):

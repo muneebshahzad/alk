@@ -87,10 +87,6 @@ class PendingTraxTrackingTests(unittest.TestCase):
             "PAID_FINANCIAL_STATUSES": {"paid", "partially_paid"},
             "normalize_status_bucket": namespace["normalize_status_bucket"],
             "is_pending_line_item_status": namespace["is_pending_line_item_status"],
-            "has_return_resolution_tag": lambda order: any(
-                str(tag).casefold().startswith(("return received", "claim received"))
-                for tag in order.get("tags", [])
-            ),
             "is_lahore_city": lambda city: str(city).casefold() == "lahore",
             "parse_date_timestamp": lambda value: value,
         }
@@ -101,7 +97,7 @@ class PendingTraxTrackingTests(unittest.TestCase):
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["items_list"][0]["item_title"], "Pending shawl")
 
-    def test_return_received_order_is_never_shown_as_pending(self):
+    def test_tags_do_not_hide_a_genuinely_booked_duplicate(self):
         async def no_revalidation(_orders):
             return 0
 
@@ -127,16 +123,14 @@ class PendingTraxTrackingTests(unittest.TestCase):
             "PAID_FINANCIAL_STATUSES": {"paid", "partially_paid"},
             "normalize_status_bucket": namespace["normalize_status_bucket"],
             "is_pending_line_item_status": namespace["is_pending_line_item_status"],
-            "has_return_resolution_tag": lambda order: any(
-                str(tag).casefold().startswith(("return received", "claim received"))
-                for tag in order.get("tags", [])
-            ),
             "is_lahore_city": lambda _city: False,
             "parse_date_timestamp": lambda value: value,
         }
         exec(compile(ast.Module(body=[build_pending_function], type_ignores=[]), "main.py", "exec"), build_namespace)
 
-        self.assertEqual(build_namespace["build_pending_orders_mobile_data"](), [])
+        rows = build_namespace["build_pending_orders_mobile_data"]()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["order_id"], "981626600")
 
 
 if __name__ == "__main__":

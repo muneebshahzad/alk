@@ -40,6 +40,11 @@ class TraxPublicTrackingTests(unittest.IsolatedAsyncioTestCase):
         trax._history_cache.clear()
         trax._inflight.clear()
 
+    def test_recognizes_both_digidokaan_trax_cn_lengths(self):
+        self.assertTrue(trax.is_trax_tracking_number("22322660078220"))
+        self.assertTrue(trax.is_trax_tracking_number("223139469655969"))
+        self.assertFalse(trax.is_trax_tracking_number("173019689979"))
+
     def test_csrf_and_json_history_are_normalized_oldest_first(self):
         self.assertEqual(trax._csrf_token("'_token': 'abc123'"), "abc123")
         self.assertEqual(trax._csrf_token('<meta name="csrf-token" content="xyz">'), "xyz")
@@ -65,6 +70,16 @@ class TraxPublicTrackingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(session.post_data, {"tracking_numbers": "22322660078220", "_token": "public-token"})
         self.assertEqual(session.post_headers["X-Requested-With"], "XMLHttpRequest")
         self.assertEqual(history[-1]["ProcessDescForPortal"], "Shipment - Rider Picked")
+
+    async def test_fifteen_digit_cn_is_sent_to_public_tracker(self):
+        payload = {"shipments": {"1": {
+            "tracking_number": "223139469655969",
+            "tracking_history": [{"date_time": "2026-11-02 11:22:00", "status": "Delivered"}],
+        }}}
+        session = FakeSession(payload)
+        history = await trax.fetch_public_tracking_history(session, "223139469655969")
+        self.assertEqual(session.post_data["tracking_numbers"], "223139469655969")
+        self.assertEqual(history[-1]["ProcessDescForPortal"], "Delivered")
 
     async def test_active_and_terminal_cache_ttls(self):
         active = [{"ProcessDescForPortal": "Shipment - In Transit"}]
