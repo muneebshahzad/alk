@@ -4,6 +4,7 @@
 {% block content %}
 <style>
   html, body { min-height: 100%; height: auto; overflow-y: auto; }
+  [hidden] { display:none !important; }
   #app { min-height: 100vh; height: auto; overflow: visible; }
   #main { min-height: 100vh; height: auto; overflow: visible; display: block; }
   .pending-shell { display:flex; flex-direction:column; min-height:100vh; overflow:visible; }
@@ -66,6 +67,12 @@
   .money-line { display:flex; justify-content:space-between; gap:10px; font-size:11px; color:#6f7280; margin-top:6px; }
   .money-line strong { color:#2d2e36; }
   .empty-state { padding:34px 16px; text-align:center; color:#858796; font-size:13px; }
+  .section-heading { display:flex; align-items:center; gap:8px; }
+  .pending-filters { display:flex; align-items:center; gap:7px; margin-left:auto; flex-wrap:wrap; }
+  .pending-filter { display:inline-flex; align-items:center; gap:6px; padding:6px 9px; border:1px solid #dce2ee; border-radius:999px; background:#fff; color:#565968; font-size:10px; font-weight:700; cursor:pointer; user-select:none; }
+  .pending-filter input { width:14px; height:14px; margin:0; accent-color:#4e73df; cursor:pointer; }
+  .pending-filter.booked { color:#946c00; background:#fffaf0; border-color:#f2dda3; }
+  .pending-filter.unbooked { color:#626574; background:#f7f8fb; }
   @media (max-width: 900px) {
     .section-grid, .order-body { grid-template-columns:1fr; }
   }
@@ -79,6 +86,8 @@
     .vendor-custom-grid { grid-template-columns:1fr; }
     .vendor-item { grid-template-columns:48px 1fr; }
     .vendor-remove { grid-column: 1 / -1; justify-self:end; }
+    .section-header { align-items:flex-start; gap:8px; flex-wrap:wrap; }
+    .pending-filters { width:100%; margin-left:0; }
   }
 </style>
 
@@ -103,12 +112,18 @@
     <div class="section-grid">
       <div class="section-card">
         <div class="section-header">
-          <span style="font-size:14px;font-weight:700;color:#3a3b45;">Item Summary</span>
-          <span class="section-count">{{ pending_items|length }}</span>
+          <div class="section-heading">
+            <span style="font-size:14px;font-weight:700;color:#3a3b45;">Item Summary</span>
+            <span class="section-count" id="visibleItemCount">{{ pending_items|length }}</span>
+          </div>
+          <div class="pending-filters" aria-label="Item status filters">
+            <label class="pending-filter booked"><input id="showBookedItems" type="checkbox" checked> Show booked items</label>
+            <label class="pending-filter unbooked"><input id="showUnbookedItems" type="checkbox" checked> Show un-booked items</label>
+          </div>
         </div>
         <div class="summary-list" style="padding:12px;">
           {% for item in pending_items %}
-          <div class="summary-row">
+          <div class="summary-row" data-booked="{{ 1 if item.statuses.get('Booked', 0) else 0 }}" data-unbooked="{{ 1 if item.statuses.get('Un-Booked', 0) else 0 }}">
             <div class="summary-thumb">
               {% if item.item_image %}<img src="{{ item.item_image }}" alt="">{% else %}📦{% endif %}
             </div>
@@ -142,6 +157,7 @@
           {% else %}
           <div class="empty-state">No pending items right now.</div>
           {% endfor %}
+          <div class="empty-state" id="itemFilterEmpty" hidden>No items match the selected status filters.</div>
         </div>
       </div>
 
@@ -187,12 +203,19 @@
 
     <div class="section-card">
       <div class="section-header">
-        <span style="font-size:14px;font-weight:700;color:#3a3b45;">Pending Order Queue</span>
-        <span class="section-count">{{ all_orders|length }}</span>
+        <div class="section-heading">
+          <span style="font-size:14px;font-weight:700;color:#3a3b45;">Pending Order Queue</span>
+          <span class="section-count" id="visibleOrderCount">{{ all_orders|length }}</span>
+        </div>
+        <div class="pending-filters" aria-label="Order status filters">
+          <label class="pending-filter booked"><input id="showBookedOrders" type="checkbox" checked> Show booked orders</label>
+          <label class="pending-filter unbooked"><input id="showUnbookedOrders" type="checkbox" checked> Show un-booked orders</label>
+        </div>
       </div>
       <div class="order-list" style="padding:12px;">
         {% for order in all_orders %}
-        <div class="order-card">
+        {% set order_item_statuses = order.items_list|map(attribute='status')|list %}
+        <div class="order-card" data-booked="{{ 1 if 'Booked' in order_item_statuses else 0 }}" data-unbooked="{{ 1 if 'Un-Booked' in order_item_statuses else 0 }}">
           <div class="order-head">
             <div style="flex:1;min-width:0;">
               <a class="order-id" href="{{ order.order_link or '#' }}" target="_blank">#{{ order.order_id }}</a>
@@ -269,6 +292,7 @@
         {% else %}
         <div class="empty-state">No pending Shopify orders right now.</div>
         {% endfor %}
+        <div class="empty-state" id="orderFilterEmpty" hidden>No orders match the selected status filters.</div>
       </div>
     </div>
   </div>
@@ -276,7 +300,64 @@
 
 <script>
   const vendorStorageKey = 'sleekspace_vendor_list_v1';
+  const pendingFilterStorageKey = 'alkaramat_pending_visibility_v1';
   let vendorItems = [];
+
+  function pendingFilterState() {
+    return {
+      bookedOrders: document.getElementById('showBookedOrders')?.checked !== false,
+      unbookedOrders: document.getElementById('showUnbookedOrders')?.checked !== false,
+      bookedItems: document.getElementById('showBookedItems')?.checked !== false,
+      unbookedItems: document.getElementById('showUnbookedItems')?.checked !== false,
+    };
+  }
+
+  function applyPendingFilters(save = true) {
+    const state = pendingFilterState();
+    let visibleOrders = 0;
+    document.querySelectorAll('.order-card[data-booked]').forEach((card) => {
+      const visible = (state.bookedOrders && card.dataset.booked === '1') ||
+        (state.unbookedOrders && card.dataset.unbooked === '1');
+      card.hidden = !visible;
+      if (visible) visibleOrders += 1;
+    });
+    let visibleItems = 0;
+    document.querySelectorAll('.summary-row[data-booked]').forEach((row) => {
+      const visible = (state.bookedItems && row.dataset.booked === '1') ||
+        (state.unbookedItems && row.dataset.unbooked === '1');
+      row.hidden = !visible;
+      if (visible) visibleItems += 1;
+    });
+    const orderCount = document.getElementById('visibleOrderCount');
+    const itemCount = document.getElementById('visibleItemCount');
+    const orderEmpty = document.getElementById('orderFilterEmpty');
+    const itemEmpty = document.getElementById('itemFilterEmpty');
+    if (orderCount) orderCount.textContent = String(visibleOrders);
+    if (itemCount) itemCount.textContent = String(visibleItems);
+    if (orderEmpty) orderEmpty.hidden = visibleOrders !== 0;
+    if (itemEmpty) itemEmpty.hidden = visibleItems !== 0;
+    if (save) localStorage.setItem(pendingFilterStorageKey, JSON.stringify(state));
+  }
+
+  function initializePendingFilters() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(pendingFilterStorageKey) || '{}');
+      const mapping = {
+        showBookedOrders: 'bookedOrders', showUnbookedOrders: 'unbookedOrders',
+        showBookedItems: 'bookedItems', showUnbookedItems: 'unbookedItems',
+      };
+      Object.entries(mapping).forEach(([id, key]) => {
+        const control = document.getElementById(id);
+        if (control && typeof saved[key] === 'boolean') control.checked = saved[key];
+      });
+    } catch (error) {
+      localStorage.removeItem(pendingFilterStorageKey);
+    }
+    document.querySelectorAll('.pending-filter input').forEach((control) => {
+      control.addEventListener('change', () => applyPendingFilters(true));
+    });
+    applyPendingFilters(false);
+  }
 
   function loadVendorItems() {
     try {
@@ -708,5 +789,6 @@
 
   loadVendorItems();
   renderVendorItems();
+  initializePendingFilters();
 </script>
 {% endblock %}
