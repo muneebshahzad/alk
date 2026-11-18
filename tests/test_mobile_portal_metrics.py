@@ -36,6 +36,8 @@ namespace = {
     "parse_int": parse_int,
     "normalize_status_bucket": normalize_status_bucket,
     "PAID_FINANCIAL_STATUSES": {"paid", "partially_paid"},
+    "is_digidokaan_tracking_number": lambda value: str(value or "").startswith("223"),
+    "is_tcs_tracking_number": lambda value: str(value or "").startswith("173"),
     "order_details": [],
 }
 exec(compile(ast.Module(body=functions, type_ignores=[]), "main.py", "exec"), namespace)
@@ -108,6 +110,33 @@ class MobilePortalMetricsTests(unittest.TestCase):
         self.assertEqual(dashboard["cards"][0]["count"], 1)
         self.assertEqual(dashboard["shipments"][0]["payment_status"], "Paid")
         self.assertEqual(dashboard["shipments"][0]["net"], 800)
+
+    def test_outstanding_reconciles_live_deliveries_against_paid_tracking(self):
+        payments = {
+            "balance": {"deliver_orders_payments": 3000},
+            "ready": {"data": [{"tracking_no": "2232"}]},
+            "ledger": {"total_balance": 90335, "data": [
+                {"tracking_no": "223PAID0000001", "order_no": "O1", "external_reference_no": "O1", "order_status": "Delivered", "payment_type": "COD", "amount": 5000, "cheque_no": "C1"},
+                {"tracking_no": "223OPEN0000002", "order_no": "O2", "external_reference_no": "O2", "order_status": "Delivered", "payment_type": "COD", "amount": 8000},
+                {"tracking_no": "223MOVE0000003", "order_no": "O4", "external_reference_no": "O4", "order_status": "Delivery In Transit", "payment_type": "Courier charges", "sub_amount": 200},
+            ]},
+            "cheques": [{"cheque_no": "C1", "status": "Paid", "amount": 5000, "shipments": {"data": []}}],
+        }
+        shopify_orders = [
+            {"order_num": "O1", "status": "Delivered", "financial_status": "Pending", "total_price": 5000, "line_items": [{"tracking_number": "223PAID0000001"}]},
+            {"order_num": "O2", "status": "Delivered", "financial_status": "Pending", "total_price": 8000, "line_items": [{"tracking_number": "223OPEN0000002"}]},
+            {"order_num": "O3", "status": "Delivered", "financial_status": "Pending", "total_price": 7000, "line_items": [{"tracking_number": "173000000003"}]},
+            {"order_num": "O4", "status": "Delivery In Transit", "financial_status": "Pending", "total_price": 9000, "line_items": [{"tracking_number": "223MOVE0000003"}]},
+        ]
+
+        dashboard = namespace["build_digidokaan_payment_dashboard"](payments, shopify_orders=shopify_orders)
+        cards = {card["label"]: card for card in dashboard["cards"]}
+
+        self.assertEqual(cards["Outstanding payment"]["value"], 15000)
+        self.assertEqual(cards["Outstanding payment"]["count"], 2)
+        self.assertEqual(cards["Ledger balance"]["value"], 90335)
+        self.assertEqual(cards["Ready for payout"]["count"], 1)
+        self.assertEqual(len([row for row in dashboard["shipments"] if namespace["normalize_status_bucket"](row["order_status"]) == "Delivered"]), 2)
 
 
 if __name__ == "__main__":
