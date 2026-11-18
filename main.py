@@ -2675,7 +2675,12 @@ def payments_page():
         print(f"Could not load DigiDokaan payments: {fetch_error}")
         payments = {"balance": {}, "ready": {}, "ledger": {}}
         error = str(fetch_error)
-    dashboard = build_digidokaan_payment_dashboard(payments, shopify_orders=order_details)
+    with tracking_refresh_lock:
+        tracking_snapshot_ready = bool(tracking_refresh_state.get("updated_at"))
+    dashboard = build_digidokaan_payment_dashboard(
+        payments,
+        shopify_orders=order_details if tracking_snapshot_ready else None,
+    )
     return render_template("payments.html", payments=payments, payment_dashboard=dashboard, payments_error=error)
 
 
@@ -2906,13 +2911,12 @@ def build_digidokaan_payment_dashboard(payments, operational_metrics=None, shopi
             live_outstanding_value += max(amount, 0)
             live_outstanding_count += 1
         live_outstanding_value = round(live_outstanding_value, 2)
-    ready_rows = _digidokaan_rows(payments.get("ready") or {})
     cards = [
         {"label": "Gross COD", "value": gross_cod, "count": gross_count, "note": "dispatched shipments"},
         {"label": "Total shipments", "value": dispatched_count, "count": dispatched_count, "note": f"PKR {gross_cod:,.2f} combined gross COD", "count_primary": True},
         {"label": "Payment received", "value": received, "count": len(paid_shipments), "note": "shipments explicitly linked to paid cheques"},
         {"label": "Outstanding payment", "value": live_outstanding_value, "count": live_outstanding_count, "note": "live delivered COD orders without a paid-cheque match"},
-        {"label": "Ready for payout", "value": parse_money(balance.get("deliver_orders_payments"), 0), "count": len(ready_rows), "note": "DigiDokaan API ready-to-pay balance"},
+        {"label": "Ready for payout", "value": parse_money(balance.get("deliver_orders_payments"), 0), "count": None, "note": "DigiDokaan API reported ready-to-pay balance"},
         {"label": "Courier deductions", "value": total_deductions, "count": len(deducted_shipments), "note": "shipments with recorded deductions"},
         {"label": "Effective deduction", "value": (total_deductions / gross_cod * 100) if gross_cod else 0, "count": len(deducted_shipments), "note": "percent of gross COD", "percent": True},
         {"label": "Delivered COD", "value": round(sum(row["cod"] for row in delivered_shipments), 2), "count": len(delivered_shipments), "note": "delivered shipments"},

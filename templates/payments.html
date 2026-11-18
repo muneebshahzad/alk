@@ -54,7 +54,7 @@
       <div class="pay-card {% if loop.index <= 2 %}primary{% endif %}">
         <div class="pay-label">{{ card.label }}</div>
         <div class="pay-value {% if loop.index <= 5 %}green{% endif %}{% if card.label == 'Courier deductions' %} red{% endif %}">{% if card.percent %}{{ '%.2f'|format(card.value) }}%{% elif card.count_primary %}{{ card.value|format_number }}{% else %}PKR {{ card.value|format_currency }}{% endif %}</div>
-        <div class="pay-note">{{ card.count|format_number }} {{ card.note }}</div>
+        <div class="pay-note">{% if card.count is not none %}{{ card.count|format_number }} {% endif %}{{ card.note }}</div>
       </div>
     {% endfor %}
   </div>
