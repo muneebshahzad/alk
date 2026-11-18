@@ -1,4 +1,5 @@
 import os
+import json
 
 import psycopg2
 from psycopg2.extras import RealDictCursor
@@ -141,6 +142,20 @@ def _ensure_shipper_advice_actions_table(cur):
     )
 
 
+def _ensure_digidokaan_terminal_cache_table(cur):
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS digidokaan_terminal_payment_cache (
+            record_type TEXT NOT NULL,
+            record_key TEXT NOT NULL,
+            payload JSONB NOT NULL,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            PRIMARY KEY (record_type, record_key)
+        )
+        """
+    )
+
+
 def _ensure_finance_tables(cur):
     cur.execute(
         """
@@ -275,6 +290,7 @@ def init_db():
                 _ensure_employee_passkeys_table(cur)
                 _ensure_delivery_followup_contacts_table(cur)
                 _ensure_shipper_advice_actions_table(cur)
+                _ensure_digidokaan_terminal_cache_table(cur)
                 _ensure_finance_tables(cur)
             conn.commit()
         _set_last_db_error("")
@@ -416,6 +432,59 @@ def set_app_setting(key: str, value: str):
     except Exception as e:
         _set_last_db_error(str(e))
         print(f"DB set_app_setting error: {e}")
+        return False
+
+
+def load_digidokaan_terminal_payments(record_type: str) -> dict:
+    """Load immutable paid shipment or cheque records kept across deploys."""
+    try:
+        with get_conn() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                _ensure_digidokaan_terminal_cache_table(cur)
+                cur.execute(
+                    "SELECT record_key, payload FROM digidokaan_terminal_payment_cache WHERE record_type = %s",
+                    (record_type,),
+                )
+                result = {}
+                for row in cur.fetchall():
+                    payload = row["payload"]
+                    if isinstance(payload, str):
+                        payload = json.loads(payload)
+                    if isinstance(payload, dict):
+                        result[str(row["record_key"])] = payload
+            conn.commit()
+        _set_last_db_error("")
+        return result
+    except Exception as error:
+        _set_last_db_error(str(error))
+        print(f"DB load DigiDokaan terminal payment cache error: {error}")
+        return {}
+
+
+def save_digidokaan_terminal_payments(record_type: str, records: dict) -> bool:
+    """Persist newly completed records without rewriting unrelated history."""
+    if not records:
+        return True
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                _ensure_digidokaan_terminal_cache_table(cur)
+                cur.executemany(
+                    """
+                    INSERT INTO digidokaan_terminal_payment_cache (record_type, record_key, payload)
+                    VALUES (%s, %s, %s::jsonb)
+                    ON CONFLICT (record_type, record_key) DO UPDATE SET
+                        payload = EXCLUDED.payload,
+                        updated_at = NOW()
+                    """,
+                    [(record_type, str(key), json.dumps(payload)) for key, payload in records.items()],
+                )
+            conn.commit()
+        _set_last_db_error("")
+        return True
+    except Exception as error:
+        _set_last_db_error(str(error))
+        print(f"DB save DigiDokaan terminal payment cache error: {error}")
         return False
 
 

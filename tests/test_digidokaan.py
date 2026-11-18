@@ -86,6 +86,11 @@ class DigiDokaanTrackingTests(IsolatedAsyncioTestCase):
         self.assertEqual(digidokaan._money_from_text("Rs.15,472"), 15472)
         self.assertEqual(digidokaan._money_from_text("Rs.-18,227"), -18227)
 
+    def test_only_delivered_paid_records_are_terminal_payment_history(self):
+        self.assertTrue(digidokaan._is_completed_paid_record({"shipment_status": "Shipment Delivered", "payment_status": "Settled"}))
+        self.assertFalse(digidokaan._is_completed_paid_record({"shipment_status": "Delivered", "payment_status": "Not paid"}))
+        self.assertFalse(digidokaan._is_completed_paid_record({"shipment_status": "In Transit", "payment_status": "Settled"}))
+
     def test_booking_phone_is_normalized_from_shopify_format(self):
         self.assertEqual(digidokaan.normalize_booking_phone("+92 333 5032786"), "03335032786")
         self.assertEqual(digidokaan.normalize_booking_phone("3335032786"), "03335032786")

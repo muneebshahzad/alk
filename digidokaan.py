@@ -14,6 +14,8 @@ import certifi
 from aiohttp import ClientTimeout
 import requests
 
+from db import load_digidokaan_terminal_payments, save_digidokaan_terminal_payments
+
 
 _token = ""
 _token_created_at = 0.0
@@ -737,6 +739,12 @@ def _payment_record(order, detail_body):
     }
 
 
+def _is_completed_paid_record(record):
+    status = str(record.get("shipment_status") or "").strip().casefold()
+    delivered = status == "delivered" or status == "shipment delivered" or status.endswith(" - delivered")
+    return delivered and "undelivered" not in status and str(record.get("payment_status") or "").strip().casefold() == "settled"
+
+
 async def fetch_payment_records(session, force=False):
     """Build the same safe shipment-ledger fallback used by Sleek Space."""
     queries = [value.strip() for value in str(os.getenv("DIGIDOKAAN_TRACKING_SEARCH_PREFIX") or "223,173").split(",") if value.strip()]
@@ -776,12 +784,17 @@ async def fetch_payment_records(session, force=False):
                 seen.add(identity)
                 rows.append(row)
 
+        terminal_records = await asyncio.to_thread(load_digidokaan_terminal_payments, "shipment")
+
         # The payment page is a synchronous request. Fetch independent order
         # details concurrently so a large ledger does not exceed the web
         # worker timeout; individual failures still retain the search row.
         semaphore = asyncio.Semaphore(24)
         detail_timeout = ClientTimeout(total=10)
         async def fetch_one(order):
+            identity = str(order.get("tracking_no") or order.get("order_id") or "").strip()
+            if identity and identity in terminal_records:
+                return terminal_records[identity]
             detail_body = {}
             order_id = str(order.get("order_id") or "").strip()
             if order_id:
@@ -799,6 +812,14 @@ async def fetch_payment_records(session, force=False):
             return _payment_record(order, detail_body)
 
         records = await asyncio.gather(*(fetch_one(row) for row in rows if isinstance(row, dict)))
+        newly_terminal = {
+            str(record.get("tracking_number") or record.get("order_id") or "").strip(): record
+            for record in records
+            if _is_completed_paid_record(record)
+            and str(record.get("tracking_number") or record.get("order_id") or "").strip()
+        }
+        if newly_terminal:
+            await asyncio.to_thread(save_digidokaan_terminal_payments, "shipment", newly_terminal)
         records.sort(key=lambda row: row.get("created_at") or "", reverse=True)
         _payment_records_cache[cache_key] = (records, time.monotonic() + _PAYMENT_RECORDS_CACHE_SECONDS)
         return records
@@ -866,6 +887,8 @@ async def _fetch_cheque_history(session, config, api_headers):
         ledger_html = await response.text()
 
     cheques = []
+    terminal_cheques = await asyncio.to_thread(load_digidokaan_terminal_payments, "cheque")
+    newly_terminal = {}
     row_pattern = re.compile(r"<tr[^>]*class=[\"'][^\"']*\bcheque\b[^\"']*[\"'][^>]*>(.*?)</tr>", re.I | re.S)
     for row_html in row_pattern.findall(ledger_html):
         id_match = re.search(r"merchant-ledger/([0-9a-f-]{20,})", row_html, re.I)
@@ -881,14 +904,23 @@ async def _fetch_cheque_history(session, config, api_headers):
             "balance": _money_from_text(cells[4] if len(cells) > 4 else ""),
             "status": "Paid",
         }
-        async with session.post(
-            config["base_url"] + "/api/settlements/ledger_single_cheque_detail",
-            json={"phone": config["phone"], "cheque_no": cheque_no},
-            headers=api_headers, timeout=timeout, ssl=_SSL_CONTEXT,
-        ) as response:
-            detail = await response.json(content_type=None)
-        cheque["shipments"] = detail if response.status == 200 and detail.get("code") == 200 else {"data": []}
+        cached_cheque = terminal_cheques.get(cheque_no)
+        if cached_cheque:
+            cheque["shipments"] = cached_cheque.get("shipments") or {"data": []}
+        else:
+            async with session.post(
+                config["base_url"] + "/api/settlements/ledger_single_cheque_detail",
+                json={"phone": config["phone"], "cheque_no": cheque_no},
+                headers=api_headers, timeout=timeout, ssl=_SSL_CONTEXT,
+            ) as response:
+                detail = await response.json(content_type=None)
+            detail_ok = response.status == 200 and str(detail.get("code")) == "200" and isinstance(detail.get("data"), list)
+            cheque["shipments"] = detail if detail_ok else {"data": []}
+            if detail_ok:
+                newly_terminal[cheque_no] = cheque
         cheques.append(cheque)
+    if newly_terminal:
+        await asyncio.to_thread(save_digidokaan_terminal_payments, "cheque", newly_terminal)
     return cheques
 
 
