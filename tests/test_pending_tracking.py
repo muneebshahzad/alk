@@ -18,6 +18,10 @@ build_pending_function = next(
     node for node in tree.body
     if isinstance(node, ast.FunctionDef) and node.name == "build_pending_orders_mobile_data"
 )
+revalidate_function = next(
+    node for node in tree.body
+    if isinstance(node, ast.AsyncFunctionDef) and node.name == "revalidate_pending_trax_shipments"
+)
 namespace = {"re": re}
 exec(compile(ast.Module(body=functions, type_ignores=[]), "main.py", "exec"), namespace)
 
@@ -52,6 +56,53 @@ class PendingTraxTrackingTests(unittest.TestCase):
     def test_out_for_delivery_item_drives_order_counter_status(self):
         items = [{"tracking_number": "223232369716651", "status": "Out for Delivery"}]
         self.assertEqual(namespace["aggregate_order_status"](items), "Out For Delivery")
+
+    def test_call_courier_return_is_removed_from_pending(self):
+        class Client:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                return None
+
+        class Aiohttp:
+            @staticmethod
+            def ClientSession():
+                return Client()
+
+        async def call_courier_history(_client, _tracking_number):
+            return [
+                {"ProcessDescForPortal": "Booked", "TransactionDate": "2026-10-14T00:00:00"},
+                {"ProcessDescForPortal": "RETURN SUBMITTED", "TransactionDate": "2026-11-03T20:26:00"},
+            ]
+
+        revalidate_namespace = {
+            "asyncio": asyncio,
+            "aiohttp": Aiohttp,
+            "is_trax_tracking_number": lambda _value: False,
+            "is_tcs_tracking_number": lambda _value: False,
+            "is_leopards_tracking_number": lambda _value: False,
+            "is_pending_line_item_status": namespace["is_pending_line_item_status"],
+            "fetch_tracking_data": call_courier_history,
+            "fetch_tcs_tracking_history": None,
+            "fetch_leopards_tracking_history": None,
+            "fetch_resolved_tracking_snapshot": None,
+            "apply_followup_timeline_dates": lambda _item, _history: None,
+            "aggregate_order_status": namespace["aggregate_order_status"],
+        }
+        exec(compile(ast.Module(body=[revalidate_function], type_ignores=[]), "main.py", "exec"), revalidate_namespace)
+        orders = [{"status": "Booked", "line_items": [{
+            "tracking_number": "10412820010066",
+            "tracking_source": "Call Courier",
+            "status": "Booked",
+        }]}]
+
+        updated = asyncio.run(revalidate_namespace["revalidate_pending_trax_shipments"](orders))
+
+        self.assertEqual(updated, 1)
+        self.assertEqual(orders[0]["line_items"][0]["status"], "RETURN SUBMITTED")
+        self.assertEqual(orders[0]["status"], "Need Attention")
+        self.assertFalse(namespace["is_pending_line_item_status"](orders[0]["line_items"][0]["status"]))
 
     def test_dispatched_tag_does_not_hide_remaining_unbooked_items(self):
         async def no_revalidation(_orders):

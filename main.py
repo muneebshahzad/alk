@@ -4026,7 +4026,7 @@ def employee_portal_source_label(source):
 
 
 async def revalidate_pending_trax_shipments(orders):
-    """Refresh apparently pending Trax items before vendor quantities are calculated."""
+    """Refresh apparently pending courier items before vendor quantities are calculated."""
     lookups = []
     for order in orders or []:
         for item in order.get("line_items", []) or []:
@@ -4036,6 +4036,7 @@ async def revalidate_pending_trax_shipments(orders):
                     is_trax_tracking_number(tracking_number)
                     or is_tcs_tracking_number(tracking_number)
                     or is_leopards_tracking_number(tracking_number)
+                    or str(item.get("tracking_source") or "").strip().casefold() == "call courier"
                 )
                 and is_pending_line_item_status(item.get("status"))
             ):
@@ -4045,7 +4046,7 @@ async def revalidate_pending_trax_shipments(orders):
     async with aiohttp.ClientSession() as client:
         semaphore = asyncio.Semaphore(10)
 
-        async def lookup(tracking_number):
+        async def lookup(tracking_number, tracking_source):
             async with semaphore:
                 if is_tcs_tracking_number(tracking_number):
                     history = await fetch_tcs_tracking_history(client, tracking_number)
@@ -4061,11 +4062,19 @@ async def revalidate_pending_trax_shipments(orders):
                         "source": "Leopards Direct",
                         "history": history,
                     }
+                if str(tracking_source or "").strip().casefold() == "call courier":
+                    history = await fetch_tracking_data(client, tracking_number)
+                    history = history if isinstance(history, list) else []
+                    return {
+                        "status": str((history[-1] if history else {}).get("ProcessDescForPortal") or "").strip(),
+                        "source": "Call Courier",
+                        "history": history,
+                    }
                 return await fetch_resolved_tracking_snapshot(client, tracking_number)
 
         results = await asyncio.gather(*(
-            lookup(tracking_number)
-            for _order, _item, tracking_number in lookups
+            lookup(tracking_number, item.get("tracking_source"))
+            for _order, item, tracking_number in lookups
         ), return_exceptions=True)
     updated = 0
     touched_orders = set()
@@ -4084,7 +4093,7 @@ async def revalidate_pending_trax_shipments(orders):
 
 
 async def refresh_trax_tracking_for_orders(orders):
-    """Reconcile all active Trax rows after Shopify orders have been published."""
+    """Reconcile all active courier rows after Shopify orders have been published."""
     lookups = []
     for order in orders or []:
         for item in order.get("line_items", []) or []:
@@ -4093,13 +4102,14 @@ async def refresh_trax_tracking_for_orders(orders):
                 is_trax_tracking_number(tracking_number)
                 or is_tcs_tracking_number(tracking_number)
                 or is_leopards_tracking_number(tracking_number)
+                or str(item.get("tracking_source") or "").strip().casefold() == "call courier"
             ):
                 lookups.append((order, item, str(tracking_number)))
     if not lookups:
         return 0
     semaphore = asyncio.Semaphore(10)
     async with aiohttp.ClientSession() as client:
-        async def lookup(tracking_number):
+        async def lookup(tracking_number, tracking_source):
             async with semaphore:
                 if is_tcs_tracking_number(tracking_number):
                     history = await fetch_tcs_tracking_history(client, tracking_number)
@@ -4115,10 +4125,18 @@ async def refresh_trax_tracking_for_orders(orders):
                         "source": "Leopards Direct",
                         "history": history,
                     }
+                if str(tracking_source or "").strip().casefold() == "call courier":
+                    history = await fetch_tracking_data(client, tracking_number)
+                    history = history if isinstance(history, list) else []
+                    return {
+                        "status": str((history[-1] if history else {}).get("ProcessDescForPortal") or "").strip(),
+                        "source": "Call Courier",
+                        "history": history,
+                    }
                 return await fetch_resolved_tracking_snapshot(client, tracking_number)
 
         results = await asyncio.gather(*(
-            lookup(tracking_number) for _order, _item, tracking_number in lookups
+            lookup(tracking_number, item.get("tracking_source")) for _order, item, tracking_number in lookups
         ), return_exceptions=True)
     updated = 0
     touched_orders = set()
