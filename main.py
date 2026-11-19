@@ -1321,7 +1321,7 @@ def normalize_status_bucket(status):
         return "Undelivered"
     if "OUT FOR DELIVERY" in upper:
         return "Out For Delivery"
-    if is_delivered_status(raw):
+    if is_delivered_status(upper):
         return "Delivered"
     if "PICKED FROM SHIPPER" in upper or "RIDER PICKED" in upper or "PICKED UP" in upper:
         return "Picked From Shipper"

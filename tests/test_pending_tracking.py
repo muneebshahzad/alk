@@ -39,6 +39,10 @@ class PendingTraxTrackingTests(unittest.TestCase):
             with self.subTest(dispatched=dispatched):
                 self.assertFalse(namespace["is_pending_line_item_status"](dispatched))
 
+    def test_shipment_prefixed_delivered_status_is_normalized(self):
+        self.assertEqual(namespace["normalize_status_bucket"]("Shipment - Delivered"), "Delivered")
+        self.assertEqual(namespace["aggregate_order_status"]([{"status": "Shipment Delivered"}]), "Delivered")
+
     def test_order_with_delivered_and_unbooked_items_has_mixed_status(self):
         items = [
             {"tracking_number": "2232369665557", "status": "Delivered"},
