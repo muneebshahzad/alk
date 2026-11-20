@@ -747,7 +747,7 @@ def _is_completed_paid_record(record):
 
 async def fetch_payment_records(session, force=False):
     """Build the same safe shipment-ledger fallback used by Sleek Space."""
-    queries = [value.strip() for value in str(os.getenv("DIGIDOKAAN_TRACKING_SEARCH_PREFIX") or "223,173").split(",") if value.strip()]
+    queries = [value.strip() for value in str(os.getenv("DIGIDOKAAN_TRACKING_SEARCH_PREFIX") or "223,173,104").split(",") if value.strip()]
     cache_key = ",".join(queries)
     cached = _payment_records_cache.get(cache_key)
     if not force and cached and cached[1] > time.monotonic():

@@ -2664,7 +2664,7 @@ def payments_page():
                     return_exceptions=True,
                 )
                 if isinstance(settlement, dict):
-                    return settlement
+                    return merge_payment_records_into_settlement(settlement, records)
                 if records:
                     return payment_records_as_settlement_payload(records)
                 raise settlement if isinstance(settlement, Exception) else RuntimeError("DigiDokaan payment data is unavailable")
@@ -2702,6 +2702,35 @@ def payment_records_as_settlement_payload(records):
         if deductions:
             ledger_rows.append({**common, "payment_type": "Courier charges", "amount": 0, "sub_amount": deductions})
     return {"balance": {}, "ready": {}, "ledger": {"data": ledger_rows}, "cheques": []}
+
+
+def merge_payment_records_into_settlement(settlement, records):
+    """Supplement DigiDokaan's Trax ledger with other gateway shipments."""
+    merged = dict(settlement or {})
+    primary_ledger = dict(merged.get("ledger") or {})
+    primary_rows = _digidokaan_rows(primary_ledger)
+    fallback_rows = _digidokaan_rows(payment_records_as_settlement_payload(records).get("ledger"))
+    signatures = {
+        (
+            str(row.get("tracking_no") or "").strip(),
+            str(row.get("order_no") or "").strip(),
+            str(row.get("payment_type") or "").strip().casefold(),
+        )
+        for row in primary_rows
+    }
+    additions = []
+    for row in fallback_rows:
+        signature = (
+            str(row.get("tracking_no") or "").strip(),
+            str(row.get("order_no") or "").strip(),
+            str(row.get("payment_type") or "").strip().casefold(),
+        )
+        if signature not in signatures:
+            additions.append(row)
+            signatures.add(signature)
+    primary_ledger["data"] = primary_rows + additions
+    merged["ledger"] = primary_ledger
+    return merged
 
 
 def _digidokaan_rows(payload):
