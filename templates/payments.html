@@ -31,6 +31,7 @@
   .pay-table td { padding:11px 12px; border-bottom:1px solid #f0f2f6; color:#424a5d; vertical-align:top; }
   .pay-table tr:hover td { background:#fbfcff; }
   .money { font-weight:700; white-space:nowrap; } .muted { color:#8c95a8; }
+  .live-mismatch { color:#b5473d; font-size:10px; font-weight:700; margin-top:4px; white-space:nowrap; }
   .status { display:inline-block; padding:4px 8px; border-radius:999px; background:#eef2ff; color:#3c4ca3; font-weight:700; white-space:nowrap; }
   .status.paid { background:#e8f7ef;color:#168252; }.status.unpaid { background:#fff0ed;color:#b64036; }.status.pending { background:#fff6df;color:#916713; }
   .pay-error { background:#fff1f0; color:#a83a34; border:1px solid #f5c7c3; padding:13px 15px; border-radius:10px; margin-bottom:16px; }
@@ -84,7 +85,7 @@
     <div class="pay-table-wrap"><table class="pay-table"><thead><tr><th>Order</th><th>Reference</th><th>Tracking</th><th>Order date</th><th>Courier status</th><th>Payment status</th><th>Cheque</th><th>COD</th><th>Deductions</th><th>Net balance</th></tr></thead><tbody>
       {% for row in payment_dashboard.shipments %}<tr>
         <td data-label="Order"><strong>{{ row.order_no or '—' }}</strong></td><td data-label="Reference">{{ row.reference or '—' }}</td><td data-label="Tracking">{{ row.tracking_no or '—' }}</td><td data-label="Date">{{ row.order_date or '—' }}</td>
-        <td data-label="Courier status"><span class="status">{{ row.order_status or '—' }}</span></td>
+        <td data-label="Courier status"><span class="status">{{ row.order_status or '—' }}</span>{% if (row.live_courier_status or '')|lower == 'delivered' and 'delivered' not in (row.order_status or '')|lower %}<div class="live-mismatch">Direct courier: Delivered</div>{% endif %}</td>
         <td data-label="Payment status"><span class="status {% if row.payment_status == 'Paid' %}paid{% elif row.payment_status == 'Pending cheque' %}pending{% else %}unpaid{% endif %}">{{ row.payment_status }}</span></td>
         <td data-label="Cheque">{{ row.cheque_no or '—' }}{% if row.cheque_status %}<div class="muted">{{ row.cheque_status }}</div>{% endif %}</td>
         <td data-label="COD" class="money">PKR {{ row.cod|format_currency }}</td><td data-label="Deductions" class="money">PKR {{ row.deductions|format_currency }}</td><td data-label="Net balance" class="money">PKR {{ row.net|format_currency }}</td>
