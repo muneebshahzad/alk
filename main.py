@@ -2882,7 +2882,7 @@ def build_digidokaan_payment_dashboard(payments, operational_metrics=None, shopi
         str(row.get("reference") or row.get("order_no") or "").strip()
         for row in shipments if row.get("reference") or row.get("order_no")
     }
-    live_outstanding_value = round(sum(max(row["net"], 0) for row in ready_shipments), 2)
+    live_outstanding_value = round(sum(max(row["cod"], 0) for row in ready_shipments), 2)
     live_outstanding_count = len(ready_shipments)
     if shopify_orders is not None:
         for order in shopify_orders or []:

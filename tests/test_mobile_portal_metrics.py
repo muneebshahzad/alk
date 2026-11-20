@@ -154,7 +154,7 @@ class MobilePortalMetricsTests(unittest.TestCase):
         dashboard = namespace["build_digidokaan_payment_dashboard"](payments, shopify_orders=[])
         cards = {card["label"]: card for card in dashboard["cards"]}
 
-        self.assertEqual(cards["Outstanding payment"]["value"], 7800)
+        self.assertEqual(cards["Outstanding payment"]["value"], 8000)
         self.assertEqual(cards["Outstanding payment"]["count"], 1)
         self.assertEqual(cards["Delivered COD"]["value"], 8000)
 
