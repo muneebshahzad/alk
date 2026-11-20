@@ -136,6 +136,8 @@ class MobilePortalMetricsTests(unittest.TestCase):
 
         self.assertEqual(cards["Outstanding payment"]["value"], 15000)
         self.assertEqual(cards["Outstanding payment"]["count"], 2)
+        self.assertEqual(cards["Courier delivered, DigiDokaan pending"]["value"], 7000)
+        self.assertEqual(cards["Courier delivered, DigiDokaan pending"]["count"], 1)
         self.assertEqual(cards["Ledger balance"]["value"], 90335)
         self.assertIsNone(cards["Ready for payout"]["count"])
         self.assertEqual(len([row for row in dashboard["shipments"] if namespace["normalize_status_bucket"](row["order_status"]) == "Delivered"]), 2)
