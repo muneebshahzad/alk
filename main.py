@@ -2664,22 +2664,27 @@ def payments_page():
                     return_exceptions=True,
                 )
                 if isinstance(settlement, dict):
-                    return settlement
+                    live_statuses = await fetch_payment_live_tracking_statuses(client, settlement)
+                    return settlement, live_statuses
                 if records:
-                    return payment_records_as_settlement_payload(records)
+                    fallback = payment_records_as_settlement_payload(records)
+                    live_statuses = await fetch_payment_live_tracking_statuses(client, fallback)
+                    return fallback, live_statuses
                 raise settlement if isinstance(settlement, Exception) else RuntimeError("DigiDokaan payment data is unavailable")
 
-        payments = asyncio.run(load_payments())
+        payments, payment_live_statuses = asyncio.run(load_payments())
         error = ""
     except Exception as fetch_error:
         print(f"Could not load DigiDokaan payments: {fetch_error}")
         payments = {"balance": {}, "ready": {}, "ledger": {}}
+        payment_live_statuses = {}
         error = str(fetch_error)
     with tracking_refresh_lock:
         tracking_snapshot_ready = bool(tracking_refresh_state.get("updated_at"))
     dashboard = build_digidokaan_payment_dashboard(
         payments,
         shopify_orders=order_details if tracking_snapshot_ready else None,
+        live_tracking_statuses=payment_live_statuses,
     )
     return render_template("payments.html", payments=payments, payment_dashboard=dashboard, payments_error=error)
 
@@ -2721,7 +2726,38 @@ def _payment_identifier(row, keys):
     return ""
 
 
-def build_digidokaan_payment_dashboard(payments, operational_metrics=None, shopify_orders=None):
+async def fetch_payment_live_tracking_statuses(client, payments):
+    """Fetch direct courier truth for ledger shipments DigiDokaan still calls active."""
+    candidates = {}
+    rows = list(_digidokaan_rows((payments or {}).get("ledger") or {}))
+    for cheque in (payments or {}).get("cheques") or []:
+        rows.extend(_digidokaan_rows((cheque or {}).get("shipments") or {}))
+    for row in rows:
+        tracking_number = _payment_identifier(row, ("tracking_no", "tracking_number", "consignment_no"))
+        digidokaan_status = str(row.get("order_status") or row.get("courier_status") or "").strip()
+        if not tracking_number or normalize_status_bucket(digidokaan_status) in {"Delivered", "RETURNED TO SHIPPER"}:
+            continue
+        if is_digidokaan_tracking_number(tracking_number) or is_tcs_tracking_number(tracking_number):
+            candidates[tracking_number] = digidokaan_status
+    if not candidates:
+        return {}
+    semaphore = asyncio.Semaphore(20)
+
+    async def lookup(tracking_number):
+        async with semaphore:
+            if is_tcs_tracking_number(tracking_number):
+                return await fetch_tcs_tracking_status(client, tracking_number)
+            return await fetch_resolved_tracking_status(client, tracking_number)
+
+    results = await asyncio.gather(*(lookup(number) for number in candidates), return_exceptions=True)
+    return {
+        number: str(status or "").strip()
+        for number, status in zip(candidates, results)
+        if not isinstance(status, Exception) and str(status or "").strip()
+    }
+
+
+def build_digidokaan_payment_dashboard(payments, operational_metrics=None, shopify_orders=None, live_tracking_statuses=None):
     balance = payments.get("balance") or {}
     ledger = payments.get("ledger") or {}
     ledger_rows = _digidokaan_rows(ledger)
@@ -2782,8 +2818,8 @@ def build_digidokaan_payment_dashboard(payments, operational_metrics=None, shopi
     for group in grouped.values():
         cod = 0.0
         deductions = 0.0
-        linked_cheque = None
-        cheque_id = ""
+        payment_cheque = None
+        payment_cheque_id = ""
         ledger_cheque_status = ""
         entry_types = []
         for row in group.pop("rows"):
@@ -2798,25 +2834,19 @@ def build_digidokaan_payment_dashboard(payments, operational_metrics=None, shopi
                 deductions += abs(amount)
             deductions += abs(charge)
             row_cheque_id = _payment_identifier(row, cheque_keys)
-            if row_cheque_id:
-                cheque_id = row_cheque_id
-                linked_cheque = cheque_by_id.get(row_cheque_id.casefold()) or linked_cheque
+            if row_cheque_id and "COD" in entry_type:
+                payment_cheque_id = row_cheque_id
+                payment_cheque = cheque_by_id.get(row_cheque_id.casefold()) or payment_cheque
                 ledger_cheque_status = str(row.get("cheque_status") or row.get("settlement_status") or row.get("payment_status") or "").strip() or ledger_cheque_status
-        if not linked_cheque:
-            for value in (group.get("tracking_no"), group.get("order_no"), group.get("reference")):
-                if value and value.casefold() in cheque_by_shipment:
-                    linked_cheque = cheque_by_shipment[value.casefold()]
-                    cheque_id = _payment_identifier(linked_cheque, cheque_keys)
-                    break
-        settlement_status = str((linked_cheque or {}).get("status") or (linked_cheque or {}).get("settlement_status") or ledger_cheque_status).strip()
+        settlement_status = str((payment_cheque or {}).get("status") or (payment_cheque or {}).get("settlement_status") or ledger_cheque_status).strip()
         normalized_status = settlement_status.casefold()
         explicitly_paid = bool(re.search(r"\bpaid\b", normalized_status)) or any(word in normalized_status for word in paid_words)
         explicitly_unpaid = "unpaid" in normalized_status or "not paid" in normalized_status
         if explicitly_unpaid:
             payment_status = "Not paid"
-        elif (linked_cheque or cheque_id) and explicitly_paid:
+        elif payment_cheque_id and explicitly_paid:
             payment_status = "Paid"
-        elif linked_cheque or cheque_id:
+        elif payment_cheque_id:
             payment_status = "Pending cheque" if not normalized_status or any(word in normalized_status for word in pending_words) else "Unconfirmed"
         else:
             payment_status = "Not paid"
@@ -2824,12 +2854,13 @@ def build_digidokaan_payment_dashboard(payments, operational_metrics=None, shopi
         # its ledger amount may still be absent or adjusted. Settled rows retain
         # the explicit COD ledger amount used by their cheque calculation.
         effective_cod = cod
-        if not (linked_cheque or cheque_id) and group.get("price", 0) > 0:
+        if not payment_cheque_id and group.get("price", 0) > 0:
             effective_cod = group["price"]
         group.update({
             "cod": round(effective_cod, 2), "deductions": round(deductions, 2),
             "net": round(effective_cod - deductions, 2), "entry_types": ", ".join(entry_types),
-            "cheque_no": cheque_id, "cheque_status": settlement_status,
+            "cheque_no": payment_cheque_id, "cheque_status": settlement_status,
+            "live_courier_status": str((live_tracking_statuses or {}).get(group.get("tracking_no")) or "").strip(),
             "payment_status": payment_status,
         })
         shipments.append(group)
@@ -2849,15 +2880,9 @@ def build_digidokaan_payment_dashboard(payments, operational_metrics=None, shopi
         if normalize_status_bucket(row.get("order_status", "")) == "Delivered"
     ]
     deducted_shipments = [row for row in shipments if row["deductions"] > 0]
-    cheque_total = round(sum(parse_money(row.get("amount") or row.get("cheque_amount"), 0) for row in cheque_rows), 2)
-    if cheque_rows:
-        received = cheque_total
-    elif ledger.get("total_paid") is not None:
-        received = parse_money(ledger.get("total_paid"), 0)
-    elif balance.get("payment_received") is not None:
-        received = parse_money(balance.get("payment_received"), 0)
-    else:
-        received = round(sum(max(row["net"], 0) for row in paid_shipments), 2)
+    # Only COD/payment cheques settle the merchant receivable. Cheques for
+    # delivery charges and withholding taxes are deductions, not customer COD.
+    received = round(sum(max(row["net"], 0) for row in paid_shipments), 2)
     ledger_balance = parse_money(ledger.get("total_balance"), sum(max(row["net"], 0) for row in unpaid_shipments))
     combined_cheques = [dict(row) for row in cheque_rows]
     known_cheques = {_payment_identifier(row, cheque_keys).casefold() for row in combined_cheques if _payment_identifier(row, cheque_keys)}
@@ -2964,14 +2989,19 @@ def build_digidokaan_payment_dashboard(payments, operational_metrics=None, shopi
             live_outstanding_count += 1
         live_outstanding_value = round(live_outstanding_value, 2)
     ready_for_payout_value = parse_money(balance.get("deliver_orders_payments"), 0)
-    delivered_not_ready_value = round(max(live_outstanding_value - ready_for_payout_value, 0), 2)
+    stale_delivered_shipments = [
+        row for row in shipments
+        if normalize_status_bucket(row.get("live_courier_status")) == "Delivered"
+        and normalize_status_bucket(row.get("order_status")) != "Delivered"
+    ]
+    stale_delivered_value = round(sum(max(row.get("cod", 0), 0) for row in stale_delivered_shipments), 2)
     cards = [
         {"label": "Gross COD", "value": gross_cod, "count": gross_count, "note": "dispatched shipments"},
         {"label": "Total shipments", "value": dispatched_count, "count": dispatched_count, "note": f"PKR {gross_cod:,.2f} combined gross COD", "count_primary": True},
         {"label": "Payment received", "value": received, "count": len(paid_shipments), "note": "shipments explicitly linked to paid cheques"},
         {"label": "Outstanding payment", "value": live_outstanding_value, "count": live_outstanding_count, "note": "live delivered COD orders without a paid-cheque match"},
         {"label": "Ready for payout", "value": ready_for_payout_value, "count": None, "note": "DigiDokaan API reported ready-to-pay balance"},
-        {"label": "Delivered, not yet ready", "value": delivered_not_ready_value, "count": None, "note": "outstanding delivered COD not yet moved into DigiDokaan ready-for-payout"},
+        {"label": "Delivered actual, DigiDokaan stale", "value": stale_delivered_value, "count": len(stale_delivered_shipments), "note": "direct courier says Delivered while DigiDokaan still shows an older status"},
         {"label": "Courier deductions", "value": total_deductions, "count": len(deducted_shipments), "note": "shipments with recorded deductions"},
         {"label": "Effective deduction", "value": (total_deductions / gross_cod * 100) if gross_cod else 0, "count": len(deducted_shipments), "note": "percent of gross COD", "percent": True},
         {"label": "Delivered COD", "value": round(sum(row["cod"] for row in delivered_shipments), 2), "count": len(delivered_shipments), "note": "delivered shipments"},

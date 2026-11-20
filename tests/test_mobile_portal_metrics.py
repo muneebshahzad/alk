@@ -93,6 +93,60 @@ class MobilePortalMetricsTests(unittest.TestCase):
         shipment = namespace["build_digidokaan_payment_dashboard"](payments)["shipments"][0]
         self.assertNotEqual(shipment["payment_status"], "Paid")
 
+    def test_deduction_cheque_does_not_mark_customer_cod_paid(self):
+        payments = {
+            "balance": {},
+            "ledger": {"data": [
+                {"tracking_no": "173020134578", "order_status": "Delivered", "price": 4950, "payment_type": "COD", "amount": 4950},
+                {"tracking_no": "173020134578", "order_status": "Delivered", "payment_type": "DC", "sub_amount": 198, "cheque_no": "DC-CHEQUE"},
+            ]},
+            "cheques": [{"cheque_no": "DC-CHEQUE", "status": "Paid", "shipments": {"data": []}}],
+        }
+
+        shipment = namespace["build_digidokaan_payment_dashboard"](payments)["shipments"][0]
+
+        self.assertEqual(shipment["payment_status"], "Not paid")
+        self.assertEqual(shipment["cheque_no"], "")
+
+    def test_only_cod_payment_cheque_marks_shipment_paid(self):
+        payments = {
+            "balance": {},
+            "ledger": {"data": [
+                {"tracking_no": "22322370234394", "order_status": "Delivered", "price": 4648, "payment_type": "COD", "amount": 4648, "cheque_no": "PAYMENT-CHEQUE"},
+                {"tracking_no": "22322370234394", "order_status": "Delivered", "payment_type": "DC", "sub_amount": 152, "cheque_no": "DC-CHEQUE"},
+                {"tracking_no": "22322370234394", "order_status": "Delivered", "payment_type": "WHT SALES TAX", "sub_amount": 92.96, "cheque_no": "TAX-CHEQUE"},
+            ]},
+            "cheques": [
+                {"cheque_no": "PAYMENT-CHEQUE", "status": "Paid", "shipments": {"data": []}},
+                {"cheque_no": "DC-CHEQUE", "status": "Paid", "shipments": {"data": []}},
+                {"cheque_no": "TAX-CHEQUE", "status": "Paid", "shipments": {"data": []}},
+            ],
+        }
+
+        shipment = namespace["build_digidokaan_payment_dashboard"](payments)["shipments"][0]
+
+        self.assertEqual(shipment["payment_status"], "Paid")
+        self.assertEqual(shipment["cheque_no"], "PAYMENT-CHEQUE")
+
+    def test_direct_delivery_exposes_stale_digidokaan_status(self):
+        payments = {
+            "balance": {},
+            "ledger": {"data": [{
+                "tracking_no": "22331570686328", "order_status": "Delivery In Transit",
+                "price": 7499, "payment_type": "COD", "amount": 7499,
+            }]},
+            "cheques": [],
+        }
+
+        dashboard = namespace["build_digidokaan_payment_dashboard"](
+            payments,
+            live_tracking_statuses={"22331570686328": "Delivered"},
+        )
+        card = next(card for card in dashboard["cards"] if card["label"] == "Delivered actual, DigiDokaan stale")
+
+        self.assertEqual(card["count"], 1)
+        self.assertEqual(card["value"], 7499)
+
     def test_cheque_details_add_paid_shipments_and_gross_cod_uses_dispatched_metric(self):
         payments = {
             "balance": {},
@@ -136,7 +190,7 @@ class MobilePortalMetricsTests(unittest.TestCase):
 
         self.assertEqual(cards["Outstanding payment"]["value"], 15000)
         self.assertEqual(cards["Outstanding payment"]["count"], 2)
-        self.assertEqual(cards["Delivered, not yet ready"]["value"], 12000)
+        self.assertEqual(cards["Delivered actual, DigiDokaan stale"]["value"], 0)
         self.assertEqual(cards["Ledger balance"]["value"], 90335)
         self.assertIsNone(cards["Ready for payout"]["count"])
         self.assertEqual(len([row for row in dashboard["shipments"] if namespace["normalize_status_bucket"](row["order_status"]) == "Delivered"]), 2)
