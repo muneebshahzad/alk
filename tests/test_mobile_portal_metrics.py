@@ -136,8 +136,7 @@ class MobilePortalMetricsTests(unittest.TestCase):
 
         self.assertEqual(cards["Outstanding payment"]["value"], 15000)
         self.assertEqual(cards["Outstanding payment"]["count"], 2)
-        self.assertEqual(cards["Courier delivered, DigiDokaan pending"]["value"], 7000)
-        self.assertEqual(cards["Courier delivered, DigiDokaan pending"]["count"], 1)
+        self.assertEqual(cards["Delivered, not yet ready"]["value"], 12000)
         self.assertEqual(cards["Ledger balance"]["value"], 90335)
         self.assertIsNone(cards["Ready for payout"]["count"])
         self.assertEqual(len([row for row in dashboard["shipments"] if namespace["normalize_status_bucket"](row["order_status"]) == "Delivered"]), 2)
@@ -183,22 +182,6 @@ class MobilePortalMetricsTests(unittest.TestCase):
         self.assertEqual(cards["Outstanding payment"]["value"], 9000)
         self.assertEqual(cards["Outstanding payment"]["count"], 1)
 
-    def test_mixed_order_counts_delivered_line_missing_from_digidokaan(self):
-        payments = {"balance": {}, "ledger": {"data": []}, "cheques": []}
-        shopify_orders = [{
-            "order_num": "O5", "status": "Mixed Status", "financial_status": "Pending",
-            "subtotal_price": 10000, "total_price": 10500,
-            "line_items": [
-                {"tracking_number": "223LIVE0000001", "status": "Delivered", "unit_price": 6000, "quantity": 1},
-                {"tracking_number": "223MOVE0000002", "status": "In Transit", "unit_price": 4000, "quantity": 1},
-            ],
-        }]
-
-        dashboard = namespace["build_digidokaan_payment_dashboard"](payments, shopify_orders=shopify_orders)
-        card = next(card for card in dashboard["cards"] if card["label"] == "Courier delivered, DigiDokaan pending")
-
-        self.assertEqual(card["count"], 1)
-        self.assertEqual(card["value"], 6300)
 
 
 if __name__ == "__main__":
