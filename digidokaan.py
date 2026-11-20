@@ -773,7 +773,10 @@ async def fetch_payment_records(session, force=False):
             return rows if response.status == 200 and isinstance(rows, list) else []
 
         searches = [search(prefix) for prefix in queries]
-        searches.extend(search(prefix, False) for prefix in queries if prefix.startswith("17"))
+        # TCS and Call Courier orders can sit behind a different DigiDokaan
+        # gateway than the merchant's current default, so also search them
+        # without constraining gateway_id.
+        searches.extend(search(prefix, False) for prefix in queries if prefix.startswith(("17", "104")))
         results = await asyncio.gather(*searches)
         rows, seen = [], set()
         for result in results:
