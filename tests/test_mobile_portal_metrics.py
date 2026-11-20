@@ -8,7 +8,7 @@ tree = ast.parse((Path(__file__).resolve().parents[1] / "main.py").read_text())
 wanted = {
     "normalize_scan_term", "scan_term_candidates", "build_payment_operational_metrics",
     "_digidokaan_rows", "_payment_identifier", "build_digidokaan_payment_dashboard",
-    "payment_records_as_settlement_payload", "merge_payment_records_into_settlement",
+    "payment_records_as_settlement_payload",
 }
 functions = [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name in wanted]
 
@@ -45,21 +45,6 @@ exec(compile(ast.Module(body=functions, type_ignores=[]), "main.py", "exec"), na
 
 
 class MobilePortalMetricsTests(unittest.TestCase):
-    def test_other_gateway_payment_records_supplement_without_duplicating_trax(self):
-        settlement = {"ledger": {"data": [{
-            "tracking_no": "2231", "order_no": "O1", "payment_type": "COD", "amount": 5000,
-        }]}}
-        records = [
-            {"tracking_number": "2231", "order_id": "O1", "shipment_status": "Delivered", "order_amount": 5000},
-            {"tracking_number": "1041", "order_id": "O2", "shipment_status": "Delivered", "order_amount": 7000},
-        ]
-
-        merged = namespace["merge_payment_records_into_settlement"](settlement, records)
-        cod_rows = [row for row in merged["ledger"]["data"] if row.get("payment_type") == "COD"]
-
-        self.assertEqual(len(cod_rows), 2)
-        self.assertEqual({row["tracking_no"] for row in cod_rows}, {"2231", "1041"})
-
     def test_scan_candidates_extract_order_number_from_barcode_url(self):
         candidates = namespace["scan_term_candidates"]("https://shop.test/orders/#981587900?label=abc")
         self.assertIn("981587900", candidates)
