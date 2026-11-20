@@ -126,6 +126,7 @@ class MobilePortalMetricsTests(unittest.TestCase):
         self.assertEqual(dashboard["cards"][0]["count"], 1)
         self.assertEqual(dashboard["shipments"][0]["payment_status"], "Paid")
         self.assertEqual(dashboard["shipments"][0]["net"], 800)
+        self.assertEqual(dashboard["cheques"][0]["amount"], 800)
 
     def test_outstanding_reconciles_live_deliveries_against_paid_tracking(self):
         payments = {

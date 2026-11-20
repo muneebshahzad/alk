@@ -2901,6 +2901,35 @@ def build_digidokaan_payment_dashboard(payments, operational_metrics=None, shopi
             })
             known_cheques.add(cheque_id.casefold())
 
+    # DigiDokaan frequently omits amount/date from the cheque-list header even
+    # though every settled ledger line carries the cheque identifier. Rebuild
+    # the cheque total from its COD and deduction rows rather than displaying 0.
+    for cheque in combined_cheques:
+        cheque_id = _payment_identifier(cheque, cheque_keys)
+        if not cheque_id:
+            continue
+        matching_rows = [
+            row for row in ledger_rows
+            if _payment_identifier(row, cheque_keys).casefold() == cheque_id.casefold()
+        ]
+        if parse_money(cheque.get("amount") or cheque.get("cheque_amount"), 0) <= 0 and matching_rows:
+            cheque_cod = 0.0
+            cheque_deductions = 0.0
+            for row in matching_rows:
+                entry_type = str(row.get("payment_type") or row.get("payment_mode") or "").strip().upper()
+                amount = parse_money(row.get("amount"), 0)
+                charge = parse_money(row.get("sub_amount"), 0)
+                if "COD" in entry_type:
+                    cheque_cod += amount
+                elif amount < 0 and not charge:
+                    cheque_deductions += abs(amount)
+                cheque_deductions += abs(charge)
+            cheque["amount"] = round(max(cheque_cod - cheque_deductions, 0), 2)
+        if not (cheque.get("cheque_date") or cheque.get("settlement_date") or cheque.get("payment_date")):
+            dated_row = next((row for row in matching_rows if row.get("cheque_date") or row.get("settlement_date") or row.get("payment_date")), None)
+            if dated_row:
+                cheque["cheque_date"] = dated_row.get("cheque_date") or dated_row.get("settlement_date") or dated_row.get("payment_date")
+
     gross_shipments = [row for row in shipments if row.get("price", 0) > 0 or row.get("cod", 0) > 0]
     gross_cod = round(sum(row.get("price", 0) or row.get("cod", 0) for row in gross_shipments), 2)
     dispatched_count = len(shipments)
