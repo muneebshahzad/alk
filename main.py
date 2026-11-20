@@ -2818,6 +2818,8 @@ def build_digidokaan_payment_dashboard(payments, operational_metrics=None, shopi
     for group in grouped.values():
         cod = 0.0
         deductions = 0.0
+        courier_deductions = 0.0
+        withholding_tax = 0.0
         payment_cheque = None
         payment_cheque_id = ""
         ledger_cheque_status = ""
@@ -2830,9 +2832,13 @@ def build_digidokaan_payment_dashboard(payments, operational_metrics=None, shopi
             charge = parse_money(row.get("sub_amount"), 0)
             if "COD" in entry_type:
                 cod += amount
-            elif amount < 0 and not charge:
-                deductions += abs(amount)
-            deductions += abs(charge)
+            else:
+                deduction_value = abs(charge) if charge else (abs(amount) if amount < 0 else 0.0)
+                deductions += deduction_value
+                if any(marker in entry_type for marker in ("WHT", "TAX", "WITHHOLD")):
+                    withholding_tax += deduction_value
+                else:
+                    courier_deductions += deduction_value
             row_cheque_id = _payment_identifier(row, cheque_keys)
             if row_cheque_id and "COD" in entry_type:
                 payment_cheque_id = row_cheque_id
@@ -2858,6 +2864,8 @@ def build_digidokaan_payment_dashboard(payments, operational_metrics=None, shopi
             effective_cod = group["price"]
         group.update({
             "cod": round(effective_cod, 2), "deductions": round(deductions, 2),
+            "courier_deductions": round(courier_deductions, 2),
+            "withholding_tax": round(withholding_tax, 2),
             "net": round(effective_cod - deductions, 2), "entry_types": ", ".join(entry_types),
             "cheque_no": payment_cheque_id, "cheque_status": settlement_status,
             "live_courier_status": str((live_tracking_statuses or {}).get(group.get("tracking_no")) or "").strip(),
@@ -2866,13 +2874,9 @@ def build_digidokaan_payment_dashboard(payments, operational_metrics=None, shopi
         shipments.append(group)
 
     total_cod = parse_money(ledger.get("total_order_price"), parse_money(ledger.get("total_cod"), sum(row["cod"] for row in shipments)))
-    deduction_keys = ("total_delivery_charges", "total_sales_tax", "total_income_tax")
-    total_deductions = round(
-        sum(parse_money(ledger.get(key), 0) for key in deduction_keys)
-        if any(ledger.get(key) is not None for key in deduction_keys)
-        else sum(row["deductions"] for row in shipments),
-        2,
-    )
+    total_courier_deductions = round(sum(row["courier_deductions"] for row in shipments), 2)
+    total_withholding_tax = round(sum(row["withholding_tax"] for row in shipments), 2)
+    total_deductions = round(total_courier_deductions + total_withholding_tax, 2)
     paid_shipments = [row for row in shipments if row["payment_status"] == "Paid"]
     unpaid_shipments = [row for row in shipments if row["payment_status"] != "Paid"]
     delivered_shipments = [
@@ -2880,6 +2884,8 @@ def build_digidokaan_payment_dashboard(payments, operational_metrics=None, shopi
         if normalize_status_bucket(row.get("order_status", "")) == "Delivered"
     ]
     deducted_shipments = [row for row in shipments if row["deductions"] > 0]
+    courier_deducted_shipments = [row for row in shipments if row["courier_deductions"] > 0]
+    tax_deducted_shipments = [row for row in shipments if row["withholding_tax"] > 0]
     # Only COD/payment cheques settle the merchant receivable. Cheques for
     # delivery charges and withholding taxes are deductions, not customer COD.
     received = round(sum(max(row["net"], 0) for row in paid_shipments), 2)
@@ -3002,7 +3008,9 @@ def build_digidokaan_payment_dashboard(payments, operational_metrics=None, shopi
         {"label": "Outstanding payment", "value": live_outstanding_value, "count": live_outstanding_count, "note": "live delivered COD orders without a paid-cheque match"},
         {"label": "Ready for payout", "value": ready_for_payout_value, "count": None, "note": "DigiDokaan API reported ready-to-pay balance"},
         {"label": "Delivered actual, DigiDokaan stale", "value": stale_delivered_value, "count": len(stale_delivered_shipments), "note": "direct courier says Delivered while DigiDokaan still shows an older status"},
-        {"label": "Courier deductions", "value": total_deductions, "count": len(deducted_shipments), "note": "shipments with recorded deductions"},
+        {"label": "Courier deductions", "value": total_courier_deductions, "count": len(courier_deducted_shipments), "note": "delivery, insurance, reserve and other courier charges"},
+        {"label": "Withholding tax", "value": total_withholding_tax, "count": len(tax_deducted_shipments), "note": "sales-tax and income-tax deductions"},
+        {"label": "Total deductions", "value": total_deductions, "count": len(deducted_shipments), "note": "courier deductions plus withholding tax"},
         {"label": "Effective deduction", "value": (total_deductions / gross_cod * 100) if gross_cod else 0, "count": len(deducted_shipments), "note": "percent of gross COD", "percent": True},
         {"label": "Delivered COD", "value": round(sum(row["cod"] for row in delivered_shipments), 2), "count": len(delivered_shipments), "note": "delivered shipments"},
         {"label": "Ledger balance", "value": ledger_balance, "count": len(unpaid_shipments), "note": "DigiDokaan API current net ledger balance"},

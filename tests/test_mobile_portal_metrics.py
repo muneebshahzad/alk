@@ -123,10 +123,17 @@ class MobilePortalMetricsTests(unittest.TestCase):
             ],
         }
 
-        shipment = namespace["build_digidokaan_payment_dashboard"](payments)["shipments"][0]
+        dashboard = namespace["build_digidokaan_payment_dashboard"](payments)
+        shipment = dashboard["shipments"][0]
+        cards = {card["label"]: card for card in dashboard["cards"]}
 
         self.assertEqual(shipment["payment_status"], "Paid")
         self.assertEqual(shipment["cheque_no"], "PAYMENT-CHEQUE")
+        self.assertEqual(shipment["courier_deductions"], 152)
+        self.assertEqual(shipment["withholding_tax"], 92.96)
+        self.assertEqual(cards["Courier deductions"]["value"], 152)
+        self.assertEqual(cards["Withholding tax"]["value"], 92.96)
+        self.assertEqual(cards["Total deductions"]["value"], 244.96)
 
     def test_direct_delivery_exposes_stale_digidokaan_status(self):
         payments = {
