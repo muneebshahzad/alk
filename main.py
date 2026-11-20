@@ -2922,6 +2922,46 @@ def build_digidokaan_payment_dashboard(payments, operational_metrics=None, shopi
     courier_delivered_digidokaan_pending_count = 0
     reconciled_ready_rows = set()
     if shopify_orders is not None:
+        awaiting_tracking_values = {}
+        for order in shopify_orders or []:
+            financial_status = str(order.get("financial_status") or "").strip().casefold().replace(" ", "_")
+            if financial_status in PAID_FINANCIAL_STATUSES:
+                continue
+            reference = str(order.get("order_num") or order.get("order_id") or "").strip()
+            pending_lines = {}
+            for item in order.get("line_items") or []:
+                tracking_number = str(item.get("tracking_number") or "").strip()
+                if not (is_digidokaan_tracking_number(tracking_number) or is_tcs_tracking_number(tracking_number)):
+                    continue
+                live_status = item.get("status") or order.get("status")
+                if normalize_status_bucket(live_status) != "Delivered" or tracking_number in paid_tracking:
+                    continue
+                ledger_matches = [row for row in shipments if str(row.get("tracking_no") or "").strip() == tracking_number]
+                if not ledger_matches and reference:
+                    ledger_matches = [
+                        row for row in shipments
+                        if reference in {str(row.get("reference") or "").strip(), str(row.get("order_no") or "").strip()}
+                    ]
+                if any(normalize_status_bucket(row.get("order_status")) == "Delivered" for row in ledger_matches):
+                    continue
+                pending_lines[tracking_number] = pending_lines.get(tracking_number, 0.0) + (
+                    parse_money(item.get("unit_price"), 0) * parse_int(item.get("quantity"), 0)
+                )
+            if pending_lines:
+                order_total = parse_money(order.get("current_total_price", order.get("total_price", 0)), 0)
+                order_subtotal = parse_money(order.get("current_subtotal_price", order.get("subtotal_price", 0)), 0)
+                pending_subtotal = sum(pending_lines.values())
+                for tracking_number, line_value in pending_lines.items():
+                    if order_subtotal > 0 and line_value > 0:
+                        value = order_total * line_value / order_subtotal
+                    elif pending_subtotal > 0:
+                        value = order_total * line_value / pending_subtotal
+                    else:
+                        value = order_total / len(pending_lines)
+                    awaiting_tracking_values[tracking_number] = max(value, 0)
+        courier_delivered_digidokaan_pending_value = round(sum(awaiting_tracking_values.values()), 2)
+        courier_delivered_digidokaan_pending_count = len(awaiting_tracking_values)
+
         for order in shopify_orders or []:
             financial_status = str(order.get("financial_status") or "").strip().casefold().replace(" ", "_")
             if financial_status in PAID_FINANCIAL_STATUSES or normalize_status_bucket(order.get("status")) != "Delivered":
@@ -2949,15 +2989,6 @@ def build_digidokaan_payment_dashboard(payments, operational_metrics=None, shopi
                     if str(item.get("tracking_number") or "").strip() in unsettled_tracking
                 )
                 amount = amount * unsettled_subtotal / subtotal if subtotal > 0 else 0
-            matching_ledger_shipments = [
-                row for row in shipments
-                if (
-                    reference and reference in {str(row.get("reference") or "").strip(), str(row.get("order_no") or "").strip()}
-                ) or str(row.get("tracking_no") or "").strip() in unsettled_tracking
-            ]
-            if not any(normalize_status_bucket(row.get("order_status")) == "Delivered" for row in matching_ledger_shipments):
-                courier_delivered_digidokaan_pending_value += max(amount, 0)
-                courier_delivered_digidokaan_pending_count += 1
             matched_ready = [
                 row for row in ready_shipments
                 if (
@@ -2974,7 +3005,6 @@ def build_digidokaan_payment_dashboard(payments, operational_metrics=None, shopi
             live_outstanding_value += max(amount, 0)
             live_outstanding_count += 1
         live_outstanding_value = round(live_outstanding_value, 2)
-        courier_delivered_digidokaan_pending_value = round(courier_delivered_digidokaan_pending_value, 2)
     cards = [
         {"label": "Gross COD", "value": gross_cod, "count": gross_count, "note": "dispatched shipments"},
         {"label": "Total shipments", "value": dispatched_count, "count": dispatched_count, "note": f"PKR {gross_cod:,.2f} combined gross COD", "count_primary": True},
