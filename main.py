@@ -2820,7 +2820,12 @@ def build_digidokaan_payment_dashboard(payments, operational_metrics=None, shopi
             payment_status = "Pending cheque" if not normalized_status or any(word in normalized_status for word in pending_words) else "Unconfirmed"
         else:
             payment_status = "Not paid"
-        effective_cod = cod if cod > 0 else group.get("price", 0)
+        # For open shipments DigiDokaan's order price is the gross customer COD;
+        # its ledger amount may still be absent or adjusted. Settled rows retain
+        # the explicit COD ledger amount used by their cheque calculation.
+        effective_cod = cod
+        if not (linked_cheque or cheque_id) and group.get("price", 0) > 0:
+            effective_cod = group["price"]
         group.update({
             "cod": round(effective_cod, 2), "deductions": round(deductions, 2),
             "net": round(effective_cod - deductions, 2), "entry_types": ", ".join(entry_types),
