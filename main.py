@@ -2820,9 +2820,10 @@ def build_digidokaan_payment_dashboard(payments, operational_metrics=None, shopi
             payment_status = "Pending cheque" if not normalized_status or any(word in normalized_status for word in pending_words) else "Unconfirmed"
         else:
             payment_status = "Not paid"
+        effective_cod = cod if cod > 0 else group.get("price", 0)
         group.update({
-            "cod": round(cod, 2), "deductions": round(deductions, 2),
-            "net": round(cod - deductions, 2), "entry_types": ", ".join(entry_types),
+            "cod": round(effective_cod, 2), "deductions": round(deductions, 2),
+            "net": round(effective_cod - deductions, 2), "entry_types": ", ".join(entry_types),
             "cheque_no": cheque_id, "cheque_status": settlement_status,
             "payment_status": payment_status,
         })
@@ -2876,11 +2877,14 @@ def build_digidokaan_payment_dashboard(payments, operational_metrics=None, shopi
         str(row.get("reference") or row.get("order_no") or "").strip()
         for row in paid_shipments if row.get("reference") or row.get("order_no")
     }
+    ledger_tracking = {str(row.get("tracking_no") or "").strip() for row in shipments if row.get("tracking_no")}
+    ledger_references = {
+        str(row.get("reference") or row.get("order_no") or "").strip()
+        for row in shipments if row.get("reference") or row.get("order_no")
+    }
     live_outstanding_value = round(sum(max(row["net"], 0) for row in ready_shipments), 2)
     live_outstanding_count = len(ready_shipments)
     if shopify_orders is not None:
-        live_outstanding_value = 0.0
-        live_outstanding_count = 0
         for order in shopify_orders or []:
             financial_status = str(order.get("financial_status") or "").strip().casefold().replace(" ", "_")
             if financial_status in PAID_FINANCIAL_STATUSES or normalize_status_bucket(order.get("status")) != "Delivered":
@@ -2894,7 +2898,13 @@ def build_digidokaan_payment_dashboard(payments, operational_metrics=None, shopi
                     or is_tcs_tracking_number(item.get("tracking_number"))
                 )
             }
-            if not tracking_numbers or reference in paid_references or tracking_numbers.issubset(paid_tracking):
+            if (
+                not tracking_numbers
+                or reference in paid_references
+                or reference in ledger_references
+                or tracking_numbers.issubset(paid_tracking)
+                or tracking_numbers.issubset(ledger_tracking)
+            ):
                 continue
             unsettled_tracking = tracking_numbers - paid_tracking
             if not unsettled_tracking:

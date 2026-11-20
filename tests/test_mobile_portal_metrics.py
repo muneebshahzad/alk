@@ -138,6 +138,26 @@ class MobilePortalMetricsTests(unittest.TestCase):
         self.assertIsNone(cards["Ready for payout"]["count"])
         self.assertEqual(len([row for row in dashboard["shipments"] if namespace["normalize_status_bucket"](row["order_status"]) == "Delivered"]), 2)
 
+    def test_shopify_snapshot_never_erases_unpaid_delivered_ledger_rows(self):
+        payments = {
+            "balance": {},
+            "ledger": {"data": [
+                {
+                    "tracking_no": "223OPEN0000002", "order_no": "O2",
+                    "order_status": "Delivered", "price": 8000,
+                    "payment_type": "Courier charges", "sub_amount": 200,
+                },
+            ]},
+            "cheques": [],
+        }
+
+        dashboard = namespace["build_digidokaan_payment_dashboard"](payments, shopify_orders=[])
+        cards = {card["label"]: card for card in dashboard["cards"]}
+
+        self.assertEqual(cards["Outstanding payment"]["value"], 7800)
+        self.assertEqual(cards["Outstanding payment"]["count"], 1)
+        self.assertEqual(cards["Delivered COD"]["value"], 8000)
+
 
 if __name__ == "__main__":
     unittest.main()
