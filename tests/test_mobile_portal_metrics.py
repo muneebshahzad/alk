@@ -158,6 +158,27 @@ class MobilePortalMetricsTests(unittest.TestCase):
         self.assertEqual(cards["Outstanding payment"]["count"], 1)
         self.assertEqual(cards["Delivered COD"]["value"], 8000)
 
+    def test_shopify_total_reconciles_matching_unpaid_ledger_cod(self):
+        payments = {
+            "balance": {},
+            "ledger": {"data": [{
+                "tracking_no": "223OPEN0000002", "order_no": "O2",
+                "order_status": "Delivered", "price": 8000,
+                "payment_type": "COD", "amount": 7800,
+            }]},
+            "cheques": [],
+        }
+        shopify_orders = [{
+            "order_num": "O2", "status": "Delivered", "financial_status": "Pending",
+            "total_price": 9000, "line_items": [{"tracking_number": "223OPEN0000002"}],
+        }]
+
+        dashboard = namespace["build_digidokaan_payment_dashboard"](payments, shopify_orders=shopify_orders)
+        cards = {card["label"]: card for card in dashboard["cards"]}
+
+        self.assertEqual(cards["Outstanding payment"]["value"], 9000)
+        self.assertEqual(cards["Outstanding payment"]["count"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -2889,6 +2889,7 @@ def build_digidokaan_payment_dashboard(payments, operational_metrics=None, shopi
     }
     live_outstanding_value = round(sum(max(row["cod"], 0) for row in ready_shipments), 2)
     live_outstanding_count = len(ready_shipments)
+    reconciled_ready_rows = set()
     if shopify_orders is not None:
         for order in shopify_orders or []:
             financial_status = str(order.get("financial_status") or "").strip().casefold().replace(" ", "_")
@@ -2903,13 +2904,7 @@ def build_digidokaan_payment_dashboard(payments, operational_metrics=None, shopi
                     or is_tcs_tracking_number(item.get("tracking_number"))
                 )
             }
-            if (
-                not tracking_numbers
-                or reference in paid_references
-                or reference in ledger_references
-                or tracking_numbers.issubset(paid_tracking)
-                or tracking_numbers.issubset(ledger_tracking)
-            ):
+            if not tracking_numbers or reference in paid_references or tracking_numbers.issubset(paid_tracking):
                 continue
             unsettled_tracking = tracking_numbers - paid_tracking
             if not unsettled_tracking:
@@ -2923,6 +2918,19 @@ def build_digidokaan_payment_dashboard(payments, operational_metrics=None, shopi
                     if str(item.get("tracking_number") or "").strip() in unsettled_tracking
                 )
                 amount = amount * unsettled_subtotal / subtotal if subtotal > 0 else 0
+            matched_ready = [
+                row for row in ready_shipments
+                if (
+                    reference and reference in {str(row.get("reference") or "").strip(), str(row.get("order_no") or "").strip()}
+                ) or str(row.get("tracking_no") or "").strip() in unsettled_tracking
+            ]
+            fresh_matches = [row for row in matched_ready if id(row) not in reconciled_ready_rows]
+            if fresh_matches:
+                live_outstanding_value += max(amount, 0) - sum(max(row["cod"], 0) for row in fresh_matches)
+                reconciled_ready_rows.update(id(row) for row in fresh_matches)
+                continue
+            if reference in ledger_references or tracking_numbers.issubset(ledger_tracking):
+                continue
             live_outstanding_value += max(amount, 0)
             live_outstanding_count += 1
         live_outstanding_value = round(live_outstanding_value, 2)
