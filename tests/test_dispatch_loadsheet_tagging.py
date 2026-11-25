@@ -31,6 +31,12 @@ def test_both_scanners_offer_only_the_supported_warehouses():
         assert 'value="Engineer Town"' in template
 
 
+def test_dispatch_mode_only_shows_the_load_sheet_action():
+    assert "reportBtn.style.display = 'none'" in EMPLOYEE_TEMPLATE
+    assert "reportBtn.style.display = 'block'" in EMPLOYEE_TEMPLATE
+    assert "classList.toggle('hidden', mode === 'DISPATCHED')" in SCANNER_TEMPLATE
+
+
 def test_legacy_bulk_tag_saves_selected_warehouse(monkeypatch):
     class Order:
         tags = "DigiDokaan"

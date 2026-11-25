@@ -689,11 +689,11 @@
           reportBtn.textContent = 'Create Dispatch Report';
           reportBtn.className = 'primary-btn dispatch';
           queueTitle.textContent = 'Dispatch Queue';
+          reportBtn.style.display = 'none';
           loadSheetBtn.style.display = 'none';
         } else if (mode === 'dispatch') {
-          helper.textContent = 'Scan Alkaramat orders one by one. Report creation tags Shopify as Dispatched (today).';
-          reportBtn.textContent = 'Create Dispatch Report';
-          reportBtn.className = 'primary-btn dispatch';
+          helper.textContent = 'Create & Print Load Sheet applies the dated Dispatched tag and selected warehouse tag before generating the sheet.';
+          reportBtn.style.display = 'none';
           queueTitle.textContent = 'Dispatch Queue';
           loadSheetBtn.style.display = 'block';
           loadSheetBtn.textContent = 'Create & Print Load Sheet';
@@ -702,6 +702,7 @@
           helper.textContent = 'Scan returned Alkaramat parcels. Report creation tags Shopify as Return Received (today).';
           reportBtn.textContent = 'Create Return Report';
           reportBtn.className = 'primary-btn return';
+          reportBtn.style.display = 'block';
           queueTitle.textContent = 'Return Queue';
           loadSheetBtn.style.display = 'none';
         }

@@ -712,6 +712,7 @@ document.getElementById('bulk-list').classList.remove('hidden');
 document.getElementById('bulkListTitle').textContent = `${title} (0)`;
 
 document.getElementById('generateReportBtn').textContent = `Generate ${title} Report`;
+document.getElementById('generateReportBtn').classList.toggle('hidden', mode === 'DISPATCHED');
 
 document.getElementById('generateLoadSheetBtn').classList.toggle('hidden', mode !== 'DISPATCHED');
 
