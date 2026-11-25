@@ -629,6 +629,12 @@
           </div>
           <button class="ghost-btn" onclick="clearQueue()">Clear</button>
         </div>
+        <label class="helper" for="warehouseSelect" style="display:block;margin:4px 0 8px;">Warehouse</label>
+        <select id="warehouseSelect" style="width:100%;padding:13px 14px;border:1px solid var(--line);border-radius:12px;background:#fff;font:inherit;margin-bottom:12px;">
+          <option value="">Select warehouse</option>
+          <option value="Azam Market">Azam Market</option>
+          <option value="Engineer Town">Engineer Town</option>
+        </select>
         <button class="primary-btn dispatch" id="reportBtn" onclick="createReport()">Create Dispatch Report</button>
         <button class="primary-btn dispatch" id="loadSheetBtn" onclick="createLoadSheet()" style="display:none;margin-top:10px;">Create & Print Load Sheet</button>
         <div class="queue-list" id="queueList"></div>
@@ -886,12 +892,17 @@
       async function createLoadSheet() {
         const trackingNumbers = scannedDispatchTrackingNumbers();
         const button = document.getElementById('loadSheetBtn');
+        const warehouseTag = document.getElementById('warehouseSelect').value;
         if (generatedLoadSheetLink) {
           showLoadSheetViewer(generatedLoadSheetLink);
           return;
         }
         if (!trackingNumbers.length) {
           showToast('No booked DigiDokaan shipment found', false);
+          return;
+        }
+        if (!warehouseTag) {
+          showToast('Select Azam Market or Engineer Town.', false);
           return;
         }
         document.getElementById('loadSheetProgress').classList.add('open');
@@ -978,12 +989,15 @@
 
       async function applyQueueTags(clearOnSuccess) {
         if (!queue.length) return {success: false, error: 'No scanned orders provided.'};
+        const warehouseTag = document.getElementById('warehouseSelect').value;
+        if (!warehouseTag) return {success: false, error: 'Select Azam Market or Engineer Town.'};
 
         const response = await fetch('/employee_portal/report', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             mode: currentMode,
+            warehouse_tag: warehouseTag,
             orders: queue.map((entry) => ({
               source: entry.source,
               order_id: entry.order_id,

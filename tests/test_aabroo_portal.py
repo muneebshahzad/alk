@@ -137,18 +137,26 @@ def test_aabroo_orders_are_available_to_scanner(monkeypatch):
 
 def test_employee_return_report_tags_aabroo_store(monkeypatch):
     tagged = []
-    monkeypatch.setattr(main, "apply_employee_portal_order_tag", lambda source, order_id, tag: tagged.append((source, order_id, tag)) or True)
+    monkeypatch.setattr(
+        main,
+        "apply_employee_portal_order_tag",
+        lambda source, order_id, tag, include_date=True: tagged.append((source, order_id, tag, include_date)) or True,
+    )
     client = main.app.test_client()
     with client.session_transaction() as session:
         session[main.EMPLOYEE_PORTAL_SESSION_KEY] = True
 
     response = client.post("/employee_portal/report", json={
         "mode": "return",
+        "warehouse_tag": "Azam Market",
         "orders": [{"source": "aabroo", "shopify_id": "987", "order_id": "#1020"}],
     })
 
     assert response.status_code == 200
-    assert tagged == [("aabroo", "987", "Return Received")]
+    assert tagged == [
+        ("aabroo", "987", "Return Received", True),
+        ("aabroo", "987", "Azam Market", False),
+    ]
     assert response.get_json()["tagged_by_source"] == {"Aabroo": 1}
 
 

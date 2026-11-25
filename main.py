@@ -3244,12 +3244,23 @@ def apply_tag():
     if not order_id or not tag:
         return jsonify({"success": False, "error": "order_id and tag are required."}), 400
 
-    if tag.casefold() in {"returned", "return received", "claim received"}:
+    cancellation_tags = {
+        "returned",
+        "return submitted",
+        "return received",
+        "claim received",
+        "cancelled",
+        "canceled",
+    }
+    if tag.casefold() in cancellation_tags:
         try:
             cancel_order(order_id)
             apply_shopify_order_tag(order_id, tag, include_date=True)
             order_details = [order for order in order_details if str(order.get("id") or order.get("shopify_id")) != str(order_id)]
-            return jsonify({"success": True, "message": "Order cancelled and dated tag applied."})
+            return jsonify({
+                "success": True,
+                "message": "Order cancelled, tracked inventory restocked, and dated tag applied.",
+            })
         except Exception as error:
             print(f"Could not resolve returned Shopify order {order_id}: {error}")
             return jsonify({"success": False, "error": str(error)}), 500
@@ -3309,8 +3320,14 @@ def apply_bulk_tag():
     order_ids_to_tag = data.get('order_ids', [])
     # Add 'DELIVERED' to the allowed list
     tag_type = data.get('tag_type')
+    warehouse_tag = str(data.get('warehouse_tag') or '').strip()
+    allowed_warehouse_tags = {'Azam Market', 'Engineer Town'}
 
-    if not order_ids_to_tag or tag_type not in ['RETURNED', 'DISPATCHED', 'DELIVERED']:
+    if (
+        not order_ids_to_tag
+        or tag_type not in ['RETURNED', 'DISPATCHED', 'DELIVERED']
+        or (tag_type in {'RETURNED', 'DISPATCHED'} and warehouse_tag not in allowed_warehouse_tags)
+    ):
         return jsonify({"success": False, "error": "Invalid input."}), 400
 
     today_date = datetime.now().strftime('%Y-%m-%d')
@@ -3323,7 +3340,7 @@ def apply_bulk_tag():
 
             base_tag = ""
             order = shopify.Order.find(order_shopify_id)
-            
+
             if not order:
                 results.append({'id': order_shopify_id, 'status': 'failed', 'message': 'Order not found.'})
                 continue
@@ -3332,7 +3349,7 @@ def apply_bulk_tag():
             if tag_type == 'RETURNED':
                 base_tag = "Return Received"
                 # Optional: Cancel order if returned
-                # order.cancel() 
+                # order.cancel()
             elif tag_type == 'DISPATCHED':
                 base_tag = "DISPATCHED"
             elif tag_type == 'DELIVERED':
@@ -3346,12 +3363,14 @@ def apply_bulk_tag():
             final_tag = f"{base_tag} ({today_date})"
 
             tags = [t.strip() for t in order.tags.split(", ")] if order.tags else []
-            
+
             # Remove conflicting tags if necessary
             if "Leopards Courier" in tags: tags.remove("Leopards Courier")
-            
+
             if final_tag not in tags:
                 tags.append(final_tag)
+            if warehouse_tag and warehouse_tag not in tags:
+                tags.append(warehouse_tag)
 
             order.tags = ", ".join(tags)
 
@@ -4098,12 +4117,12 @@ def apply_aabroo_order_tag(order_id, tag, include_date=False):
     return True
 
 
-def apply_employee_portal_order_tag(source, order_id, tag_name):
+def apply_employee_portal_order_tag(source, order_id, tag_name, include_date=True):
     source = str(source or "").strip().lower()
     if source == "aabroo":
-        return apply_aabroo_order_tag(order_id, tag_name, include_date=True)
+        return apply_aabroo_order_tag(order_id, tag_name, include_date=include_date)
     if source in {"shopify", "alkaramat", "al-karamat"}:
-        return apply_shopify_order_tag(order_id, tag_name, include_date=True)
+        return apply_shopify_order_tag(order_id, tag_name, include_date=include_date)
     return False
 
 
@@ -4870,10 +4889,14 @@ def employee_portal_report():
     data = request.get_json() or {}
     mode = (data.get("mode") or "").strip().lower()
     scanned_orders = data.get("orders") or []
+    warehouse_tag = str(data.get("warehouse_tag") or "").strip()
+    allowed_warehouse_tags = {"Azam Market", "Engineer Town"}
     if mode not in {"dispatch", "return"}:
         return jsonify({"success": False, "error": "Invalid report mode."}), 400
     if not scanned_orders:
         return jsonify({"success": False, "error": "No scanned orders provided."}), 400
+    if warehouse_tag not in allowed_warehouse_tags:
+        return jsonify({"success": False, "error": "Select Azam Market or Engineer Town."}), 400
     tag_name = "Dispatched" if mode == "dispatch" else "Return Received"
     tagged_count = 0
     skipped_count = 0
@@ -4893,6 +4916,8 @@ def employee_portal_report():
         seen_order_keys.add(order_key)
         try:
             if apply_employee_portal_order_tag(source, shopify_id, tag_name):
+                if not apply_employee_portal_order_tag(source, shopify_id, warehouse_tag, include_date=False):
+                    raise RuntimeError(f"Could not apply warehouse tag: {warehouse_tag}")
                 tagged_count += 1
                 label = employee_portal_source_label(source)
                 tagged_by_source[label] = tagged_by_source.get(label, 0) + 1
@@ -4909,6 +4934,7 @@ def employee_portal_report():
             "failed": failed[:5],
             "tagged_by_source": tagged_by_source,
             "tag_name": tag_name,
+            "warehouse_tag": warehouse_tag,
         }
     ), 207 if failed else 200
 

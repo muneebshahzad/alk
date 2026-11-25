@@ -342,6 +342,13 @@ onkeypress="if(event.key === 'Enter') { handleScanInput(this.value); }"
 
 </div>
 
+<label for="bulkWarehouseSelect" style="display:block;font-weight:700;margin:0 0 6px;">Warehouse</label>
+<select id="bulkWarehouseSelect" style="width:100%;padding:12px;border:1px solid #d1d5db;border-radius:8px;margin-bottom:15px;font-size:16px;">
+<option value="">Select warehouse</option>
+<option value="Azam Market">Azam Market</option>
+<option value="Engineer Town">Engineer Town</option>
+</select>
+
 
 
 <table id="bulkOrdersTable">
@@ -711,6 +718,7 @@ document.getElementById('generateLoadSheetBtn').classList.toggle('hidden', mode 
 document.getElementById('generateLoadSheetBtn').disabled = true;
 
 document.getElementById('generateLoadSheetBtn').textContent = 'Create & Print Load Sheet';
+document.getElementById('bulkWarehouseSelect').value = '';
 
 
 
@@ -1130,6 +1138,16 @@ const trackingNumbers = getScannedTrackingNumbers();
 
 const button = document.getElementById('generateLoadSheetBtn');
 
+const warehouseTag = document.getElementById('bulkWarehouseSelect').value;
+
+if (!warehouseTag) {
+
+alert('Select Azam Market or Engineer Town.');
+
+return;
+
+}
+
 if (!trackingNumbers.length) {
 
 alert('No DigiDokaan tracking number was found in the scanned orders. Scan a booked shipment or its tracking barcode.');
@@ -1160,7 +1178,7 @@ method: 'POST',
 
 headers: { 'Content-Type': 'application/json' },
 
-body: JSON.stringify({ order_ids: orderIds, tag_type: 'DISPATCHED' })
+body: JSON.stringify({ order_ids: orderIds, tag_type: 'DISPATCHED', warehouse_tag: warehouseTag })
 
 });
 
@@ -1236,11 +1254,21 @@ const tagType = currentMode === 'RETURNED' ? 'RETURNED' : 'DISPATCHED';
 
 const tagTitle = currentMode === 'DISPATCHED' ? 'Dispatch' : 'Return';
 
+const warehouseTag = document.getElementById('bulkWarehouseSelect').value;
+
 const tbody = document.getElementById('bulkOrdersTable').getElementsByTagName('tbody')[0];
 
 
 
 if (count === 0) return;
+
+if (!warehouseTag) {
+
+alert('Select Azam Market or Engineer Town.');
+
+return;
+
+}
 
 
 
@@ -1262,7 +1290,9 @@ body: JSON.stringify({
 
 order_ids: orderIds,
 
-tag_type: tagType
+tag_type: tagType,
+
+warehouse_tag: warehouseTag
 
 })
 

@@ -99,7 +99,7 @@ class DeliveryFollowupTests(unittest.TestCase):
         self.assertIn("Mark Claim Received", missed_section)
 
     def test_return_resolutions_cancel_tag_and_remove_cache_immediately(self):
-        for tag in ("Return Received", "Claim Received"):
+        for tag in ("Return Submitted", "Return Received", "Claim Received", "Cancelled"):
             with self.subTest(tag=tag), \
                  patch.object(main, "cancel_order") as cancel, \
                  patch.object(main, "apply_shopify_order_tag", return_value=True) as add_tag:

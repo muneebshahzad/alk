@@ -296,7 +296,7 @@ def add_order_tags(order_id: int | str, tags: list[str]) -> bool:
 
 
 def cancel_order(order_id: int | str) -> bool:
-    """Cancel an order without issuing an automatic refund."""
+    """Cancel without an automatic refund and restock Shopify inventory-tracked items."""
     token = get_graphql_token()
     clean_order_id = _clean(order_id)
     if not token:
