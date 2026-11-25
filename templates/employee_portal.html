@@ -898,6 +898,10 @@
         button.disabled = true;
         button.textContent = 'Creating Load Sheet…';
         try {
+          const tagResult = await applyQueueTags(false);
+          if (!tagResult.success) {
+            showToast(tagResult.error || 'Some dispatch tags could not be saved', false);
+          }
           const response = await fetch('/api/scan/load-sheet', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
@@ -959,6 +963,22 @@
       async function createReport() {
         if (!queue.length) return;
 
+        const result = await applyQueueTags(true);
+        if (!result.success) {
+          showToast(result.error || 'Report failed', false);
+          return;
+        }
+
+        const label = currentMode === 'dispatch' ? 'dispatch' : 'return';
+        const sourceCounts = Object.entries(result.tagged_by_source || {})
+          .map(([source, count]) => `${count} ${source}`)
+          .join(', ');
+        showToast(`Created ${label} report • ${sourceCounts || result.tagged_count + ' tagged'}`, true);
+      }
+
+      async function applyQueueTags(clearOnSuccess) {
+        if (!queue.length) return {success: false, error: 'No scanned orders provided.'};
+
         const response = await fetch('/employee_portal/report', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -974,17 +994,13 @@
 
         const result = await response.json();
         if (!response.ok || !result.success) {
-          showToast(result.error || 'Report failed', false);
-          return;
+          return {...result, success: false, error: result.error || 'Could not save all order tags'};
         }
-
-        const label = currentMode === 'dispatch' ? 'dispatch' : 'return';
-        const sourceCounts = Object.entries(result.tagged_by_source || {})
-          .map(([source, count]) => `${count} ${source}`)
-          .join(', ');
-        showToast(`Created ${label} report • ${sourceCounts || result.tagged_count + ' tagged'}`, true);
-        queue = [];
-        renderQueue();
+        if (clearOnSuccess) {
+          queue = [];
+          renderQueue();
+        }
+        return result;
       }
 
       async function toggleScanner() {

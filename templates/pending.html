@@ -119,11 +119,12 @@
           <div class="pending-filters" aria-label="Item status filters">
             <label class="pending-filter booked"><input id="showBookedItems" type="checkbox" checked> Show booked items</label>
             <label class="pending-filter unbooked"><input id="showUnbookedItems" type="checkbox" checked> Show un-booked items</label>
+            <label class="pending-filter"><input id="showDispatchedItems" type="checkbox" checked> Show dispatched items</label>
           </div>
         </div>
         <div class="summary-list" style="padding:12px;">
           {% for item in pending_items %}
-          <div class="summary-row" data-booked="{{ 1 if item.statuses.get('Booked', 0) else 0 }}" data-unbooked="{{ 1 if item.statuses.get('Un-Booked', 0) else 0 }}">
+          <div class="summary-row" data-booked="{{ 1 if item.statuses.get('Booked', 0) else 0 }}" data-unbooked="{{ 1 if item.statuses.get('Un-Booked', 0) else 0 }}" data-dispatched="{{ 1 if item.has_dispatched else 0 }}" data-undispatched="{{ 1 if item.has_undispatched else 0 }}">
             <div class="summary-thumb">
               {% if item.item_image %}<img src="{{ item.item_image }}" alt="">{% else %}📦{% endif %}
             </div>
@@ -210,12 +211,13 @@
         <div class="pending-filters" aria-label="Order status filters">
           <label class="pending-filter booked"><input id="showBookedOrders" type="checkbox" checked> Show booked orders</label>
           <label class="pending-filter unbooked"><input id="showUnbookedOrders" type="checkbox" checked> Show un-booked orders</label>
+          <label class="pending-filter"><input id="showDispatchedOrders" type="checkbox" checked> Show dispatched orders</label>
         </div>
       </div>
       <div class="order-list" style="padding:12px;">
         {% for order in all_orders %}
         {% set order_item_statuses = order.items_list|map(attribute='status')|list %}
-        <div class="order-card" data-booked="{{ 1 if 'Booked' in order_item_statuses else 0 }}" data-unbooked="{{ 1 if 'Un-Booked' in order_item_statuses else 0 }}">
+        <div class="order-card" data-booked="{{ 1 if 'Booked' in order_item_statuses else 0 }}" data-unbooked="{{ 1 if 'Un-Booked' in order_item_statuses else 0 }}" data-dispatched="{{ 1 if order.is_dispatched else 0 }}">
           <div class="order-head">
             <div style="flex:1;min-width:0;">
               <a class="order-id" href="{{ order.order_link or '#' }}" target="_blank">#{{ order.order_id }}</a>
@@ -309,6 +311,8 @@
       unbookedOrders: document.getElementById('showUnbookedOrders')?.checked !== false,
       bookedItems: document.getElementById('showBookedItems')?.checked !== false,
       unbookedItems: document.getElementById('showUnbookedItems')?.checked !== false,
+      dispatchedOrders: document.getElementById('showDispatchedOrders')?.checked !== false,
+      dispatchedItems: document.getElementById('showDispatchedItems')?.checked !== false,
     };
   }
 
@@ -318,15 +322,17 @@
     document.querySelectorAll('.order-card[data-booked]').forEach((card) => {
       const visible = (state.bookedOrders && card.dataset.booked === '1') ||
         (state.unbookedOrders && card.dataset.unbooked === '1');
-      card.hidden = !visible;
-      if (visible) visibleOrders += 1;
+      const dispatchVisible = state.dispatchedOrders || card.dataset.dispatched !== '1';
+      card.hidden = !(visible && dispatchVisible);
+      if (visible && dispatchVisible) visibleOrders += 1;
     });
     let visibleItems = 0;
     document.querySelectorAll('.summary-row[data-booked]').forEach((row) => {
       const visible = (state.bookedItems && row.dataset.booked === '1') ||
         (state.unbookedItems && row.dataset.unbooked === '1');
-      row.hidden = !visible;
-      if (visible) visibleItems += 1;
+      const dispatchVisible = state.dispatchedItems || row.dataset.dispatched !== '1' || row.dataset.undispatched === '1';
+      row.hidden = !(visible && dispatchVisible);
+      if (visible && dispatchVisible) visibleItems += 1;
     });
     const orderCount = document.getElementById('visibleOrderCount');
     const itemCount = document.getElementById('visibleItemCount');
@@ -345,6 +351,7 @@
       const mapping = {
         showBookedOrders: 'bookedOrders', showUnbookedOrders: 'unbookedOrders',
         showBookedItems: 'bookedItems', showUnbookedItems: 'unbookedItems',
+        showDispatchedOrders: 'dispatchedOrders', showDispatchedItems: 'dispatchedItems',
       };
       Object.entries(mapping).forEach(([id, key]) => {
         const control = document.getElementById(id);

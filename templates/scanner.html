@@ -1022,7 +1022,7 @@ data.items.forEach(item => totalPieces += item.quantity);
 
 scannedOrderCache[orderNum] = {
 
-id: numericShopifyId,
+id: numericShopifyId || data.shopify_id,
 
 items: data.items,
 
@@ -1149,6 +1149,32 @@ button.disabled = true;
 button.textContent = 'Creating Load Sheet…';
 
 try {
+
+const orderIds = Object.values(scannedOrderCache).map(order => order.id).filter(Boolean);
+
+if (orderIds.length) {
+
+const tagResponse = await fetch('/api/apply_bulk_tag', {
+
+method: 'POST',
+
+headers: { 'Content-Type': 'application/json' },
+
+body: JSON.stringify({ order_ids: orderIds, tag_type: 'DISPATCHED' })
+
+});
+
+const tagData = await tagResponse.json();
+
+const tagFailures = (tagData.results || []).filter(result => result.status !== 'success');
+
+if (!tagResponse.ok || !tagData.success || tagFailures.length) {
+
+console.error('Some dispatch tags could not be saved before load-sheet generation.', tagData);
+
+}
+
+}
 
 const response = await fetch('/api/scan/load-sheet', {
 

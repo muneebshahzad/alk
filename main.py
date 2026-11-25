@@ -4373,6 +4373,12 @@ def build_pending_orders_mobile_data():
         total_price = parse_money(shopify_order.get("current_total_price", shopify_order.get("total_price", subtotal_price)))
         shipping_charges = parse_money(shopify_order.get("shipping_charges", 0))
         total_discounts = parse_money(shopify_order.get("total_discounts", 0))
+        visible_tags = [tag for tag in shopify_order.get("tags", []) if tag != "Leopards Courier"]
+        is_dispatched = any(
+            str(tag or "").strip().casefold() == "dispatched"
+            or str(tag or "").strip().casefold().startswith("dispatched (")
+            for tag in visible_tags
+        )
         all_orders.append(
             {
                 "order_via": "Shopify",
@@ -4380,7 +4386,8 @@ def build_pending_orders_mobile_data():
                 "order_link": shopify_order.get("order_link"),
                 "order_id": shopify_order.get("order_id") or shopify_order.get("order_num"),
                 "status": normalize_status_bucket(shopify_order.get("status", "")),
-                "tags": [tag for tag in shopify_order.get("tags", []) if tag != "Leopards Courier"],
+                "tags": visible_tags,
+                "is_dispatched": is_dispatched,
                 "customer_name": customer.get("name", ""),
                 "customer_phone": customer.get("phone", ""),
                 "customer_address": customer.get("address", ""),
@@ -4437,12 +4444,18 @@ def build_pending_items_table_data():
                     "total_price": 0.0,
                     "total_cost": 0.0,
                     "statuses": {},
+                    "has_dispatched": False,
+                    "has_undispatched": False,
                 }
             pending_items[product_title]["quantity"] += quantity
             pending_items[product_title]["total_price"] += parse_money(item.get("line_total", 0))
             pending_items[product_title]["total_cost"] += parse_money(item.get("line_cost_total", 0))
             status = item.get("status", "")
             pending_items[product_title]["statuses"][status] = pending_items[product_title]["statuses"].get(status, 0) + quantity
+            if order.get("is_dispatched"):
+                pending_items[product_title]["has_dispatched"] = True
+            else:
+                pending_items[product_title]["has_undispatched"] = True
     pending_items_sorted = sorted(
         pending_items.values(),
         key=lambda item: str(item.get("item_title", "")).casefold(),
@@ -5293,6 +5306,7 @@ def scan_single_order():
                 'title': item.get('title', 'Unknown item'),
                 'quantity': item.get('quantity', 0),
                 'image_src': item.get('image', ''),
+                'tracking_number': item.get('tracking_number', ''),
             }
             for item in found_order.get('items', [])
         ]
@@ -5310,6 +5324,7 @@ def scan_single_order():
             'order': found_order,
             'order_num': found_order.get('order_id'),
             'source': found_order.get('source'),
+            'shopify_id': found_order.get('shopify_id'),
             'items': items_list,
             'dispatch_tracking_numbers': list(dict.fromkeys(dispatch_tracking_numbers)),
         }), 200
