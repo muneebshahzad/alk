@@ -727,9 +727,6 @@
 
   <!-- Bottom bar -->
   <div class="bottom-bar" id="bottomBar">
-    <button class="bottom-btn bb-green" id="btnDeliver" onclick="applyDeliveredToAll()">
-      ✅ <span id="deliverLabel">Bulk Mark Delivered</span>
-    </button>
     <button class="bottom-btn bb-red" id="btnReturn" onclick="applyReturnedToAll()">
       ↩ <span id="returnLabel">Mark All Returned</span>
     </button>
@@ -1063,8 +1060,6 @@ function renderStats() {
 }
 
 // ── Bottom bar ──
-let ofdCount = 0;
-let deliveredCount = 0;
 let rtsCount = 0;
 
 function getVisibleOrders() {
@@ -1090,24 +1085,17 @@ function getVisibleOrders() {
 }
 
 function updateBottomBar() {
-  const btnD = document.getElementById('btnDeliver');
   const btnR = document.getElementById('btnReturn');
   const bar  = document.getElementById('bottomBar');
   const visibleOrders = getVisibleOrders();
   const q = document.getElementById('orderSearch').value.toLowerCase();
   const statusQueryBucket = getStatusQueryBucket(q);
   const effectiveFilter = statusQueryBucket || currentFilter;
-  ofdCount = visibleOrders.filter(o => effectiveOrderStatus(o) === 'Out For Delivery').length;
-  deliveredCount = visibleOrders.filter(o => effectiveOrderStatus(o) === 'Delivered').length;
   rtsCount = visibleOrders.filter(o => effectiveOrderStatus(o) === 'RETURNED TO SHIPPER').length;
-  const deliverTargetCount = effectiveFilter === 'Delivered' ? deliveredCount : ofdCount;
-  document.getElementById('deliverLabel').textContent = `Bulk Mark Delivered (${deliverTargetCount} Orders)`;
   document.getElementById('returnLabel').textContent  = `Mark All Returned (${rtsCount} Orders)`;
-  const showDeliver = (effectiveFilter === 'Out For Delivery' && ofdCount > 0) || (effectiveFilter === 'Delivered' && deliveredCount > 0);
   const showReturn = effectiveFilter === 'RETURNED TO SHIPPER' && rtsCount > 0;
-  btnD.style.display = showDeliver ? 'flex' : 'none';
   btnR.style.display = showReturn ? 'flex' : 'none';
-  bar.classList.toggle('visible', showDeliver || showReturn);
+  bar.classList.toggle('visible', showReturn);
 }
 
 // ── Filter + Search ──
@@ -1237,30 +1225,6 @@ async function bulkMark(tag) {
   }
   showToast(`Applied "${tag}" to ${ids.length} orders`);
   clearSelection();
-}
-
-// ── Apply Delivered to All (Delivered tab or Out For Delivery → Delivered) ──
-async function applyDeliveredToAll() {
-  const btn = document.getElementById('btnDeliver');
-  const lbl = document.getElementById('deliverLabel');
-  const q = document.getElementById('orderSearch').value.toLowerCase();
-  const statusQueryBucket = getStatusQueryBucket(q);
-  const effectiveFilter = statusQueryBucket || currentFilter;
-  const targetBucket = effectiveFilter === 'Delivered' ? 'Delivered' : 'Out For Delivery';
-  const toDeliver = getVisibleOrders().filter(o => normalizeStatusBucket(o.status) === targetBucket);
-  if (!toDeliver.length) return;
-  btn.disabled = true;
-  for (let i = 0; i < toDeliver.length; i++) {
-    lbl.textContent = `Applying ${i+1}/${toDeliver.length}…`;
-    try {
-      await fetch('/apply_tag', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({order_id: toDeliver[i].id, tag:'Delivered'}) });
-      updateOrderCardAfterMark(toDeliver[i].id, 'Delivered');
-    } catch(e) {}
-    await new Promise(r => setTimeout(r, 600));
-  }
-  showToast(`Applied "Delivered" to ${toDeliver.length} orders`);
-  updateBottomBar();
-  btn.disabled = false;
 }
 
 // ── Apply Returned to All (RETURNED TO SHIPPER → Returned) ──
