@@ -38,6 +38,8 @@
   .fpill.active { background: #4e73df; color: #fff; border-color: #4e73df; }
   .refresh-btn { margin-left: auto; flex-shrink: 0; display: flex; align-items: center; gap: 5px; padding: 5px 11px; border-radius: 7px; border: 1px solid #e3e6f0; background: #fff; font-size: 11px; font-weight: 600; font-family: 'DM Sans', sans-serif; color: #4e73df; cursor: pointer; white-space: nowrap; }
   .refresh-btn:hover { background: #f0f4ff; }
+  .select-view-btn { margin-left: auto; color: #2f855a; }
+  .select-view-btn + .refresh-btn { margin-left: 0; }
 
   /* ── Shipper advice ── */
   .advice-section { margin:12px 14px 14px; max-width:960px; border:1px solid #f2c76e; background:#fffaf0; border-radius:12px; overflow:hidden; box-shadow:0 3px 12px rgba(145,95,0,.08); }
@@ -354,6 +356,7 @@
       {% for f in ['All','Booked','Un-Booked','Out For Delivery','Delivered','Need Attention','Being Return','RETURNED TO SHIPPER'] %}
       <button class="fpill {% if loop.first %}active{% endif %}" data-filter="{{ f }}" onclick="setFilter(this)">{{ f }}</button>
       {% endfor %}
+      <button class="refresh-btn select-view-btn" id="selectViewBtn" type="button" onclick="toggleSelectAllInView()">☑ Select All in View</button>
       <button class="refresh-btn" id="refreshTrackingBtn" onclick="refreshTracking()">
         <span id="refreshIcon">🔄</span> Refresh All Tracking
       </button>
@@ -1133,6 +1136,7 @@ function applyFilterSearch() {
   });
   document.getElementById('shopifyCount').textContent = visible;
   updateBottomBar();
+  updateSelectViewButton();
 }
 
 // ── Mark single order ──
@@ -1192,6 +1196,53 @@ function updateBulkBar() {
   const cnt = document.getElementById('bulkCount');
   bar.classList.toggle('visible', selectedOrders.size > 0);
   cnt.textContent = `${selectedOrders.size} order${selectedOrders.size > 1 ? 's' : ''} selected`;
+  updateSelectViewButton();
+}
+
+function visibleOrderIds() {
+  return [...document.querySelectorAll('#shopifyOrderList .card')]
+    .filter(card => card.style.display !== 'none')
+    .map(card => String(card.id || '').replace('order-card-', ''))
+    .filter(Boolean);
+}
+
+function updateSelectViewButton() {
+  const button = document.getElementById('selectViewBtn');
+  if (!button) return;
+  const ids = visibleOrderIds();
+  const allSelected = ids.length > 0 && ids.every(id => selectedOrders.has(id));
+  button.disabled = ids.length === 0;
+  button.textContent = allSelected
+    ? `☒ Deselect View (${ids.length})`
+    : `☑ Select All in View (${ids.length})`;
+}
+
+function toggleSelectAllInView() {
+  const ids = visibleOrderIds();
+  if (!ids.length) return;
+  const deselect = ids.every(id => selectedOrders.has(id));
+  if (!deselect) {
+    selectedOrders.forEach(id => {
+      const previousCard = document.getElementById('order-card-' + id);
+      if (previousCard) {
+        previousCard.classList.remove('selected');
+        const previousCheckbox = previousCard.querySelector('input[type=checkbox]');
+        if (previousCheckbox) previousCheckbox.checked = false;
+      }
+    });
+    selectedOrders.clear();
+  }
+  ids.forEach(id => {
+    const card = document.getElementById('order-card-' + id);
+    if (deselect) selectedOrders.delete(id);
+    else selectedOrders.add(id);
+    if (card) {
+      card.classList.toggle('selected', !deselect);
+      const checkbox = card.querySelector('input[type=checkbox]');
+      if (checkbox) checkbox.checked = !deselect;
+    }
+  });
+  updateBulkBar();
 }
 
 function clearSelection() {

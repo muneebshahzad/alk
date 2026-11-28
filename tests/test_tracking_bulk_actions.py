@@ -12,3 +12,11 @@ def test_out_for_delivery_filter_has_no_mark_all_delivered_override():
 
 def test_delivered_remains_available_for_explicitly_selected_orders():
     assert "bulkMark('Delivered')" in TEMPLATE
+
+
+def test_all_orders_in_the_current_filtered_view_can_be_selected():
+    assert 'id="selectViewBtn"' in TEMPLATE
+    assert "function visibleOrderIds()" in TEMPLATE
+    assert "function toggleSelectAllInView()" in TEMPLATE
+    assert "card.style.display !== 'none'" in TEMPLATE
+    assert "checkbox.checked = !deselect" in TEMPLATE
